@@ -1,0 +1,39 @@
+# systemd unit for the unattended monitor on a Raspberry Pi (or any Linux host).
+# Install:
+#   sudo cp deploy/olive-monitor.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now olive-monitor
+# Watch:   journalctl -u olive-monitor -f
+# Health:  cat /var/lib/olive/olive-health.json
+
+[Unit]
+Description=Olive's Bark Logger — on-device noise monitor (levels only, never audio)
+After=sound.target
+Wants=sound.target
+
+[Service]
+Type=simple
+# Adjust User/paths to your install. A dedicated unprivileged user is recommended.
+User=olive
+Group=audio
+WorkingDirectory=/var/lib/olive
+ExecStart=/opt/olive/.venv/bin/olive-monitor --config /etc/olive/config.json
+Restart=always
+RestartSec=5
+# A stale heartbeat file means the service wedged; pair with a watchdog/cron alert.
+
+# Hardening: this process needs the microphone and its own data dir, nothing else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/olive
+ProtectHome=true
+PrivateTmp=true
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

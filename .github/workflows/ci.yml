@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Fast, single-version gate: lint, types, security, accessibility, container.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install ruff mypy bandit pip-audit
+
+      # 1. format + lint
+      - name: Lint & format
+        run: |
+          ruff check monitor store report tests scripts
+          ruff format --check monitor store report tests scripts
+
+      # 2. type-check (strict)
+      - name: Type-check
+        run: mypy
+
+      # 4. security: SAST + deps + secrets
+      - name: SAST (bandit)
+        run: bandit -q -r monitor store report
+      - name: Dependency audit
+        run: pip-audit
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+      # 5. accessibility: structural gate is in pytest; add axe via pa11y on the report
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: "20"
+      - name: Render report & run pa11y (axe)
+        run: |
+          python scripts/demo_report.py
+          npx --yes pa11y --runner axe ./report.html
+
+      # 6b. PWA variant: detector/report ports tested with Node's test runner
+      - name: PWA tests
+        run: node --test pwa/*.test.mjs
+
+      # 8. portability: the container builds and its bring-up runs from scratch
+      - name: Build container & smoke test
+        run: |
+          docker build -t olive .
+          docker run --rm olive --help
+
+      # 7. responsible-tech checks are the no-audio / no-egress / report-content tests,
+      #    run in the matrix test job below (merge-blocking).
+
+  # Compatibility matrix: tests + coverage across supported Python versions and OSes.
+  test-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install tzdata  # guarantees IANA zones for the DST test on every runner
+      - name: Tests & coverage
+        run: pytest --cov --cov-report=term-missing --cov-fail-under=85

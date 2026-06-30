@@ -1,0 +1,103 @@
+# Olive's Bark Logger — Implementation Roadmap
+
+> Generic enforcement lives in `/STANDARDS`. This document carries the decisions and project-specific values.
+> **Last verified: 2026-05-31 · Recheck cadence: per recording-law review + audio-stack/hardware change.**
+
+## 1. Snapshot
+An on-device noise monitor that detects and logs barking/noise *events* — timestamps, durations, and sound levels — and generates an honest report, while never recording, storing, or transmitting audio. Primary target is a Raspberry Pi service; a browser PWA is a zero-hardware alternative. Built to provide objective data for a neighbor noise dispute.
+
+## 2. Problem & users
+- **Problem.** Vague noise complaints about Olive with no objective record on your side; recording the home would create legal/ethical problems and isn't necessary.
+- **Primary user.** You (single-user, your apartment).
+- **Jobs to be done.** "Log when it was actually loud, and for how long." · "Give me a clean report I can show property management." · "Do this without recording anyone."
+- **Evidence basis.** A labeled test session (known barks/quiet) to validate event detection and thresholds.
+
+## 3. Product definition
+- **Vision.** Honest, level-only evidence of the real noise pattern — no audio, no exaggeration.
+- **Scope (MoSCoW).**
+  - *Must:* in-memory level computation (dBFS); event detection (threshold + min-duration + debounce); SQLite event log (no audio); report generator (charts + methodology + limitations); local-only operation.
+  - *Should:* configurable quiet-hours; calibration helper (offset toward approximate SPL); a small local dashboard.
+  - *Could:* coarse on-device event tagging (bark-like vs ambient) computed from features without storing audio; CSV export.
+  - *Won't (ever):* record/store/transmit audio; cloud upload; any claim the device can prove a sound's source.
+- **Non-goals.** Not surveillance; not a recorder; not a courtroom-grade SPL meter.
+
+## 4. Research & evidence
+- **Recording-law basis.** Document why level-only + no-audio sidesteps two-party-consent/eavesdropping concerns; keep this front-and-center in design and report.
+- **Acoustics.** Decide level metric (RMS → dBFS), the calibration-offset approach, and the device's stated limits (relative, not absolute, unless calibrated).
+- **Detection validation.** Run a labeled session; tune threshold/duration/debounce; record false-positive/negative behavior.
+
+## 5. Experience & design
+- **Headless + report-first.** The monitor runs unattended; the deliverable is the report.
+- **Report design.** Daily/hourly distributions, quiet-hours compliance, event counts, and a plain-language methodology + limitations section so it reads as honest, not adversarial.
+- **Accessibility.** Reports/dashboard are keyboard-complete; every chart has a data-table equivalent; severity/levels not color-only. Release gate.
+
+## 6. Architecture
+- **Shape (Pi).** Python service using `sounddevice`/PortAudio: read frames → compute level in memory → event detector → SQLite (events only) → report generator (PDF/HTML + charts).
+- **Shape (PWA alt).** Web Audio API `AnalyserNode` for levels, IndexedDB for events, same report generator logic; still audio-never-persisted.
+- **Data model.** `Event(start, end, duration, peak_level, avg_level, [coarse_tag])`; `Calibration(offset, note)`. No audio fields exist anywhere.
+- **Key decisions (ADRs).** Level-only, audio-never-persisted (rejected: recording — legal/ethical, and unnecessary). Pi primary for reliable always-on (PWA as no-hardware option). In-memory processing with immediate discard (rejected: buffering raw audio to disk). Honest methodology section mandatory (rejected: bare numbers with no limitations).
+
+### ADRs added during build (M0–M4, 2026-06-05)
+- **Zero-dependency, pure-Python core.** Level math, detector, store, and report use only the standard library; `make verify` runs with no installs and only the optional `live` extra (`sounddevice`) is needed for real microphone capture. (Rejected: numpy in the core — unnecessary for RMS and adds a dependency to the always-run path.)
+- **JSON config, not TOML.** Target runtime is Python 3.9, which lacks `tomllib`; config is JSON via the stdlib. (Rejected: a third-party TOML parser — avoid a dependency for config.)
+- **Hand-rendered inline-SVG charts.** Charts are deterministic SVG with a paired data-table, so report output is byte-stable (snapshot-testable) and accessible without a plotting library. (Rejected: matplotlib — heavy, non-deterministic output, harder a11y.)
+- **Fixed UTC-offset bucketing (`tz_offset_hours`).** A single-site monitor lives in one offset; bucketing against a fixed offset makes reports reproducible across machines. (Rejected: machine-local time — non-reproducible reports.)
+- **Structural a11y gate as the enforced floor.** `tests/test_a11y.py` enforces the mechanically checkable WCAG subset everywhere (no browser needed); pa11y/axe runs as a deeper layer in `make a11y`/CI; the screen-reader walkthrough stays review-gated in `docs/audits/`.
+- **Type-checking under 3.10 semantics.** Code targets 3.9 at runtime (via `from __future__ import annotations`) but is checked under mypy 3.10 (current mypy dropped 3.9 support); safe because annotations are not evaluated at runtime.
+
+## 7. Quality attributes & metrics
+| Metric | Target | Measured by | Gate |
+|--------|--------|-------------|------|
+| Audio bytes written to disk or transmitted | 0 | no-audio test (asserts no audio write/IO path) | merge-blocking |
+| Network egress in monitor | none | no-egress test | merge-blocking |
+| Report includes methodology + limitations | always | report-content test | merge-blocking |
+| Event-detection accuracy vs labeled session | meets stated threshold | eval test | review-gated |
+| Report reproducibility (same log → same report) | deterministic | snapshot test | merge-blocking |
+| axe violations (report/dashboard) | 0 | pa11y-ci | merge-blocking |
+| Coverage | ≥ 85% / ≥ 80% | coverage | merge-blocking |
+
+**Testing.** Unit (level math, detector thresholds/debounce, report assembly), integration (frame pipeline → event → log → report), eval (detection vs labeled session), a11y. A dedicated test proves no code path persists or transmits audio.
+
+## 8. Implementation plan for Claude Code
+```
+monitor/   (capture, level compute, event detector)  [pi]
+pwa/       (web-audio variant)                        [optional]
+store/     (sqlite events, calibration)
+report/    (charts + pdf/html + methodology)
+docs/
+```
+- **M0 — Scaffold & gates.** ✅ Repo + CI (`/STANDARDS` gates + axe + the no-audio + no-egress tests). *Done: `make verify` green; no-audio test passes.*
+- **M1 — Level pipeline.** ✅ In-memory RMS→dBFS with immediate frame discard. *Done: levels stream with zero audio persisted (test-proven).*
+- **M2 — Event detection.** ✅ Threshold + min-duration + debounce → events to SQLite. *Done: labeled-session eval passes.*
+- **M3 — Report generator.** ✅ Charts + distributions + quiet-hours + methodology/limitations. *Done: report renders with limitations; structural a11y gate green, pa11y in CI.*
+- **M4 — Calibration + config.** ✅ `olive-calibrate` offset helper, `olive-tune` live meter, quiet-hours config. *Done: calibration stored + shown in report.*
+- **M5 — PWA variant (optional).** ✅ Web Audio version (`pwa/`) sharing detection + report logic, IndexedDB, offline. *Done: events logged with audio never persisted; Node tests pass.*
+- **M6 — Polish + validation.** ✅ Detection tuning, CSV/print export, property-based tests. *Done: all §7 gates pass and the eval threshold is met.*
+- **Claude Code approach.** Build the no-audio guarantee first and design so there is literally no API to write audio; make the limitations section non-optional in the report.
+
+### Productionization ADRs (P0–P2, 2026-06-05)
+- **DST-safe time zones.** Bucketing and quiet hours use an IANA zone via `zoneinfo` (not a fixed offset), so they stay correct across daylight-saving changes. Falls back to UTC if tzdata is absent. (Rejected: fixed UTC offset — wrong half the year.)
+- **Frame-coverage accounting.** The capture path counts frames seen vs dropped; the report's "Measurement conditions" discloses coverage so silent backpressure can't quietly undercount events. (Integrity complement to the no-audio guarantee.)
+- **Durability & lineage.** SQLite runs in WAL with `synchronous=NORMAL`; schema is versioned via `user_version` with in-place migrations; a `sessions` table records device/placement/calibration/tz + coverage and links each event for traceability. Retention pruning is config-driven. (Rejected: ad-hoc schema with no upgrade path.)
+- **Unattended ops.** `resilient_source` reconnects on device failure with capped backoff; a heartbeat JSON file is written atomically for watchdogs; a hardened `systemd` unit (`PrivateNetwork`, `ProtectSystem`) enforces local-only at the OS level too.
+- **Runtime egress proof.** In addition to the static import scan, a test booby-traps `socket` and runs the full pipeline + report to prove no network access at runtime.
+- **Coarse tagging (opt-in).** A cheap zero-crossing-rate feature, computed in memory and discarded, classifies events as bark-like/ambient; surfaced as a clearly-hedged "hint" in the report. No audio stored.
+- **PWA parity.** The browser variant re-implements the detector/level/report in JS with its own Node tests; documented as a parallel implementation sharing semantics and the honest framing.
+
+## 9. Go-to-market & community
+- **Positioning.** "Honest, level-only noise evidence — no recording."
+- **Marketing/comms.** A small, principled hardware/privacy project; a clean example of privacy-by-design under a real-world constraint.
+- **Community.** Setup guide (Pi + PWA); a documented "why level-only" note others in similar disputes can reuse.
+
+## 10. Legal & compliance
+- **Recording law.** Level-only + no audio is the core compliance posture; documented in the report and README.
+- **Honest use.** The report states methodology and limitations and never claims to attribute a sound to a specific source.
+- **Privacy.** Local-only, minimal data, no audio.
+
+## 11. Operations & sustainability
+- **Hosting/cost.** A Raspberry Pi (or just a browser); no running cost; no cloud.
+- **Maintenance.** Periodic recalibration; re-validate detection if the device moves.
+- **Sustainability.** Self-contained and offline; nothing to keep paying for.
+
+## 12. Responsible-tech summary
+Top risks: (1) recording audio of the household or neighbors → never captured, stored, or transmitted (tested); (2) misleading evidence → mandatory methodology + limitations, no source-attribution claims; (3) any data leaving the device → local-only, no egress (tested); (4) inaccessible reports → full a11y with chart data-tables. Full treatment in [`RESPONSIBLE-TECH-AUDITS.md`](./RESPONSIBLE-TECH-AUDITS.md).

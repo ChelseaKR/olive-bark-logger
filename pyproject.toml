@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "olive-bark-logger"
+version = "0.1.0"
+description = "Privacy-first, on-device noise monitor: logs sound-level events (never audio) and generates an honest report."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Chelsea" }]
+# Core has ZERO runtime dependencies: level math, detector, store, and report are
+# pure standard library so `make verify` runs on any Python 3.9+ with no installs.
+dependencies = []
+
+[project.optional-dependencies]
+# Live microphone capture on a Raspberry Pi / laptop. Optional on purpose: the
+# core pipeline and all tests run without it. Installing audio libs does NOT add
+# any path that writes or transmits audio — capture only yields in-memory frames.
+live = ["sounddevice>=0.4"]
+dev = ["pytest>=8", "pytest-cov>=5", "hypothesis>=6"]
+
+[project.scripts]
+olive-monitor = "monitor.service:main"
+olive-report = "report.render:main"
+olive-tune = "monitor.calibrate:main_tune"
+olive-calibrate = "monitor.calibrate:main_calibrate"
+
+[tool.setuptools]
+packages = ["monitor", "store", "report"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+branch = true
+source = ["monitor", "store", "report"]
+omit = ["monitor/capture_live.py"]  # live mic path needs hardware; excluded from coverage, covered by the no-audio static gate
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = false
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+src = ["monitor", "store", "report", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]  # line length is handled by the formatter
+
+[tool.mypy]
+# Runtime target is 3.9 (see requires-python); the code uses `from __future__ import
+# annotations`, so checking under 3.10 semantics is safe and required by current mypy.
+python_version = "3.10"
+strict = true
+files = ["monitor", "store", "report"]
+exclude = "(^|/)capture_live\\.py$"
+
+# The live mic path depends on an untyped third-party lib and a hardware callback;
+# it is excluded from coverage and from strict checking (the no-audio gate guards it).
+[[tool.mypy.overrides]]
+module = "monitor.capture_live"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "sounddevice"
+ignore_missing_imports = true

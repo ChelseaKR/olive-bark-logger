@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Local artifacts (event logs and generated reports are user data, never committed)
+*.db
+*.db-journal
+*.db-wal
+report.html
+demo.db
+
+# OS
+.DS_Store

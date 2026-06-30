@@ -1,0 +1,17 @@
+{
+  "sample_rate": 16000,
+  "frame_size": 1600,
+  "threshold_dbfs": -35.0,
+  "min_duration_s": 0.4,
+  "debounce_s": 1.0,
+  "calibration_offset": 0.0,
+  "calibration_note": "Uncalibrated: levels are relative dBFS, not absolute SPL.",
+  "quiet_hours": { "start_hour": 22, "end_hour": 8 },
+  "tz": "America/Los_Angeles",
+  "db_path": "olive.db",
+  "retention_days": 0,
+  "health_path": "olive-health.json",
+  "device_label": "olive-monitor",
+  "mic_model": "",
+  "placement_note": "Living room, 1.5 m from the shared wall, mic facing inward."
+}

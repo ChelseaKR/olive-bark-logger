@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#3b6ea5">
+<link rel="manifest" href="./manifest.webmanifest">
+<title>Olive's Bark Logger (PWA)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 0 auto; padding: 1.5rem; }
+  fieldset { margin: 1rem 0; }
+  label { display: inline-block; min-width: 9rem; }
+  input { width: 5rem; }
+  meter { width: 100%; height: 1.5rem; }
+  button { font-size: 1rem; padding: .5rem 1rem; margin: .25rem .25rem 0 0; }
+  .row { margin: .25rem 0; }
+  :focus-visible { outline: 3px solid #3b6ea5; outline-offset: 2px; }
+  .note { background: #f3f3f3; border-left: 4px solid #3b6ea5; padding: .75rem 1rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Olive's Bark Logger <small>(browser edition)</small></h1>
+<p class="note">This page measures sound <strong>levels</strong> in your browser. Audio is
+processed in memory and <strong>never recorded, stored, or uploaded</strong>. Events
+(timestamps and levels only) are saved locally in your browser. Works offline.</p>
+
+<fieldset>
+  <legend>Detection settings</legend>
+  <div class="row"><label for="threshold">Threshold (dBFS)</label><input id="threshold" type="number" value="-35" step="1"></div>
+  <div class="row"><label for="minDuration">Min duration (s)</label><input id="minDuration" type="number" value="0.4" step="0.1"></div>
+  <div class="row"><label for="debounce">Debounce (s)</label><input id="debounce" type="number" value="1.0" step="0.1"></div>
+  <div class="row"><label for="startHour">Quiet from (hour)</label><input id="startHour" type="number" value="22" min="0" max="24"></div>
+  <div class="row"><label for="endHour">Quiet to (hour)</label><input id="endHour" type="number" value="8" min="0" max="24"></div>
+</fieldset>
+
+<h2>Live level</h2>
+<meter id="meter" min="0" max="100" value="0" aria-label="Live sound level"></meter>
+<p>Current: <span id="level" aria-live="polite">— dBFS</span></p>
+
+<div>
+  <button id="start">Start monitoring</button>
+  <button id="stop" disabled>Stop</button>
+</div>
+<p id="status" role="status">Idle.</p>
+
+<h2>Events logged: <span id="count">0</span></h2>
+<div>
+  <button id="report">Download report (HTML)</button>
+  <button id="csv">Download CSV</button>
+  <button id="clear">Clear events</button>
+</div>
+</main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
