@@ -40,7 +40,7 @@ on any Python 3.9+ with no installs; only live microphone capture needs the `liv
 | `olive-monitor` | Run the monitor: capture → level → detect → SQLite. Creates a capture *session* (lineage), writes a heartbeat file, reconnects on device failure, prunes per `retention_days`. |
 | `olive-tune` | Show the live level so you can pick a threshold by ear; prints a suggestion. |
 | `olive-calibrate` | Measure mean level against a reference SPL reading and store the offset. |
-| `olive-report` | Render the accessible HTML report (and optional `--csv`). |
+| `olive-report` | Render the accessible HTML report (distributions + day×hour calendar heatmap + quiet-hours summary). Optional `--csv` event export, and `--violations-csv` / `--violations-html` for an honest quiet-hours report suitable for a neighbor/landlord/HOA submission. |
 
 ## Deployment & variants
 - **Raspberry Pi service:** `scripts/setup-pi.sh` installs PortAudio + a venv and the

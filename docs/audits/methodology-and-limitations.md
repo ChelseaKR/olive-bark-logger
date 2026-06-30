@@ -39,6 +39,31 @@ session with known loud spans must yield the right number of events, each aligne
 labeled span within one frame, with no false positives in a quiet session and nothing
 detected when the threshold is set above the signal.
 
+## Calendar heatmap
+
+The report and the PWA render a **day × hour calendar heatmap**: each cell is the number
+of events that *began* in that hour on that day. It visualizes the same level/event
+metadata as the rest of the report — counts only, never audio. Accessibility is preserved:
+the count is printed as text in every non-empty cell (meaning never depends on color
+alone), the SVG carries `role="img"` and a summarizing `aria-label`, and an equivalent
+data table repeats every number. It is a pattern view, not new evidence.
+
+## Quiet-hours violation report
+
+Quiet hours are configurable (`quiet_hours.start_hour` / `end_hour`, local time, wraps
+midnight — default **22:00–08:00**; set them to your local ordinance, lease, or HOA rule).
+`olive-report --violations-csv` / `--violations-html` (and the PWA's "Download quiet-hours
+CSV") export an honest record for a neighbor, landlord, or HOA submission. Honesty rules
+baked into the export:
+
+- An event is attributed to quiet hours **by its start time** in the configured zone.
+- The export lists **all** events with a within/outside flag — never only the flagged
+  ones — so it cannot be a cherry-picked subset.
+- "Within quiet hours" means only that *this device measured a level above the threshold
+  starting during the window*. It is **not** proof of the source of a sound or of who
+  caused it. The no-source and relative-dBFS limitations below are reproduced verbatim in
+  every exported violation report.
+
 ## Limitations (what this cannot prove)
 
 1. **Relative, not absolute.** Without calibration, the numbers are relative dBFS, not
