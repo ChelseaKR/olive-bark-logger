@@ -32,9 +32,11 @@ export function summarize(events, { startHour = 22, endHour = 8, tz = "UTC" } = 
   for (let h = 0; h < 24; h++) byHour[h] = 0;
   const byDay = {};
   const byTag = {};
+  const byDayHour = {}; // date -> {hour -> count}: the calendar heatmap grid (counts only)
   let totalLoud = 0;
   let quietCount = 0;
   let quietLoud = 0;
+  let outsideLoud = 0;
   let loudestPeak = -Infinity;
   let peakSum = 0;
   let longest = 0;
@@ -42,6 +44,11 @@ export function summarize(events, { startHour = 22, endHour = 8, tz = "UTC" } = 
     const { hour, date } = partsInTz(ev.start * 1000, tz);
     byHour[hour] += 1;
     byDay[date] = (byDay[date] || 0) + 1;
+    if (!byDayHour[date]) {
+      byDayHour[date] = {};
+      for (let h = 0; h < 24; h++) byDayHour[date][h] = 0;
+    }
+    byDayHour[date][hour] += 1;
     if (ev.coarse_tag) byTag[ev.coarse_tag] = (byTag[ev.coarse_tag] || 0) + 1;
     totalLoud += ev.duration;
     peakSum += ev.peak_level;
@@ -50,6 +57,8 @@ export function summarize(events, { startHour = 22, endHour = 8, tz = "UTC" } = 
     if (inQuietHours(hour, startHour, endHour)) {
       quietCount += 1;
       quietLoud += ev.duration;
+    } else {
+      outsideLoud += ev.duration;
     }
   }
   return {
@@ -61,8 +70,11 @@ export function summarize(events, { startHour = 22, endHour = 8, tz = "UTC" } = 
     byHour,
     byDay,
     byTag,
+    byDayHour,
     quietCount,
     quietLoud,
+    outsideCount: events.length - quietCount,
+    outsideLoud,
   };
 }
 
@@ -75,6 +87,34 @@ function table(caption, headers, rows) {
     .map(([k, v]) => `<tr><th scope="row">${esc(k)}</th><td>${esc(v)}</td></tr>`)
     .join("");
   return `<table><caption>${esc(caption)}</caption><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+// Calendar heatmap as an accessible HTML table: rows are days, columns are hours 0..23.
+// Cells are shaded by intensity AND print their count, so meaning never depends on color
+// alone; the table itself is the data-table equivalent. Counts only — never audio.
+function heatTable(byDayHour) {
+  const days = Object.keys(byDayHour).sort();
+  let max = 0;
+  for (const d of days) for (let h = 0; h < 24; h++) max = Math.max(max, byDayHour[d][h] || 0);
+  const head = Array.from({ length: 24 }, (_, h) => `<th scope="col">${String(h).padStart(2, "0")}</th>`).join("");
+  const rows = days
+    .map((d) => {
+      let rowTotal = 0;
+      const cells = Array.from({ length: 24 }, (_, h) => {
+        const v = byDayHour[d][h] || 0;
+        rowTotal += v;
+        const ratio = max ? v / max : 0;
+        const ch = Math.round(255 - (255 - 59) * ratio);
+        const cg = Math.round(255 - (255 - 110) * ratio);
+        const cb = Math.round(255 - (255 - 165) * ratio);
+        const bg = v === 0 ? "#f5f5f5" : `rgb(${ch},${cg},${cb})`;
+        const fg = ratio >= 0.55 ? "#fff" : "#111";
+        return `<td style="background:${bg};color:${fg};text-align:center" title="${esc(d)} ${String(h).padStart(2, "0")}:00 — ${v} events">${v}</td>`;
+      }).join("");
+      return `<tr><th scope="row">${esc(d)}</th>${cells}<td>${rowTotal}</td></tr>`;
+    })
+    .join("");
+  return `<table><caption>Events by day and hour — darker cells saw more events; counts are printed in every cell</caption><thead><tr><th scope="col">Day</th>${head}<th scope="col">Total</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 export function buildReportHtml(summary, { generatedAt, tz = "UTC", startHour = 22, endHour = 8 }) {
@@ -105,9 +145,11 @@ ${table("Summary", ["Metric", "Value"], [
 ${table("Events by hour of day", ["Hour", "Events"], hourRows)}
 <h2>Events by day</h2>
 ${dayRows.length ? table("Events by day", ["Day", "Events"], dayRows) : "<p>No events yet.</p>"}
+<h2>Calendar heatmap</h2>
+${dayRows.length ? `<p>Each cell is the number of events that began in that hour, by day and hour of day. Darker cells saw more events; the count is printed in every cell, so the pattern does not depend on color.</p>${heatTable(summary.byDayHour)}` : "<p>No events have been logged yet, so there is no calendar to show.</p>"}
 ${tagsSection}
 <h2>Quiet hours</h2>
-<p>Window <strong>${window}</strong> in time zone <strong>${esc(tz)}</strong>. Of ${summary.count} events, <strong>${summary.quietCount}</strong> fell within quiet hours.</p>
+<p>Window <strong>${window}</strong> in time zone <strong>${esc(tz)}</strong>. Of ${summary.count} events, <strong>${summary.quietCount}</strong> began within quiet hours and <strong>${summary.outsideCount}</strong> outside them. An event counts as within quiet hours by its start time; this flags a level threshold being crossed, not the source of a sound.</p>
 <h2>Methodology</h2>
 <p>Each audio frame is reduced in memory to one RMS level in dBFS and then discarded. An event is recorded when the level stays above the threshold for at least the minimum duration; brief dips shorter than the debounce do not split it. Only six numbers per event are stored — never audio.</p>
 <h2>Limitations</h2>
@@ -128,6 +170,35 @@ export function eventsToCsv(events, tz = "UTC") {
       ev.duration.toFixed(3),
       ev.peak_level.toFixed(1),
       ev.avg_level.toFixed(1),
+      ev.coarse_tag || "",
+    ].join(","));
+  }
+  return lines.join("\n");
+}
+
+// Honest quiet-hours export: every event, flagged within/outside the window by its start
+// time (in the given tz). Lists all events, never a cherry-picked subset. Counts only.
+export function violationsToCsv(events, { startHour = 22, endHour = 8, tz = "UTC" } = {}) {
+  const window = `${String(startHour).padStart(2, "0")}:00–${String(endHour).padStart(2, "0")}:00`;
+  const header = [
+    "start_unix", "start_iso", "end_iso", "hour_local",
+    "duration_s", "peak_dbfs", "avg_dbfs", "within_quiet_hours", "quiet_window", "coarse_tag",
+  ];
+  const iso = (s) => new Date(s * 1000).toISOString();
+  const lines = [header.join(",")];
+  for (const ev of events) {
+    const { hour } = partsInTz(ev.start * 1000, tz);
+    const within = inQuietHours(hour, startHour, endHour);
+    lines.push([
+      ev.start.toFixed(3),
+      iso(ev.start),
+      iso(ev.end),
+      String(hour).padStart(2, "0"),
+      ev.duration.toFixed(3),
+      ev.peak_level.toFixed(1),
+      ev.avg_level.toFixed(1),
+      within ? "yes" : "no",
+      window,
       ev.coarse_tag || "",
     ].join(","));
   }

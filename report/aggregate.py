@@ -25,6 +25,10 @@ class Summary:
     by_hour: dict[int, int] = field(default_factory=dict)  # hour-of-day 0..23 -> count
     by_day: dict[str, int] = field(default_factory=dict)  # ISO date -> count
     by_tag: dict[str, int] = field(default_factory=dict)  # coarse tag -> count (if tagging on)
+    # ISO date -> {hour-of-day 0..23 -> count}: the day x hour grid the calendar heatmap
+    # draws. Metadata only (counts of level-events), never audio — same guarantee as the
+    # rest of the summary.
+    by_day_hour: dict[str, dict[int, int]] = field(default_factory=dict)
     quiet_hours_event_count: int = 0
     quiet_hours_loud_seconds: float = 0.0
 
@@ -50,6 +54,7 @@ def summarize(
     by_hour: Counter[int] = Counter()
     by_day: Counter[str] = Counter()
     by_tag: Counter[str] = Counter()
+    by_day_hour: dict[str, Counter[int]] = {}
     quiet_count = 0
     quiet_seconds = 0.0
     total_seconds = 0.0
@@ -57,8 +62,10 @@ def summarize(
 
     for ev in events:
         dt = datetime.fromtimestamp(ev.start, tz=tz)
+        day = dt.date().isoformat()
         by_hour[dt.hour] += 1
-        by_day[dt.date().isoformat()] += 1
+        by_day[day] += 1
+        by_day_hour.setdefault(day, Counter())[dt.hour] += 1
         if ev.coarse_tag:
             by_tag[ev.coarse_tag] += 1
         total_seconds += ev.duration
@@ -76,6 +83,10 @@ def summarize(
         by_hour={h: by_hour.get(h, 0) for h in range(24)},
         by_day=dict(sorted(by_day.items())),
         by_tag=dict(sorted(by_tag.items())),
+        by_day_hour={
+            day: {h: counts.get(h, 0) for h in range(24)}
+            for day, counts in sorted(by_day_hour.items())
+        },
         quiet_hours_event_count=quiet_count,
         quiet_hours_loud_seconds=quiet_seconds,
     )

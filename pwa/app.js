@@ -4,7 +4,7 @@
 
 import { Detector } from "./detector.js";
 import { dbfs } from "./level.js";
-import { buildReportHtml, eventsToCsv, summarize } from "./report.js";
+import { buildReportHtml, eventsToCsv, summarize, violationsToCsv } from "./report.js";
 
 const $ = (id) => document.getElementById(id);
 const cfg = () => ({
@@ -120,12 +120,16 @@ async function downloadReport() {
 async function downloadCsv() {
   download("events.csv", eventsToCsv(await allEvents()), "text/csv");
 }
+async function downloadViolations() {
+  download("quiet-hours.csv", violationsToCsv(await allEvents(), cfg()), "text/csv");
+}
 
 window.addEventListener("DOMContentLoaded", () => {
   $("start").addEventListener("click", () => start().catch((e) => ($("status").textContent = e.message)));
   $("stop").addEventListener("click", stop);
   $("report").addEventListener("click", downloadReport);
   $("csv").addEventListener("click", downloadCsv);
+  $("violations").addEventListener("click", downloadViolations);
   $("clear").addEventListener("click", () => clearEvents().then(refresh));
   refresh();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});

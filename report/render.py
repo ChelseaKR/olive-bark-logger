@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from monitor.config import Config
 
 from report.aggregate import Summary, summarize
-from report.charts import bar_chart
+from report.charts import bar_chart, heatmap
 
 if TYPE_CHECKING:
     from store import Session
@@ -126,6 +126,28 @@ def build_report(
         value_caption="events",
     )
 
+    if summary.by_day_hour:
+        heat_days = list(summary.by_day_hour.keys())
+        heat_grid = [[summary.by_day_hour[d][h] for h in range(24)] for d in heat_days]
+        calendar_section = (
+            "\n<h2>Calendar heatmap</h2>\n"
+            "<p>Each cell is the number of sound-level events that began in that hour, by "
+            "day and hour of day. Darker cells saw more events; the count is printed in "
+            "every non-empty cell and repeated in the data table below, so the pattern "
+            "does not depend on color. These are event counts only — never audio.</p>\n"
+            + heatmap(
+                chart_id="calendar",
+                title="Events by day and hour",
+                day_labels=heat_days,
+                grid=heat_grid,
+            )
+        )
+    else:
+        calendar_section = (
+            "\n<h2>Calendar heatmap</h2>\n<p>No events have been logged yet, so there is "
+            "no calendar to show.</p>"
+        )
+
     qh = config.quiet_hours
     quiet_window = f"{qh.start_hour:02d}:00–{qh.end_hour:02d}:00"
 
@@ -188,6 +210,7 @@ transmitted to produce it.</p>
 <h2>Distributions</h2>
 {hour_chart}
 {day_chart}
+{calendar_section}
 
 {tags_section}
 <h2>Quiet hours</h2>
@@ -266,6 +289,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--csv", type=Path, default=None, help="also export the event log to this CSV path"
     )
+    parser.add_argument(
+        "--violations-csv",
+        type=Path,
+        default=None,
+        help="export every event flagged within/outside quiet hours to this CSV path",
+    )
+    parser.add_argument(
+        "--violations-html",
+        type=Path,
+        default=None,
+        help="render a standalone honest quiet-hours violation report to this HTML path",
+    )
     args = parser.parse_args(argv)
 
     config = Config.load(args.config)
@@ -284,6 +319,40 @@ def main(argv: list[str] | None = None) -> int:
         with EventStore(db_path) as store:
             rows = events_to_csv(store.events(), args.csv, tz=config.tzinfo())
         print(f"Wrote {args.csv} ({rows} rows).")  # noqa: T201
+
+    if args.violations_csv is not None or args.violations_html is not None:
+        from store import EventStore
+
+        from report.violations import (
+            build_violation_report_html,
+            compute_violations,
+            violations_to_csv,
+        )
+
+        with EventStore(db_path) as store:
+            events = store.events()
+        if args.violations_csv is not None:
+            rows = violations_to_csv(
+                events,
+                args.violations_csv,
+                quiet_hours=config.quiet_hours,
+                tz=config.tzinfo(),
+                tz_name=config.tz,
+            )
+            print(f"Wrote {args.violations_csv} ({rows} rows).")  # noqa: T201
+        if args.violations_html is not None:
+            report = compute_violations(
+                events, quiet_hours=config.quiet_hours, tz=config.tzinfo(), tz_name=config.tz
+            )
+            vhtml = build_violation_report_html(
+                report,
+                threshold_dbfs=config.threshold_dbfs,
+                min_duration_s=config.min_duration_s,
+                generated_at=generated_at,
+                calibrated=config.calibration_offset != 0.0,
+            )
+            args.violations_html.write_text(vhtml, encoding="utf-8")
+            print(f"Wrote {args.violations_html} ({len(vhtml)} bytes).")  # noqa: T201
     return 0
 
 

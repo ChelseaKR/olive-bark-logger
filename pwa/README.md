@@ -26,9 +26,12 @@ python3 -m http.server 8000
 # open http://localhost:8000
 ```
 
-Click **Start monitoring**, grant microphone permission, and adjust the threshold while
-watching the live level. Use **Download report** / **Download CSV** to export, and
-**Clear events** to reset. Install it as an app from your browser's "Install" option.
+Click **Start monitoring**, grant microphone permission, and adjust the threshold and the
+quiet-hours window while watching the live level. Use **Download report** (HTML, with a
+day×hour calendar heatmap and a quiet-hours summary), **Download CSV** (the event log), or
+**Download quiet-hours CSV** (every event flagged within/outside quiet hours — an honest
+export for a neighbor/landlord/HOA submission). **Clear events** resets. Install it as an
+app from your browser's "Install" option.
 
 ## Test
 

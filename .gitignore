@@ -10,12 +10,14 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Local artifacts (event logs and generated reports are user data, never committed)
+# Local artifacts (event logs and generated reports are user data, never committed).
+# Anchored to the repo root so the committed test golden tests/snapshots/report.html
+# (a fixture, not user data) is still tracked.
 *.db
 *.db-journal
 *.db-wal
-report.html
-demo.db
+/report.html
+/demo.db
 
 # OS
 .DS_Store
