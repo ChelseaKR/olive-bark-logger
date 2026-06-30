@@ -74,6 +74,15 @@ def main_calibrate(
     parser.add_argument(
         "--reference-db", type=float, required=True, help="SPL (dB) shown on a reference meter now"
     )
+    parser.add_argument(
+        "--reference-instrument",
+        type=str,
+        default="",
+        help=(
+            "make/model/class of the reference meter used (e.g. 'Brand X, IEC 61672 Class 2'). "
+            "Recorded for provenance so a reader knows what the offset was measured against."
+        ),
+    )
     parser.add_argument("--seconds", type=float, default=10.0, help="how long to measure")
     args = parser.parse_args(argv)
 
@@ -82,9 +91,15 @@ def main_calibrate(
     source = source_factory(config) if source_factory else _live(config)
     measured = statistics.fmean(measure_levels(source, max_frames=frames))
     offset = compute_offset(measured, args.reference_db)
+    instrument = (
+        f" Reference instrument: {args.reference_instrument.strip()}."
+        if args.reference_instrument.strip()
+        else " Reference instrument not recorded."
+    )
     note = (
         f"Calibrated against a {args.reference_db:.1f} dB reference "
-        f"(measured {measured:.1f} dBFS). Readings approximate SPL but remain estimates."
+        f"(measured {measured:.1f} dBFS).{instrument} Readings approximate SPL but remain "
+        "estimates, not a Class 1/2 sound-level-meter measurement."
     )
     with EventStore(config.db_path) as store:
         store.set_calibration(offset, note)
