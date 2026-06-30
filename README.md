@@ -2,7 +2,7 @@
 
 **A privacy-first, on-device noise monitor that timestamps barking events and sound-level spikes and turns them into a clean report** — so the next time a downstairs neighbor complains, you have objective data instead of a he-said-she-said. It measures sound *levels* and event metadata only. It never records, stores, or transmits audio. By design, there is no recording to leak, subpoena, or wiretap.
 
-**Status:** `Beta` · **Track:** Personal (on-device monitor + report generator) · **License:** MIT (proposed) · **Data:** on-device/local
+**Status:** `Beta` · **Track:** Personal (on-device monitor + report generator) · **License:** MIT · **Data:** on-device/local
 
 ## Why it matters
 You've been on the receiving end of vague noise complaints about Olive with nothing concrete to point to. A small device that runs in your apartment and logs *when* sound crossed a threshold and for *how long* gives you an honest, time-stamped record — useful for property management or just for understanding the real pattern — without the legal and ethical problems of recording your home (or your neighbors).
