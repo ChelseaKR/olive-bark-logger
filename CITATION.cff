@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use Olive's Bark Logger, please cite it using this metadata."
+title: "Olive's Bark Logger"
+abstract: >-
+  A privacy-first, on-device noise monitor that timestamps barking events and
+  sound-level spikes and turns them into a clean report. It measures sound
+  levels and event metadata only — it never records, stores, or transmits
+  audio; raw frames are processed in memory and discarded, and only derived
+  levels plus event metadata are persisted (the no-audio guarantee is a
+  merge-blocking test, not prose). It runs local-only, with no cloud and no
+  telemetry.
+type: software
+authors:
+  - given-names: "Chelsea"
+    family-names: "Kelly-Reif"
+    alias: "ChelseaKR"
+version: "0.1.0"
+date-released: "2026-06-30"
+license: "MIT"
+repository-code: "https://github.com/ChelseaKR/olive-bark-logger"
+url: "https://github.com/ChelseaKR/olive-bark-logger"
+keywords:
+  - "privacy"
+  - "on-device"
+  - "noise-monitor"
+  - "sound-level"
+  - "no-audio"
+  - "local-first"
+  - "sqlite"
+  - "raspberry-pi"
+  - "pwa"
