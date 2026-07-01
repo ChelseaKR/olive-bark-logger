@@ -6,7 +6,7 @@ PIP ?= .venv/bin/pip
 RUFF ?= ruff
 MYPY ?= mypy
 
-.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pwa-test verify clean
+.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pwa-test i18n verify clean
 
 help:
 	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pwa-test verify clean"
@@ -58,7 +58,15 @@ report:
 pwa-test:
 	node --test pwa/*.test.mjs
 
-verify: lint type cov a11y pwa-test
+# i18n status is N/A for this single-user, operator-only tool (see docs/I18N.md).
+# Enforcing gate per INTERNATIONALIZATION-STANDARD §1: the N/A declaration must
+# exist with the required marker and a non-empty Reason; absence fails the build.
+i18n:
+	@grep -q 'i18n status: N/A' docs/I18N.md || { echo "docs/I18N.md missing 'i18n status: N/A' declaration"; exit 1; }
+	@grep -Eq '^Reason: .+' docs/I18N.md || { echo "docs/I18N.md missing a non-empty 'Reason:' line"; exit 1; }
+	@echo "i18n: N/A declaration present."
+
+verify: lint type cov a11y pwa-test i18n
 	@echo "All local gates passed."
 
 clean:
