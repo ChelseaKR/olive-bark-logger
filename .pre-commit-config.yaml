@@ -1,26 +1,38 @@
 # Local pre-commit layer (CQ-12, SEC-17 Gate 1). Install with:
-#   pre-commit install                    # runs ruff + ruff-format + gitleaks on commit
-#   pre-commit install --hook-type pre-push  # also runs mypy before push (slower)
+#   pre-commit install                       # fast commit-time checks
+#   pre-commit install --hook-type pre-push # strict mypy before push
 #
-# This is a *local* speed bump, not a replacement for `make verify` / CI — it catches
-# the cheap stuff before it's even committed. CI remains the actual merge-blocking gate.
+# Full-SHA pins are supply-chain controls. The corresponding release tag remains
+# beside each SHA so Renovate and human reviewers can see the intended version.
+# CI remains the merge-blocking authority through `make verify`.
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.20  # matches pyproject.toml's [dependency-groups] dev floor (ruff>=0.15)
+    rev: c59bba8fb259db0fec2bbb77ad8ba51ea7341b56  # v0.15.20
     hooks:
       - id: ruff
-        args: [--fix]
+        args: ["--fix"]
         files: ^(monitor|store|report|tests|scripts)/
       - id: ruff-format
         files: ^(monitor|store|report|tests|scripts)/
 
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.21.2
+    rev: a9e1950fe247fbb08817393121691474c55a6cfa  # v8.21.2
     hooks:
       - id: gitleaks
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1  # matches pyproject.toml's [dependency-groups] dev floor (mypy>=1.13,<2)
+    rev: a66e98df7b4aeeb3724184b332785976d062b92e  # v1.19.1
     hooks:
       - id: mypy
         stages: [pre-push]
