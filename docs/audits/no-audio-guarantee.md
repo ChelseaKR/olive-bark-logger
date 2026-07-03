@@ -37,12 +37,33 @@ roadmap mandates (§8, "Claude Code approach").
   any column whose name suggests audio/samples/frames/blobs.
 - `test_no_source_file_uses_audio_write_api` — static scan: no `wave`, `soundfile`,
   `scipy.io.wavfile`, `aifc`, `sunau`, `audioop`, or `.tobytes(` anywhere in the code.
-- `test_no_file_open_in_write_binary_mode` — AST scan: nothing opens a file `"wb"`.
+- `test_no_file_open_in_write_binary_mode` — AST scan: nothing writes bytes to disk.
 - `test_capture_live_only_sinks_frames_to_memory` — the live frame is only enqueued.
 
 `tests/test_no_egress.py`:
 - `test_no_first_party_module_imports_network` — AST scan: no first-party module
   imports a networking library, so nothing can transmit anything (audio included).
+- `test_no_first_party_module_shells_out` — AST scan: no `subprocess`/`ctypes` import
+  and no `os.system`/`os.popen`/`os.spawn*`/`os.exec*` call, so nothing can shell out.
+
+## Closed bypasses (FIX-11 — hardened gates)
+
+The gates originally scanned only the obvious sinks. FIX-11 extended them so the
+harder-to-spot ways to write bytes or reach the network are also merge-blocked, and
+added canary self-tests so the scanners themselves stay honest:
+
+- **Byte-dump bypasses** (`scan_binary_write`): beyond `open('x','wb')`, the gate now
+  flags `io.open('x','wb')`, `Path(...).write_bytes(...)`, and low-level
+  `os.open(..., O_WRONLY/O_RDWR/O_CREAT)` writable descriptors.
+- **Shell-out / native-call bypasses** (`scan_exec_imports`, `scan_os_shell_calls`):
+  importing `subprocess` or `ctypes`, or calling `os.system`/`os.popen`/`os.spawn*`/
+  `os.exec*`, is now banned — a shell is just another route to disk or the wire. The
+  runtime pipeline test also booby-traps `subprocess.Popen` and `os.system` alongside
+  `socket.socket`.
+- **Scanner self-tests** (`tests/test_gate_selftest.py`): the scan helpers moved to
+  `tests/gates.py`; each is fed a known-bad canary string (e.g. `import subprocess`,
+  `os.system('curl x')`, `Path('x').write_bytes(b'')`) and asserted to report it, so a
+  broken scanner fails loudly instead of quietly going green on a clean tree.
 
 If any future change adds a way to persist or send audio, one of these tests fails and
 the merge is blocked.
