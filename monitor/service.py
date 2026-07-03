@@ -22,6 +22,7 @@ from store import EventStore
 
 from monitor import __version__
 from monitor.capture import resilient_source
+from monitor.clock import ClockGuard
 from monitor.config import Config
 from monitor.detector import Detector, Event
 from monitor.features import classify, zero_crossing_rate
@@ -85,7 +86,13 @@ def _attach_tag(event: Event, feats: list[tuple[float, float]]) -> Event:
 
 
 def _health_payload(
-    config: Config, stats: CaptureStats, *, started_at: float, now: float, session_id: int
+    config: Config,
+    stats: CaptureStats,
+    *,
+    started_at: float,
+    now: float,
+    session_id: int,
+    clock_anomalies: int = 0,
 ) -> dict[str, object]:
     return {
         "status": "ok",
@@ -96,6 +103,7 @@ def _health_payload(
         "frames_seen": stats.frames_seen,
         "frames_dropped": stats.frames_dropped,
         "frame_coverage": round(stats.coverage, 4),
+        "clock_anomalies": clock_anomalies,
         "db_path": config.db_path,
         "version": __version__,
     }
@@ -128,6 +136,9 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
         app_version=__version__,
     )
     stats = CaptureStats()
+    # Clock-integrity guard: watch for wall-vs-monotonic divergence (RTC-less Pi hazard).
+    guard = ClockGuard(tolerance_s=config.clock_jump_tolerance_s)
+    anomaly_count = 0
 
     from monitor.capture_live import live_source  # lazy: optional audio dependency
 
@@ -146,8 +157,30 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
                     started_at=started_at,
                     now=now or time.time(),
                     session_id=session_id,
+                    clock_anomalies=anomaly_count,
                 ),
             )
+
+    def check_clock() -> None:
+        """Sample both clocks; persist and announce any divergence beyond tolerance."""
+        nonlocal anomaly_count
+        anomaly = guard.check(time.time(), time.monotonic())
+        if anomaly is None:
+            return
+        anomaly_count += 1
+        store.add_clock_anomaly(
+            session_id=session_id,
+            kind=anomaly.kind,
+            wall_before=anomaly.wall_before,
+            wall_after=anomaly.wall_after,
+            delta=anomaly.delta,
+            detected_at=anomaly.detected_at,
+        )
+        print(
+            f"clock {anomaly.kind}: wall time moved {anomaly.delta:+.1f}s relative to "
+            f"the monotonic clock (expected {anomaly.wall_before:.0f}, saw "
+            f"{anomaly.wall_after:.0f}). Event timestamps around this point may be off."
+        )
 
     print(
         f"Monitoring (threshold {config.threshold_dbfs} dBFS). "
@@ -162,6 +195,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             stats=stats,
             session_id=session_id,
         ):
+            check_clock()
             print(
                 f"event @ {event.start:.0f}  dur {event.duration:.1f}s  "
                 f"peak {event.peak_level:.1f} dBFS"

@@ -16,11 +16,11 @@ from typing import TYPE_CHECKING
 
 from monitor.config import Config
 
-from report.aggregate import Summary, summarize
+from report.aggregate import Summary, describe_clock_anomalies, summarize
 from report.charts import bar_chart, heatmap
 
 if TYPE_CHECKING:
-    from store import Session
+    from store import ClockAnomaly, Session
 
 # Phrases the report-content gate checks for. Keeping them as constants makes the
 # contract between the renderer and the test explicit.
@@ -35,6 +35,7 @@ NO_SOURCE_NOTE = (
     "This tool measures sound levels only. It cannot prove what made a sound or "
     "where it came from; it does not record or identify any voice or source."
 )
+NO_CLOCK_ANOMALY_NOTE = "No clock anomalies detected during the measurement window."
 
 _STYLE = """
 :root { color-scheme: light dark; }
@@ -94,6 +95,19 @@ def _conditions_html(session: Session | None) -> str:
     )
 
 
+def _clock_anomalies_html(lines: list[str]) -> str:
+    """Disclose clock jumps within the report window (or state that there were none)."""
+    if not lines:
+        return f'<p class="note">{escape(NO_CLOCK_ANOMALY_NOTE)}</p>'
+    items = "".join(f"<li>{escape(line)}</li>" for line in lines)
+    return (
+        '<p class="note">The system clock diverged from the monotonic clock during '
+        "capture, so some event timestamps near these points may be off. On hardware "
+        "without a real-time clock this typically happens when the network time syncs "
+        f"after boot.</p>\n<ul>{items}</ul>"
+    )
+
+
 def build_report(
     summary: Summary,
     *,
@@ -102,6 +116,7 @@ def build_report(
     calibration_offset: float | None = None,
     calibration_note: str | None = None,
     session: Session | None = None,
+    clock_anomaly_lines: list[str] | None = None,
     title: str = "Olive's Bark Logger — Noise Report",
 ) -> str:
     """Render the full report as a single self-contained HTML string."""
@@ -109,6 +124,7 @@ def build_report(
     note = config.calibration_note if calibration_note is None else calibration_note
     calibrated = offset != 0.0
     conditions_html = _conditions_html(session)
+    clock_html = _clock_anomalies_html(clock_anomaly_lines or [])
 
     hour_chart = bar_chart(
         chart_id="by-hour",
@@ -206,6 +222,7 @@ transmitted to produce it.</p>
 
 <h2>Measurement conditions</h2>
 {conditions_html}
+{clock_html}
 
 <h2>Distributions</h2>
 {hour_chart}
@@ -252,14 +269,17 @@ def generate_report_from_db(
     """Read events from the store and render the report. Deterministic given inputs."""
     from store import EventStore
 
+    anomalies: list[ClockAnomaly]
     with EventStore(db_path) as store:
         events = store.events()
         calib = store.get_calibration()
         session = store.latest_session()
+        anomalies = store.clock_anomalies()
+    tz = config.tzinfo()
     summary = summarize(
         events,
         quiet_hours=config.quiet_hours,
-        tz=config.tzinfo(),
+        tz=tz,
     )
     offset, note = calib if calib else (config.calibration_offset, config.calibration_note)
     return build_report(
@@ -269,6 +289,7 @@ def generate_report_from_db(
         calibration_offset=offset,
         calibration_note=note,
         session=session,
+        clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
     )
 
 
