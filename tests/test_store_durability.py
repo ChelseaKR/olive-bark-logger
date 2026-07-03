@@ -96,3 +96,85 @@ def test_session_lifecycle(tmp_path):
 def test_latest_session_none_when_empty(tmp_path):
     with EventStore(tmp_path / "olive.db") as store:
         assert store.latest_session() is None
+
+
+def test_v2_database_upgrades_and_legacy_session_params_are_none(tmp_path):
+    db = tmp_path / "olive.db"
+    # Hand-build a v2 database (events + calibration + sessions, no detection-param
+    # columns) with one legacy session row, then open it through EventStore.
+    conn = sqlite3.connect(db)
+    conn.executescript(_MIGRATIONS[0])
+    conn.executescript(_MIGRATIONS[1])
+    conn.execute("PRAGMA user_version = 2")
+    conn.execute(
+        "INSERT INTO sessions (started_at, device_label, mic_model, placement_note, tz, "
+        "calibration_offset, calibration_note, app_version) "
+        "VALUES (500, 'pi-legacy', 'mic', 'wall', 'UTC', 0.0, 'note', '0.0.1')"
+    )
+    conn.commit()
+    conn.close()
+
+    with EventStore(db) as store:
+        assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        # The five new columns exist and the legacy row reads them back as None.
+        cols = {r[1] for r in store._conn.execute("PRAGMA table_info(sessions)")}
+        assert {
+            "threshold_dbfs",
+            "min_duration_s",
+            "debounce_s",
+            "sample_rate",
+            "frame_size",
+        } <= cols
+        s = store.latest_session()
+        assert s is not None
+        assert s.device_label == "pi-legacy"
+        assert s.threshold_dbfs is None
+        assert s.min_duration_s is None
+        assert s.debounce_s is None
+        assert s.sample_rate is None
+        assert s.frame_size is None
+
+
+def test_start_session_round_trips_detection_params(tmp_path):
+    with EventStore(tmp_path / "olive.db") as store:
+        sid = store.start_session(
+            started_at=1000.0,
+            device_label="pi-1",
+            mic_model="USB mic",
+            placement_note="by the wall",
+            tz="UTC",
+            calibration_offset=0.0,
+            calibration_note="bench",
+            app_version="0.1.0",
+            threshold_dbfs=-42.0,
+            min_duration_s=0.5,
+            debounce_s=1.5,
+            sample_rate=22050,
+            frame_size=2205,
+        )
+        s = store.latest_session()
+        assert s is not None
+        assert s.id == sid
+        assert s.threshold_dbfs == -42.0
+        assert s.min_duration_s == 0.5
+        assert s.debounce_s == 1.5
+        assert s.sample_rate == 22050
+        assert s.frame_size == 2205
+
+
+def test_sessions_returns_all_ordered_oldest_first(tmp_path):
+    with EventStore(tmp_path / "olive.db") as store:
+        common = dict(
+            device_label="pi-1",
+            mic_model="mic",
+            placement_note="wall",
+            tz="UTC",
+            calibration_offset=0.0,
+            calibration_note="note",
+            app_version="0.1.0",
+        )
+        store.start_session(started_at=3000.0, threshold_dbfs=-30.0, **common)
+        store.start_session(started_at=1000.0, threshold_dbfs=-40.0, **common)
+        store.start_session(started_at=2000.0, threshold_dbfs=-35.0, **common)
+        starts = [s.started_at for s in store.sessions()]
+        assert starts == [1000.0, 2000.0, 3000.0]

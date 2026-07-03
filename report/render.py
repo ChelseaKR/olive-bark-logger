@@ -94,6 +94,113 @@ def _conditions_html(session: Session | None) -> str:
     )
 
 
+PARAM_CHANGE_NOTE = (
+    "Detection settings changed during this record; each event is described under the "
+    "parameters in force when it was logged."
+)
+
+
+def _param_key(session: Session) -> tuple[object, ...]:
+    """The detection-parameter tuple that defines a parameter epoch for a session."""
+    return (
+        session.threshold_dbfs,
+        session.min_duration_s,
+        session.debounce_s,
+        session.sample_rate,
+        session.frame_size,
+    )
+
+
+def _param_epochs(sessions: list[Session]) -> list[Session]:
+    """Distinct detection-parameter sets in chronological order, each represented by the
+    earliest session that used it. `sessions` is expected oldest-first."""
+    epochs: dict[tuple[object, ...], Session] = {}
+    for s in sessions:
+        epochs.setdefault(_param_key(s), s)
+    return list(epochs.values())
+
+
+def _methodology_html(config: Config, calib_line: str, sessions: list[Session] | None) -> str:
+    """The Methodology block. With one detection-parameter set (or none recorded) this is
+    the single honest paragraph, sourcing values from the session when available and
+    otherwise from config. When the parameters changed across sessions, it becomes a small
+    table of parameter epochs plus a disclosure that events are described under the
+    settings in force when they were logged."""
+    epochs = _param_epochs(sessions) if sessions else []
+
+    if len(epochs) > 1:
+        rows = "".join(
+            "<tr>"
+            f'<th scope="row">{escape(_epoch_since(s, config))}</th>'
+            f"<td>{_fmt_threshold(s.threshold_dbfs)}</td>"
+            f"<td>{_fmt_secs_param(s.min_duration_s)}</td>"
+            f"<td>{_fmt_secs_param(s.debounce_s)}</td>"
+            f"<td>{escape(_fmt_sampling(s.sample_rate, s.frame_size))}</td>"
+            "</tr>"
+            for s in epochs
+        )
+        return (
+            "<p>Each frame of audio is read into memory, reduced to a single "
+            "root-mean-square level in dBFS, and then discarded. A noise event is recorded "
+            "when the level stays at or above the threshold for at least the minimum "
+            "duration; brief dips shorter than the debounce do not split one event into "
+            "many. For each event we store start time, duration, and peak and average "
+            f"level — six numbers, no audio. {calib_line}</p>\n"
+            "<table><caption>Detection-parameter epochs</caption>"
+            '<thead><tr><th scope="col">Since</th><th scope="col">Threshold</th>'
+            '<th scope="col">Min duration</th><th scope="col">Debounce</th>'
+            '<th scope="col">Sampling</th></tr></thead>'
+            f"<tbody>{rows}</tbody></table>\n"
+            f"<p>{escape(PARAM_CHANGE_NOTE)}</p>"
+        )
+
+    # Single parameter set (or none recorded): source from the one epoch when present,
+    # falling back to config so pre-provenance records still render truthfully.
+    epoch = epochs[0] if epochs else None
+    threshold = _param_or(epoch, "threshold_dbfs", config.threshold_dbfs)
+    min_duration = _param_or(epoch, "min_duration_s", config.min_duration_s)
+    debounce = _param_or(epoch, "debounce_s", config.debounce_s)
+    sample_rate = _param_or(epoch, "sample_rate", config.sample_rate)
+    frame_size = _param_or(epoch, "frame_size", config.frame_size)
+    return (
+        f"<p>Each ~{frame_size / sample_rate * 1000:.0f} ms frame of audio is read\n"
+        "into memory, reduced to a single root-mean-square level in dBFS, and then "
+        "discarded.\n"
+        "A noise event is recorded when the level stays at or above\n"
+        f"<strong>{threshold:.0f} dBFS</strong> for at least\n"
+        f"<strong>{min_duration:.1f} s</strong>; brief dips shorter than the\n"
+        f"<strong>{debounce:.1f} s</strong> debounce do not split one event into many.\n"
+        "For each event we store start time, duration, and peak and average level — six "
+        "numbers,\n"
+        f"no audio. {calib_line}</p>"
+    )
+
+
+def _param_or(session: Session | None, attr: str, fallback: float | int) -> float | int:
+    if session is None:
+        return fallback
+    value = getattr(session, attr)
+    return fallback if value is None else value
+
+
+def _epoch_since(session: Session, config: Config) -> str:
+    return datetime.fromtimestamp(session.started_at, tz=config.tzinfo()).date().isoformat()
+
+
+def _fmt_threshold(value: float | None) -> str:
+    return "—" if value is None else f"{value:.0f} dBFS"
+
+
+def _fmt_secs_param(value: float | None) -> str:
+    return "—" if value is None else f"{value:.1f} s"
+
+
+def _fmt_sampling(sample_rate: int | None, frame_size: int | None) -> str:
+    if sample_rate is None or frame_size is None:
+        return "—"
+    return f"{sample_rate} Hz / {frame_size}-sample frames"
+
+
 def build_report(
     summary: Summary,
     *,
@@ -102,6 +209,7 @@ def build_report(
     calibration_offset: float | None = None,
     calibration_note: str | None = None,
     session: Session | None = None,
+    sessions: list[Session] | None = None,
     title: str = "Olive's Bark Logger — Noise Report",
 ) -> str:
     """Render the full report as a single self-contained HTML string."""
@@ -169,6 +277,8 @@ def build_report(
         else f"No calibration offset is applied ({escape(note)})."
     )
 
+    methodology_html = _methodology_html(config, calib_line, sessions)
+
     tags_section = ""
     if summary.by_tag:
         rows = "".join(
@@ -220,14 +330,7 @@ total events, <strong>{summary.quiet_hours_event_count}</strong> fell within qui
 totaling {_fmt_seconds(summary.quiet_hours_loud_seconds)} of loud time.</p>
 
 <h2>{METHODOLOGY_HEADING}</h2>
-<p>Each ~{config.frame_size / config.sample_rate * 1000:.0f} ms frame of audio is read
-into memory, reduced to a single root-mean-square level in dBFS, and then discarded.
-A noise event is recorded when the level stays at or above
-<strong>{config.threshold_dbfs:.0f} dBFS</strong> for at least
-<strong>{config.min_duration_s:.1f} s</strong>; brief dips shorter than the
-<strong>{config.debounce_s:.1f} s</strong> debounce do not split one event into many.
-For each event we store start time, duration, and peak and average level — six numbers,
-no audio. {calib_line}</p>
+{methodology_html}
 
 <h2>{LIMITATIONS_HEADING}</h2>
 <div class="note">
@@ -256,6 +359,7 @@ def generate_report_from_db(
         events = store.events()
         calib = store.get_calibration()
         session = store.latest_session()
+        sessions = store.sessions()
     summary = summarize(
         events,
         quiet_hours=config.quiet_hours,
@@ -269,6 +373,7 @@ def generate_report_from_db(
         calibration_offset=offset,
         calibration_note=note,
         session=session,
+        sessions=sessions,
     )
 
 

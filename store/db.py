@@ -20,7 +20,7 @@ from pathlib import Path
 
 from monitor.detector import Event
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Ordered migrations. Each entry upgrades the database from version i to i+1. A fresh
 # database (user_version 0) runs them all; an existing one runs only the new ones.
@@ -61,6 +61,16 @@ _MIGRATIONS: list[str] = [
     );
     ALTER TABLE events ADD COLUMN session_id INTEGER;
     """,
+    # 2 -> 3: detection-parameter provenance per session. Recording the detection knobs
+    # and audio framing in force for a run lets a report describe each event under the
+    # parameters that were active when it was logged, even after the config later changes.
+    """
+    ALTER TABLE sessions ADD COLUMN threshold_dbfs REAL;
+    ALTER TABLE sessions ADD COLUMN min_duration_s REAL;
+    ALTER TABLE sessions ADD COLUMN debounce_s REAL;
+    ALTER TABLE sessions ADD COLUMN sample_rate INTEGER;
+    ALTER TABLE sessions ADD COLUMN frame_size INTEGER;
+    """,
 ]
 
 
@@ -80,6 +90,13 @@ class Session:
     frames_seen: int
     frames_dropped: int
     app_version: str
+    # Detection parameters in force during this run. Optional because sessions written
+    # before schema v3 (legacy rows) have no record of them and read back as None.
+    threshold_dbfs: float | None = None
+    min_duration_s: float | None = None
+    debounce_s: float | None = None
+    sample_rate: int | None = None
+    frame_size: int | None = None
 
     @property
     def frame_coverage(self) -> float:
@@ -185,10 +202,17 @@ class EventStore:
         calibration_offset: float,
         calibration_note: str,
         app_version: str,
+        threshold_dbfs: float | None = None,
+        min_duration_s: float | None = None,
+        debounce_s: float | None = None,
+        sample_rate: int | None = None,
+        frame_size: int | None = None,
     ) -> int:
         cur = self._conn.execute(
             "INSERT INTO sessions (started_at, device_label, mic_model, placement_note, tz, "
-            "calibration_offset, calibration_note, app_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "calibration_offset, calibration_note, app_version, threshold_dbfs, min_duration_s, "
+            "debounce_s, sample_rate, frame_size) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 started_at,
                 device_label,
@@ -198,6 +222,11 @@ class EventStore:
                 calibration_offset,
                 calibration_note,
                 app_version,
+                threshold_dbfs,
+                min_duration_s,
+                debounce_s,
+                sample_rate,
+                frame_size,
             ),
         )
         self._conn.commit()
@@ -217,12 +246,8 @@ class EventStore:
         )
         self._conn.commit()
 
-    def latest_session(self) -> Session | None:
-        row = self._conn.execute(
-            "SELECT * FROM sessions ORDER BY started_at DESC, id DESC LIMIT 1"
-        ).fetchone()
-        if row is None:
-            return None
+    @staticmethod
+    def _row_to_session(row: sqlite3.Row) -> Session:
         return Session(
             id=row["id"],
             started_at=row["started_at"],
@@ -236,7 +261,24 @@ class EventStore:
             frames_seen=row["frames_seen"],
             frames_dropped=row["frames_dropped"],
             app_version=row["app_version"] or "",
+            threshold_dbfs=row["threshold_dbfs"],
+            min_duration_s=row["min_duration_s"],
+            debounce_s=row["debounce_s"],
+            sample_rate=row["sample_rate"],
+            frame_size=row["frame_size"],
         )
+
+    def latest_session(self) -> Session | None:
+        row = self._conn.execute(
+            "SELECT * FROM sessions ORDER BY started_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+        return None if row is None else self._row_to_session(row)
+
+    def sessions(self) -> list[Session]:
+        """All capture sessions, oldest first — the ordered parameter epochs a report
+        uses to describe each event under the settings in force when it was logged."""
+        rows = self._conn.execute("SELECT * FROM sessions ORDER BY started_at ASC, id ASC")
+        return [self._row_to_session(r) for r in rows]
 
     # -- integrity -----------------------------------------------------------
     def integrity_ok(self) -> bool:

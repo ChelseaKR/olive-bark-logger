@@ -126,6 +126,11 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
         calibration_offset=config.calibration_offset,
         calibration_note=config.calibration_note,
         app_version=__version__,
+        threshold_dbfs=config.threshold_dbfs,
+        min_duration_s=config.min_duration_s,
+        debounce_s=config.debounce_s,
+        sample_rate=config.sample_rate,
+        frame_size=config.frame_size,
     )
     stats = CaptureStats()
 
