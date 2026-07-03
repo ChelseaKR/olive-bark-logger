@@ -46,3 +46,35 @@ roadmap mandates (§8, "Claude Code approach").
 
 If any future change adds a way to persist or send audio, one of these tests fails and
 the merge is blocked.
+
+## The browser (PWA) implementation — same guarantee, enforced identically
+
+The PWA (`pwa/`) is a second implementation of the same product, so it carries the same
+merge-blocking gates in the browser's terms. The guarantee holds in **both**
+implementations, enforced two ways: static scans and a strict Content-Security-Policy.
+
+| Guarantee            | Python core (`monitor/`, `store/`, `report/`) | Browser PWA (`pwa/`)                                              |
+| -------------------- | --------------------------------------------- | ---------------------------------------------------------------- |
+| No audio persisted   | `tests/test_no_audio.py` (Event/schema/API scans) | `tests/test_pwa_gates.py` — forbids `MediaRecorder`, `AudioWorklet`, `decodeAudioData`; only sanctioned mic use is `getUserMedia({ audio: true })` feeding an in-memory `AnalyserNode` |
+| No network egress    | `tests/test_no_egress.py` (network-import scan) | `tests/test_pwa_gates.py` — forbids `XMLHttpRequest`, `WebSocket`, `sendBeacon`, `EventSource`, and `fetch(` except the service worker's same-origin cache passthrough; plus a strict CSP meta in `pwa/index.html` |
+
+`tests/test_pwa_gates.py`:
+- `test_no_pwa_source_uses_recording_api` — no recording-capable Web Audio API appears.
+- `test_only_sanctioned_media_devices_use` / `test_sanctioned_media_call_is_present_and_singular`
+  — `mediaDevices` is used exactly once, as the level-only `getUserMedia({ audio: true })`.
+- `test_no_pwa_source_makes_network_egress` — no wire-opening API; `fetch(` allowlisted
+  only for `sw.js`'s `fetch(e.request)` cache fallback.
+- `test_index_html_references_no_external_resources` — every `src`/`href` is local.
+- `test_egress_scanner_flags_a_planted_violation` / `..._planted_fetch` — canary
+  self-tests that plant `new WebSocket(` / `fetch(` and assert the scanner catches them,
+  so the gate cannot silently rot.
+- `test_index_html_has_strict_csp` / `test_csp_connect_src_is_local_only` — assert the
+  `<meta http-equiv="Content-Security-Policy">` in `pwa/index.html` denies by default
+  (`default-src 'none'`) and keeps `connect-src` local-only (`'self'`/`'none'`).
+
+The CSP meta (`pwa/index.html`) is the runtime backstop: `default-src 'none'` with each
+source opened only as narrowly as the local app needs (`script-src 'self'`,
+`style-src 'self' 'unsafe-inline'`, `img-src 'self'`, `manifest-src 'self'`,
+`connect-src 'self'`, `worker-src 'self'`). Even if a scan were bypassed, the browser
+blocks any cross-origin request. CI also runs pa11y (axe) against `pwa/index.html`,
+matching the report's accessibility gate.
