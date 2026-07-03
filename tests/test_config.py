@@ -27,6 +27,12 @@ def test_load_from_json(tmp_path):
     assert c.quiet_hours.label() == "21:00–07:00"  # noqa: RUF001 - intentional en dash
 
 
+def test_loads_opt_in_ipc_socket(tmp_path):
+    path = tmp_path / "cfg.json"
+    path.write_text(json.dumps({"ipc_socket": "/run/olive/ipc.sock"}))
+    assert Config.load(path).ipc_socket == "/run/olive/ipc.sock"
+
+
 def test_missing_file_falls_back_to_defaults(tmp_path):
     c = Config.load(tmp_path / "nope.json")
     assert c.threshold_dbfs == -35.0

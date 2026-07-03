@@ -187,7 +187,11 @@ gate — templates can drift into unauthorized-practice territory); depends on E
 **Excellence bar:** the packet is coherent when any single file is separated from it
 (every artifact self-carries the cover text — R1's rule, enforced by test).
 
-### EXP-11 · Local automation hooks (Home Assistant et al., AF_UNIX only)
+### EXP-11 · Local automation hooks (Home Assistant et al., AF_UNIX only) — ✅ DONE (2026-07-12)
+**Status:** Implemented as an opt-in, one-way `AF_UNIX` datagram emitter for heartbeat
+and event metadata. Sends are nonblocking and best-effort, so missing, permission-
+denied, oversized, or backpressured peers cannot stop capture. Static and runtime
+canaries keep the socket carve-out confined to `AF_UNIX`; INET families remain banned.
 **Pitch:** An opt-in local event/heartbeat feed over a Unix domain socket or watched
 file, so home-automation setups can, e.g., log "HVAC was running" alongside noise
 events.

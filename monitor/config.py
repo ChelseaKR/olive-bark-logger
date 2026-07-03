@@ -306,6 +306,7 @@ class Config:
     # Static local status page (EXP-05). "" = derive from health_path (status.html next
     # to the heartbeat); disabled entirely only when health_path is also unset.
     status_path: str = ""
+    ipc_socket: str = ""  # AF_UNIX path for the opt-in local automation feed ("" = disabled)
     tagging: bool = False  # compute a coarse bark-like/ambient hint per event (no audio)
     # Clock-integrity guard: flag a wall-vs-monotonic divergence larger than this many
     # seconds as a clock jump (important on RTC-less Pis where NTP sync lurches the clock).

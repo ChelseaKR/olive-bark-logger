@@ -67,6 +67,38 @@ is atomically rewritten, so you never catch it half-written, and it auto-refresh
 60s if left open in a browser. It inherits the report's accessibility (keyboard-complete,
 scoped table headers, reduced-motion) and the same no-audio guarantee.
 
+## Local automation hooks (opt-in, emit-only)
+For home-automation *confounder context* — e.g. correlating a doorbell, robot vacuum, or
+smart speaker with a logged spike — the monitor can emit its heartbeat and each event to a
+**local** [`AF_UNIX`](https://en.wikipedia.org/wiki/Unix_domain_socket) datagram socket.
+It is **off by default**, **one-way**, and **emit-only**: nothing is ever read back and no
+network socket is opened, so the no-egress guarantee is unchanged (there is a merge-blocking
+test that permits `socket` only in `monitor/ipc.py`, and only for `AF_UNIX`). Enable it with
+`--ipc-socket /run/olive/ipc.sock` (or `"ipc_socket"` in the JSON config; `""` = disabled).
+Sending is nonblocking and best-effort: if the listener is missing, stalled, or unable to
+accept a datagram, that update is dropped instead of delaying sound capture.
+
+A Home Assistant listener (same host) can pick up the JSON datagrams via a shell/command_line
+sensor that reads the socket, e.g. with `socat`:
+
+```yaml
+# configuration.yaml — reads one JSON line per datagram from the local socket.
+command_line:
+  - sensor:
+      name: Olive Bark Event
+      command: "socat -u UNIX-RECV:/run/olive/ipc.sock,fork - "
+      value_template: "{{ value_json.peak_level | default('idle') }}"
+      json_attributes:
+        - type
+        - start
+        - duration
+        - peak_level
+        - session_id
+```
+
+Payloads are `{"type": "event", "session_id", "start", "duration", "peak_level"}` per event
+and the heartbeat health dict on each beat. Levels and metadata only — never audio.
+
 ## Deployment & variants
 - **Raspberry Pi service:** `scripts/setup-pi.sh` installs PortAudio + a venv and the
   `deploy/olive-monitor.service` systemd unit (auto-restart, network-isolated, sandboxed).

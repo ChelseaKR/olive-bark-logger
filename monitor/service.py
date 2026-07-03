@@ -27,6 +27,7 @@ from monitor.config import Config
 from monitor.detector import Detector, Event
 from monitor.features import classify, zero_crossing_rate
 from monitor.health import CaptureStats, write_health
+from monitor.ipc import LocalIpcEmitter
 from monitor.level import dbfs
 
 
@@ -207,15 +208,55 @@ def _bootstrap_session(store: EventStore, config: Config, started_at: float) -> 
     )
 
 
-def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
+def _load_monitor_config(argv: list[str] | None) -> Config:
     parser = argparse.ArgumentParser(
         prog="olive-monitor",
         description="On-device noise monitor: logs sound-level events, never audio.",
     )
     parser.add_argument("--config", type=Path, default=None, help="path to JSON config")
+    parser.add_argument(
+        "--ipc-socket",
+        default=None,
+        help="AF_UNIX path for the opt-in emit-only local automation feed "
+        '(overrides config; "" = disabled)',
+    )
     args = parser.parse_args(argv)
-
     config = Config.load(args.config)
+    return (
+        dataclasses.replace(config, ipc_socket=args.ipc_socket)
+        if args.ipc_socket is not None
+        else config
+    )
+
+
+def _publish_heartbeat(
+    config: Config,
+    store: EventStore,
+    emitter: LocalIpcEmitter | None,
+    payload: dict[str, object],
+) -> None:
+    if config.health_path:
+        write_health(config.health_path, payload)
+    _write_status_page(config, store, payload)
+    if emitter is not None:
+        emitter.emit(payload)
+
+
+def _emit_event(emitter: LocalIpcEmitter | None, event: Event, session_id: int) -> None:
+    if emitter is not None:
+        emitter.emit(
+            {
+                "type": "event",
+                "session_id": session_id,
+                "start": event.start,
+                "duration": event.duration,
+                "peak_level": event.peak_level,
+            }
+        )
+
+
+def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
+    config = _load_monitor_config(argv)
     started_at = now or time.time()
     store = EventStore(config.db_path)
     session_id = _bootstrap_session(store, config, started_at)
@@ -223,6 +264,9 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
     # Clock-integrity guard: watch for wall-vs-monotonic divergence (RTC-less Pi hazard).
     guard = ClockGuard(tolerance_s=config.clock_jump_tolerance_s)
     anomaly_count = 0
+    # Opt-in, emit-only local automation feed (Home Assistant et al). Disabled unless
+    # a socket path is configured; the emitter never opens a network socket.
+    emitter = LocalIpcEmitter(config.ipc_socket) if config.ipc_socket else None
 
     from monitor.capture_live import live_source  # lazy: optional audio dependency
 
@@ -243,9 +287,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             clock_anomalies=anomaly_count,
             last_level=latest_level,
         )
-        if config.health_path:
-            write_health(config.health_path, payload)
-        _write_status_page(config, store, payload)
+        _publish_heartbeat(config, store, emitter, payload)
 
     def check_clock() -> None:
         """Sample both clocks; persist and announce any divergence beyond tolerance."""
@@ -310,6 +352,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
                 f"event @ {event.start:.0f}  dur {event.duration:.1f}s  "
                 f"peak {event.peak_level:.1f} dBFS"
             )
+            _emit_event(emitter, event, session_id)
             heartbeat()
     except KeyboardInterrupt:  # pragma: no cover - interactive
         print("\nStopped.")
@@ -321,6 +364,8 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             ended_at=now or time.time(),
         )
         heartbeat()
+        if emitter is not None:
+            emitter.close()
         store.close()
     return 0
 
