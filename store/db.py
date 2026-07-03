@@ -3,8 +3,11 @@
 The schema is the privacy guarantee made concrete: there is no column anywhere that
 could hold audio. An event row is six numbers and an optional short tag string; a
 session row is metadata about *where and how* a run measured (for data lineage and the
-bias audit) plus frame-coverage counters. The calibration row records the offset and a
-human note. That is the entire data model.
+bias audit) plus frame-coverage counters. Calibration is an append-only history of
+(effective_from, offset, note, reference_instrument) rows — the offset in force at any
+instant is the latest row whose effective_from is at or before it, and offsets are
+applied at *render* time so persisted event levels stay raw. That is the entire data
+model.
 
 Durability: WAL journaling with synchronous=NORMAL survives process and OS crashes
 without corruption. Schema changes are applied as ordered migrations keyed on
@@ -14,13 +17,14 @@ PRAGMA user_version, so an existing database upgrades in place.
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from monitor.detector import Event
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Ordered migrations. Each entry upgrades the database from version i to i+1. A fresh
 # database (user_version 0) runs them all; an existing one runs only the new ones.
@@ -61,7 +65,34 @@ _MIGRATIONS: list[str] = [
     );
     ALTER TABLE events ADD COLUMN session_id INTEGER;
     """,
+    # 2 -> 3: calibration becomes an append-only history keyed by effective_from.
+    # Offsets are no longer baked into stored levels; they are applied at render time.
+    # The single legacy `calibration` row (if any) is preserved as the first history
+    # epoch with effective_from=0 so every previously stored event keeps its offset.
+    """
+    CREATE TABLE calibration_history (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        effective_from       REAL NOT NULL,   -- unix seconds; offset applies from here on
+        offset               REAL NOT NULL,   -- dB added to raw dBFS to approximate SPL
+        note                 TEXT,
+        reference_instrument TEXT             -- provenance of the reference meter, if any
+    );
+    CREATE INDEX idx_calibration_effective ON calibration_history(effective_from);
+    INSERT INTO calibration_history (effective_from, offset, note)
+        SELECT 0, offset, note FROM calibration WHERE id = 1;
+    """,
 ]
+
+
+@dataclass(frozen=True)
+class CalibrationEpoch:
+    """One entry in the append-only calibration history. Metadata only — never audio."""
+
+    id: int
+    effective_from: float  # unix seconds; this offset is in force from here forward
+    offset: float  # dB added to raw dBFS to approximate SPL
+    note: str | None
+    reference_instrument: str | None
 
 
 @dataclass(frozen=True)
@@ -161,17 +192,73 @@ class EventStore:
         return cur.rowcount
 
     # -- calibration ---------------------------------------------------------
-    def set_calibration(self, offset: float, note: str) -> None:
-        self._conn.execute(
-            "INSERT INTO calibration (id, offset, note) VALUES (1, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET offset = excluded.offset, note = excluded.note",
-            (offset, note),
+    def add_calibration(
+        self,
+        offset: float,
+        note: str,
+        *,
+        reference_instrument: str | None = None,
+        effective_from: float | None = None,
+    ) -> int:
+        """Append a new calibration epoch. Never updates an existing row.
+
+        Calibration is an append-only ledger so the meaning of a historical event never
+        changes: `olive-calibrate` is the only writer. `effective_from` defaults to now,
+        so the new offset applies to events measured from this point forward; passing an
+        explicit value (e.g. 0 for a bootstrap epoch) is supported for tests and imports.
+        """
+        when = time.time() if effective_from is None else effective_from
+        cur = self._conn.execute(
+            "INSERT INTO calibration_history (effective_from, offset, note, "
+            "reference_instrument) VALUES (?, ?, ?, ?)",
+            (when, offset, note, reference_instrument),
         )
         self._conn.commit()
+        return int(cur.lastrowid or 0)
 
     def get_calibration(self) -> tuple[float, str] | None:
-        row = self._conn.execute("SELECT offset, note FROM calibration WHERE id = 1").fetchone()
+        """The latest calibration (offset, note) for backward compatibility, or None."""
+        row = self._conn.execute(
+            "SELECT offset, note FROM calibration_history "
+            "ORDER BY effective_from DESC, id DESC LIMIT 1"
+        ).fetchone()
         return (row["offset"], row["note"]) if row else None
+
+    def calibration_history(self) -> list[CalibrationEpoch]:
+        """All calibration epochs, oldest first (by effective_from, then insertion)."""
+        rows = self._conn.execute(
+            "SELECT id, effective_from, offset, note, reference_instrument "
+            "FROM calibration_history ORDER BY effective_from ASC, id ASC"
+        )
+        return [
+            CalibrationEpoch(
+                id=r["id"],
+                effective_from=r["effective_from"],
+                offset=r["offset"],
+                note=r["note"],
+                reference_instrument=r["reference_instrument"],
+            )
+            for r in rows
+        ]
+
+    def calibration_at(self, ts: float) -> float | None:
+        """The offset in force at time `ts`: the latest epoch effective at or before it.
+
+        Returns None only when no calibration has ever been recorded (empty history), so
+        a caller can fall back to a bootstrap default. A timestamp earlier than the first
+        epoch resolves to that first epoch's offset (epoch 0 covers all historical rows).
+        """
+        row = self._conn.execute(
+            "SELECT offset FROM calibration_history WHERE effective_from <= ? "
+            "ORDER BY effective_from DESC, id DESC LIMIT 1",
+            (ts,),
+        ).fetchone()
+        if row is not None:
+            return float(row["offset"])
+        earliest = self._conn.execute(
+            "SELECT offset FROM calibration_history ORDER BY effective_from ASC, id ASC LIMIT 1"
+        ).fetchone()
+        return float(earliest["offset"]) if earliest is not None else None
 
     # -- sessions (lineage) --------------------------------------------------
     def start_session(

@@ -77,12 +77,41 @@ def test_monitor_main_prunes_per_retention(tmp_path, monkeypatch, capsys):
     assert starts  # newly detected events (added after prune) survive
 
 
+def test_monitor_main_does_not_clobber_stored_calibration(tmp_path, monkeypatch, capsys):
+    """Regression for FIX-01: `olive-calibrate` then `olive-monitor` (default config)
+    must not revert the device to uncalibrated. The monitor reads calibration; it never
+    writes it, and the session records the *stored* offset, not the config default."""
+    db = tmp_path / "olive.db"
+    cfg = tmp_path / "cfg.json"
+    # Default config -> calibration_offset 0.0; the stored calibration must win.
+    cfg.write_text(json.dumps({"db_path": str(db)}))
+
+    with EventStore(db) as store:
+        store.add_calibration(6.5, "bench cal", reference_instrument="B&K 2250", effective_from=0.0)
+
+    def fake_live_source(sample_rate=16000, frame_size=1600, stats=None):
+        yield from synthetic_session(6.0, [LoudRegion(1.0, 4.0, 0.4)], frame_size=frame_size)
+
+    monkeypatch.setattr(capture_live, "live_source", fake_live_source)
+    assert monitor_main(["--config", str(cfg)], now=1000.0) == 0
+    capsys.readouterr()
+
+    with EventStore(db) as store:
+        # Calibration is untouched: still exactly one epoch with the original offset.
+        assert len(store.calibration_history()) == 1
+        assert store.get_calibration() == (6.5, "bench cal")
+        session = store.latest_session()
+    assert session is not None
+    assert session.calibration_offset == 6.5  # sourced from the store, not the config
+    assert session.calibration_note == "bench cal"
+
+
 def test_report_main_writes_file(tmp_path, capsys):
     db = tmp_path / "olive.db"
     out = tmp_path / "r.html"
     config = Config(db_path=str(db))
     with EventStore(db) as store:
-        store.set_calibration(0.0, config.calibration_note)
+        store.add_calibration(0.0, config.calibration_note, effective_from=0.0)
         store.add_event(Event(1_767_312_000.0, 1_767_312_004.0, 4.0, -8.0, -12.0))
     rc = report_main(["--db", str(db), "--out", str(out), "--generated-at", "2026-01-01 UTC"])
     assert rc == 0

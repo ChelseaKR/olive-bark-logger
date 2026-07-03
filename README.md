@@ -35,12 +35,20 @@ make report                    # render report.html from a demo session (no hard
 The core (level math, detector, store, report) has **zero runtime dependencies** and runs
 on any Python 3.9+ with no installs; only live microphone capture needs the `live` extra.
 
+> **Calibration is a single source of truth.** Events are stored as **raw** dBFS and the
+> calibration offset is applied at report time from an append-only history owned by
+> `olive-calibrate`. The `calibration_offset` / `calibration_note` fields in
+> `config.sample.json` are **bootstrap-only (deprecated for steady-state use)**: they seed
+> a database that has never been calibrated and are ignored once `olive-calibrate` has run.
+> The monitor never writes calibration, so `olive-calibrate` followed by `olive-monitor`
+> with a default config no longer reverts the device to uncalibrated.
+
 ## CLIs
 | Command | What it does |
 |---------|--------------|
 | `olive-monitor` | Run the monitor: capture → level → detect → SQLite. Creates a capture *session* (lineage), writes a heartbeat file, reconnects on device failure, prunes per `retention_days`. |
 | `olive-tune` | Show the live level so you can pick a threshold by ear; prints a suggestion. |
-| `olive-calibrate` | Measure mean level against a reference SPL reading and store the offset. |
+| `olive-calibrate` | Measure mean level against a reference SPL reading and append a calibration offset (with optional `--reference-instrument` provenance). This is the **only** writer of calibration; it is an append-only history applied at report time, so recalibrating never rewrites earlier events. |
 | `olive-report` | Render the accessible HTML report (distributions + day×hour calendar heatmap + quiet-hours summary). Optional `--csv` event export, and `--violations-csv` / `--violations-html` for an honest quiet-hours report suitable for a neighbor/landlord/HOA submission. |
 
 ## Deployment & variants

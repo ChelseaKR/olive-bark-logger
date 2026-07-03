@@ -64,3 +64,39 @@ def test_main_calibrate_stores_offset(tmp_path, capsys):
     # measured ~ -10.5 dBFS for amplitude 0.3, so offset ~ 70 - (-10.5) = ~80.5
     assert 75.0 < offset < 86.0
     assert "70.0 dB" in note
+
+
+def test_main_calibrate_appends_and_records_reference_instrument(tmp_path, capsys):
+    db = tmp_path / "olive.db"
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(f'{{"db_path": "{db}"}}')
+
+    def factory(config):
+        return synthetic_session(3.0, [LoudRegion(0.0, 3.0, 0.3)], frame_size=config.frame_size)
+
+    # Seed an existing epoch so we can prove calibrate appends (never updates).
+    with EventStore(db) as store:
+        store.add_calibration(1.0, "old", effective_from=0.0)
+
+    rc = main_calibrate(
+        [
+            "--config",
+            str(cfg),
+            "--reference-db",
+            "70",
+            "--seconds",
+            "2",
+            "--reference-instrument",
+            "B&K 2250",
+        ],
+        source_factory=factory,
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    with EventStore(db) as store:
+        history = store.calibration_history()
+    assert len(history) == 2  # appended, not overwritten
+    latest = history[-1]
+    assert latest.reference_instrument == "B&K 2250"
+    assert "B&K 2250" in (latest.note or "")

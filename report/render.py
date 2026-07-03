@@ -9,18 +9,22 @@ written here unconditionally, and a merge-blocking test asserts their presence.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 from datetime import datetime
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from monitor.config import Config
+from monitor.detector import Event
 
 from report.aggregate import Summary, summarize
 from report.charts import bar_chart, heatmap
 
 if TYPE_CHECKING:
-    from store import Session
+    from datetime import tzinfo
+
+    from store import CalibrationEpoch, Session
 
 # Phrases the report-content gate checks for. Keeping them as constants makes the
 # contract between the renderer and the test explicit.
@@ -94,6 +98,76 @@ def _conditions_html(session: Session | None) -> str:
     )
 
 
+def _epoch_index_at(history: list[CalibrationEpoch], ts: float) -> int | None:
+    """Index into `history` (ascending by effective_from) of the epoch in force at `ts`.
+
+    A timestamp before the first epoch resolves to that first epoch (epoch 0 covers all
+    historical rows); None only when the history is empty.
+    """
+    if not history:
+        return None
+    chosen = 0
+    for i, epoch in enumerate(history):
+        if epoch.effective_from <= ts:
+            chosen = i
+        else:
+            break
+    return chosen
+
+
+def _offset_at(history: list[CalibrationEpoch], ts: float) -> float:
+    """The calibration offset in force at `ts`, or 0.0 when no calibration exists."""
+    idx = _epoch_index_at(history, ts)
+    return 0.0 if idx is None else history[idx].offset
+
+
+def _epochs_covering(
+    history: list[CalibrationEpoch], events: list[Event]
+) -> list[CalibrationEpoch]:
+    """The subset of epochs that are in force for at least one of `events`, in order."""
+    if not history or not events:
+        return []
+    used = {idx for ev in events if (idx := _epoch_index_at(history, ev.start)) is not None}
+    return [history[i] for i in sorted(used)]
+
+
+def _apply_offset(event: Event, offset: float) -> Event:
+    """Return the event with its stored raw levels shifted by a calibration offset."""
+    if offset == 0.0:
+        return event
+    return dataclasses.replace(
+        event, peak_level=event.peak_level + offset, avg_level=event.avg_level + offset
+    )
+
+
+def _fmt_effective_from(effective_from: float, tz: tzinfo) -> str:
+    """Human label for an epoch boundary; epoch 0 is the start of the record."""
+    if effective_from <= 0.0:
+        return "start of record"
+    return datetime.fromtimestamp(effective_from, tz=tz).strftime("%Y-%m-%d %H:%M %Z")
+
+
+def _calibration_epochs_html(epochs: list[CalibrationEpoch], *, tz: tzinfo) -> str:
+    """A per-epoch offsets table plus a disclosure line, for a multi-epoch window."""
+    rows = "".join(
+        f'<tr><th scope="row">{escape(_fmt_effective_from(e.effective_from, tz))}</th>'
+        f"<td>{e.offset:+.1f} dB</td>"
+        f"<td>{escape(e.reference_instrument) if e.reference_instrument else '—'}</td>"
+        f"<td>{escape(e.note) if e.note else '—'}</td></tr>"
+        for e in epochs
+    )
+    return (
+        "\n<p>This reporting window spans <strong>more than one calibration epoch</strong>. "
+        "Each event's level is adjusted by the offset that was in force when it was "
+        "measured, so recalibrating never rewrote earlier numbers. The offsets applied are:"
+        "</p>\n"
+        "<table><caption>Calibration offsets by epoch</caption>"
+        '<thead><tr><th scope="col">Effective from</th><th scope="col">Offset</th>'
+        '<th scope="col">Reference instrument</th><th scope="col">Note</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
 def build_report(
     summary: Summary,
     *,
@@ -101,12 +175,20 @@ def build_report(
     generated_at: str,
     calibration_offset: float | None = None,
     calibration_note: str | None = None,
+    calibration_epochs: list[CalibrationEpoch] | None = None,
     session: Session | None = None,
     title: str = "Olive's Bark Logger — Noise Report",
 ) -> str:
-    """Render the full report as a single self-contained HTML string."""
+    """Render the full report as a single self-contained HTML string.
+
+    When `calibration_epochs` holds more than one epoch, a per-epoch offsets table and a
+    recalibration disclosure are rendered; otherwise the single-offset path is used and
+    `calibration_offset`/`calibration_note` describe the one offset in force.
+    """
     offset = config.calibration_offset if calibration_offset is None else calibration_offset
     note = config.calibration_note if calibration_note is None else calibration_note
+    epochs = calibration_epochs or []
+    multi_epoch = len(epochs) > 1
     calibrated = offset != 0.0
     conditions_html = _conditions_html(session)
 
@@ -162,12 +244,21 @@ def build_report(
     }
     stats_html = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in stats.items())
 
-    calib_line = (
-        f"A calibration offset of {offset:+.1f} dB is applied "
-        f"({escape(note)}). Readings approximate SPL but remain estimates."
-        if calibrated
-        else f"No calibration offset is applied ({escape(note)})."
-    )
+    if multi_epoch:
+        calib_line = (
+            "Levels are adjusted for calibration at render time from an append-only "
+            "history; because this window spans more than one calibration epoch, each "
+            "event uses the offset in force when it was measured (see the table below)."
+        )
+        calib_epochs_section = _calibration_epochs_html(epochs, tz=config.tzinfo())
+    else:
+        calib_line = (
+            f"A calibration offset of {offset:+.1f} dB is applied "
+            f"({escape(note)}). Readings approximate SPL but remain estimates."
+            if calibrated
+            else f"No calibration offset is applied ({escape(note)})."
+        )
+        calib_epochs_section = ""
 
     tags_section = ""
     if summary.by_tag:
@@ -228,7 +319,7 @@ A noise event is recorded when the level stays at or above
 <strong>{config.debounce_s:.1f} s</strong> debounce do not split one event into many.
 For each event we store start time, duration, and peak and average level — six numbers,
 no audio. {calib_line}</p>
-
+{calib_epochs_section}
 <h2>{LIMITATIONS_HEADING}</h2>
 <div class="note">
 <p>{escape(RELATIVE_DBFS_NOTE)}</p>
@@ -253,15 +344,38 @@ def generate_report_from_db(
     from store import EventStore
 
     with EventStore(db_path) as store:
-        events = store.events()
-        calib = store.get_calibration()
+        events = store.events()  # raw dBFS levels; calibration is applied here, at render
+        history = store.calibration_history()
         session = store.latest_session()
-    summary = summarize(
-        events,
-        quiet_hours=config.quiet_hours,
-        tz=config.tzinfo(),
-    )
-    offset, note = calib if calib else (config.calibration_offset, config.calibration_note)
+
+    # Which epochs actually cover the events in this window? Only those drive the choice
+    # between the single-offset path and the multi-epoch disclosure.
+    epochs_in_window = _epochs_covering(history, events)
+
+    if len(epochs_in_window) > 1:
+        adjusted = [_apply_offset(ev, _offset_at(history, ev.start)) for ev in events]
+        summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=config.tzinfo())
+        latest = epochs_in_window[-1]
+        return build_report(
+            summary,
+            config=config,
+            generated_at=generated_at,
+            calibration_offset=latest.offset,
+            calibration_note=latest.note or config.calibration_note,
+            calibration_epochs=epochs_in_window,
+            session=session,
+        )
+
+    # Single-offset path: the whole window is under one calibration (or none -> config).
+    if epochs_in_window:
+        epoch = epochs_in_window[0]
+        offset, note = epoch.offset, epoch.note or config.calibration_note
+    elif history:
+        offset, note = history[-1].offset, history[-1].note or config.calibration_note
+    else:
+        offset, note = config.calibration_offset, config.calibration_note
+    adjusted = [_apply_offset(ev, offset) for ev in events]
+    summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=config.tzinfo())
     return build_report(
         summary,
         config=config,

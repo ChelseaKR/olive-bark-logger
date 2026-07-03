@@ -74,6 +74,12 @@ def main_calibrate(
     parser.add_argument(
         "--reference-db", type=float, required=True, help="SPL (dB) shown on a reference meter now"
     )
+    parser.add_argument(
+        "--reference-instrument",
+        type=str,
+        default=None,
+        help="make/model of the reference SPL meter, recorded for provenance",
+    )
     parser.add_argument("--seconds", type=float, default=10.0, help="how long to measure")
     args = parser.parse_args(argv)
 
@@ -82,12 +88,17 @@ def main_calibrate(
     source = source_factory(config) if source_factory else _live(config)
     measured = statistics.fmean(measure_levels(source, max_frames=frames))
     offset = compute_offset(measured, args.reference_db)
+    instrument = (
+        f" Reference instrument: {args.reference_instrument}." if args.reference_instrument else ""
+    )
     note = (
         f"Calibrated against a {args.reference_db:.1f} dB reference "
-        f"(measured {measured:.1f} dBFS). Readings approximate SPL but remain estimates."
+        f"(measured {measured:.1f} dBFS).{instrument} "
+        f"Readings approximate SPL but remain estimates."
     )
+    # olive-calibrate is the only writer of calibration: append a new epoch, never update.
     with EventStore(config.db_path) as store:
-        store.set_calibration(offset, note)
+        store.add_calibration(offset, note, reference_instrument=args.reference_instrument)
     print(
         f"Measured {measured:.1f} dBFS at {args.reference_db:.1f} dB reference -> "
         f"offset {offset:+.1f} dB. Stored to {config.db_path}."
