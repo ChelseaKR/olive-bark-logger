@@ -211,10 +211,25 @@ class EventStore:
         frames_dropped: int,
         ended_at: float | None = None,
     ) -> None:
-        self._conn.execute(
-            "UPDATE sessions SET frames_seen = ?, frames_dropped = ?, ended_at = ? WHERE id = ?",
-            (frames_seen, frames_dropped, ended_at, session_id),
-        )
+        """Persist the running frame counters for a session.
+
+        ``ended_at`` is optional so periodic checkpoints can flush counters mid-run
+        without marking the session ended: when it is None the existing ``ended_at``
+        is left untouched (it stays NULL until the finally block sets the real end
+        time). This is what makes crash-safe counters possible — a power cut during a
+        silent night still leaves the last-checkpointed counts on disk.
+        """
+        if ended_at is None:
+            self._conn.execute(
+                "UPDATE sessions SET frames_seen = ?, frames_dropped = ? WHERE id = ?",
+                (frames_seen, frames_dropped, session_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE sessions SET frames_seen = ?, frames_dropped = ?, ended_at = ? "
+                "WHERE id = ?",
+                (frames_seen, frames_dropped, ended_at, session_id),
+            )
         self._conn.commit()
 
     def latest_session(self) -> Session | None:

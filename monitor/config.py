@@ -72,6 +72,11 @@ class Config:
     db_path: str = "olive.db"
     retention_days: int = 0  # 0 = keep everything; >0 prunes events older than N days
     health_path: str = ""  # where the monitor writes its heartbeat JSON ("" = disabled)
+    # How often (seconds) to refresh the heartbeat and persist session frame counters on
+    # a wall-clock cadence, piggybacking on frame arrival. Without this, a silent night or
+    # a power cut would lose ops/coverage data because counters were only written on events
+    # and in the finally block. Kept small enough that a watchdog sees a fresh heartbeat.
+    checkpoint_interval_s: float = 30.0
     tagging: bool = False  # compute a coarse bark-like/ambient hint per event (no audio)
 
     # Device/site metadata for data lineage and the bias audit.
@@ -90,6 +95,8 @@ class Config:
             raise ConfigError("threshold_dbfs must be within [-200, 0] dBFS")
         if self.retention_days < 0:
             raise ConfigError("retention_days must be non-negative")
+        if self.checkpoint_interval_s <= 0:
+            raise ConfigError("checkpoint_interval_s must be positive")
 
     def tzinfo(self) -> tzinfo:
         """Resolve the configured zone, falling back to UTC if tzdata is unavailable."""

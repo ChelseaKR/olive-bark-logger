@@ -19,7 +19,10 @@ WorkingDirectory=/var/lib/olive
 ExecStart=/opt/olive/.venv/bin/olive-monitor --config /etc/olive/config.json
 Restart=always
 RestartSec=5
-# A stale heartbeat file means the service wedged; pair with a watchdog/cron alert.
+# The heartbeat file (config health_path) is refreshed on a time-driven cadence
+# (config checkpoint_interval_s, default 30 s), not just when an event fires, so a
+# silent night still produces a fresh updated_at. An external watchdog/cron can alert
+# when its updated_at goes stale, meaning the service wedged or the host lost power.
 
 # Hardening: this process needs the microphone and its own data dir, nothing else.
 NoNewPrivileges=true
