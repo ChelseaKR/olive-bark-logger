@@ -303,6 +303,9 @@ class Config:
     # a power cut would lose ops/coverage data because counters were only written on events
     # and in the finally block. Kept small enough that a watchdog sees a fresh heartbeat.
     checkpoint_interval_s: float = 30.0
+    # Static local status page (EXP-05). "" = derive from health_path (status.html next
+    # to the heartbeat); disabled entirely only when health_path is also unset.
+    status_path: str = ""
     tagging: bool = False  # compute a coarse bark-like/ambient hint per event (no audio)
     # Clock-integrity guard: flag a wall-vs-monotonic divergence larger than this many
     # seconds as a clock jump (important on RTC-less Pis where NTP sync lurches the clock).
@@ -328,6 +331,19 @@ class Config:
             raise ConfigError("clock_jump_tolerance_s must be positive")
         if self.checkpoint_interval_s <= 0:
             raise ConfigError("checkpoint_interval_s must be positive")
+
+    def status_html_path(self) -> str:
+        """Effective path for the static status page ("" = disabled).
+
+        An explicit ``status_path`` wins; otherwise, when the heartbeat is enabled, the
+        status page is written as ``status.html`` alongside it. With no heartbeat and no
+        explicit path, the status page is disabled.
+        """
+        if self.status_path:
+            return self.status_path
+        if self.health_path:
+            return str(Path(self.health_path).with_name("status.html"))
+        return ""
 
     def tzinfo(self) -> tzinfo:
         """Resolve the configured zone, falling back to UTC if tzdata is unavailable."""

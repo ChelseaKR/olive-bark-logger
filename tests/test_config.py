@@ -96,3 +96,13 @@ def test_to_dict_includes_new_fields():
     d = Config(tz="UTC", retention_days=7).to_dict()
     assert d["tz"] == "UTC"
     assert d["retention_days"] == 7
+
+
+def test_status_path_derives_from_health_path_or_uses_explicit_path(tmp_path):
+    health = tmp_path / "health.json"
+    assert Config(health_path=str(health)).status_html_path() == str(tmp_path / "status.html")
+    explicit = tmp_path / "ops.html"
+    assert Config(health_path=str(health), status_path=str(explicit)).status_html_path() == str(
+        explicit
+    )
+    assert Config().status_html_path() == ""

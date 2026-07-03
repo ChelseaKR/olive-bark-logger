@@ -78,7 +78,11 @@ clock anomalies as a general "integrity notices" block.
 (real-data gate for the default tolerance). **Excellence bar:** zero silent behavior
 changes; a documented decision log of why adaptive *detection* was rejected.
 
-### EXP-05 · Local ops console (gap-aware "last night" view)
+### EXP-05 · Local ops console (gap-aware "last night" view) — ✅ DONE (2026-07-12)
+**Status:** Implemented as a static, atomically replaced `status.html` snapshot. It
+shows heartbeat freshness, the retained latest level, frame coverage, recorded gaps,
+and recent/quiet-hours summaries without a server or network surface. It can derive its
+path from `health_path` or run independently through an explicit `status_path`.
 **Pitch:** A read-only, on-device status page — live level, heartbeat freshness,
 coverage, gaps, last night's quiet-hours summary.
 **Impact:** ROADMAP §3 lists "a small local dashboard" as a *Should* that was never
