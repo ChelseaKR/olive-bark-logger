@@ -6,7 +6,7 @@
   "debounce_s": 1.0,
   "calibration_offset": 0.0,
   "calibration_note": "Uncalibrated: levels are relative dBFS, not absolute SPL.",
-  "quiet_hours": { "start_hour": 22, "end_hour": 8 },
+  "quiet_hours": { "windows": [{ "days": [0, 1, 2, 3, 4, 5, 6], "start": "22:00", "end": "08:00" }] },
   "tz": "America/Los_Angeles",
   "db_path": "olive.db",
   "retention_days": 0,

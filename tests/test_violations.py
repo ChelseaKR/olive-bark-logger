@@ -6,7 +6,7 @@ import csv
 import json
 from datetime import datetime, timezone
 
-from monitor.config import Config, QuietHours
+from monitor.config import Config, QuietHours, QuietSchedule
 from monitor.detector import Event
 from report.render import main as report_main
 from report.violations import (
@@ -144,6 +144,12 @@ def test_report_cli_exports_violations(tmp_path, capsys):
     assert vhtml.exists() and "Quiet-Hours Report" in vhtml.read_text()
     out = capsys.readouterr().out
     assert "v.csv" in out and "v.html" in out
+    # The deprecated {start_hour, end_hour} form is auto-upgraded to a QuietSchedule
+    # equivalent to the legacy daily 22:00 -> 08:00 window.
+    upgraded = Config.load(config_path).quiet_hours
+    assert isinstance(upgraded, QuietSchedule)
+    assert upgraded == QuietSchedule.from_legacy(22, 8)
+    assert upgraded.label() == "22:00–08:00"
 
 
 def test_window_label_wraps_24():

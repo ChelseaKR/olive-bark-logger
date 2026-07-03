@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
 
-from monitor.config import QuietHours
+from monitor.config import QuietSchedule
 from monitor.detector import Event
 
 
@@ -36,7 +36,7 @@ class Summary:
 def summarize(
     events: list[Event],
     *,
-    quiet_hours: QuietHours,
+    quiet_hours: QuietSchedule,
     tz: tzinfo = timezone.utc,
 ) -> Summary:
     """Reduce events to distributions and quiet-hours compliance figures."""
