@@ -1,7 +1,8 @@
 """SQLite persistence for events, calibration, and capture sessions.
 
 The schema is the privacy guarantee made concrete: there is no column anywhere that
-could hold audio. An event row is six numbers and an optional short tag string; a
+could hold audio. An event row is a handful of numbers (levels, durations, and bounded
+envelope-shape descriptors) plus an optional short tag string; a
 session row is metadata about *where and how* a run measured (for data lineage and the
 bias audit) plus frame-coverage counters. Calibration is an append-only history of
 (effective_from, offset, note, reference_instrument) rows — the offset in force at any
@@ -28,7 +29,7 @@ from pathlib import Path
 
 from monitor.detector import Event
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Ordered migrations. Each entry upgrades the database from version i to i+1. A fresh
 # database (user_version 0) runs them all; an existing one runs only the new ones.
@@ -130,6 +131,12 @@ _MIGRATIONS: list[str] = [
         detected_at  REAL NOT NULL    -- wall time the divergence was noticed
     );
     CREATE INDEX idx_clock_anomalies_detected ON clock_anomalies(detected_at);
+    """,
+    # 6 -> 7: per-event envelope anatomy — bounded *shape* descriptors, never audio.
+    """
+    ALTER TABLE events ADD COLUMN rise_time_s REAL;    -- seconds start->first reading >= thr+6 dB; shape, not audio
+    ALTER TABLE events ADD COLUMN loud6_s REAL;        -- total seconds spent at/above thr+6 dB; shape, not audio
+    ALTER TABLE events ADD COLUMN longest_run_s REAL;  -- longest unbroken above-threshold run; shape, not audio
     """,
 ]
 
@@ -258,7 +265,8 @@ class EventStore:
     def add_event(self, event: Event, *, session_id: int | None = None) -> int:
         cur = self._conn.execute(
             "INSERT INTO events (start, end, duration, peak_level, avg_level, coarse_tag, "
-            "session_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "rise_time_s, loud6_s, longest_run_s, session_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 event.start,
                 event.end,
@@ -266,6 +274,9 @@ class EventStore:
                 event.peak_level,
                 event.avg_level,
                 event.coarse_tag,
+                event.rise_time_s,
+                event.loud6_s,
+                event.longest_run_s,
                 session_id,
             ),
         )
@@ -274,7 +285,10 @@ class EventStore:
 
     def events(self, *, since: float | None = None, until: float | None = None) -> list[Event]:
         """All events, optionally bounded by [since, until) on start time, ordered."""
-        sql = "SELECT start, end, duration, peak_level, avg_level, coarse_tag FROM events"
+        sql = (
+            "SELECT start, end, duration, peak_level, avg_level, coarse_tag, "
+            "rise_time_s, loud6_s, longest_run_s FROM events"
+        )
         clauses: list[str] = []
         params: list[float] = []
         if since is not None:
@@ -295,6 +309,9 @@ class EventStore:
                 peak_level=r["peak_level"],
                 avg_level=r["avg_level"],
                 coarse_tag=r["coarse_tag"],
+                rise_time_s=r["rise_time_s"],
+                loud6_s=r["loud6_s"],
+                longest_run_s=r["longest_run_s"],
             )
             for r in rows
         ]

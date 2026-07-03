@@ -90,3 +90,71 @@ def test_flush_closes_open_event_at_end_of_stream():
     events = _run(d, [(0.0, -10), (0.5, -10), (1.0, -10)])  # never goes quiet
     assert len(events) == 1
     assert events[0].end == 1.0
+
+
+# -- envelope anatomy (bounded per-event shape descriptors) -------------------------
+
+
+def test_anatomy_long_drone_is_one_unbroken_loud_run():
+    """A steady drone well above threshold: rise ~0, one run ~ duration, lots of loud6."""
+    d = Detector(threshold_dbfs=-30, min_duration_s=0.5, debounce_s=0.5)
+    # -10 dBFS >= threshold+6 (-24), sampled every 0.1 s across a full second.
+    readings = [(t / 10, -10.0) for t in range(0, 11)]  # 0.0..1.0 s loud
+    readings.append((2.0, -60.0))  # quiet beyond debounce -> close
+    events = _run(d, readings)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.rise_time_s == 0.0  # already at/above threshold+6 on the opening frame
+    assert abs(ev.loud6_s - 1.0) < 1e-9  # essentially the whole event is well above +6
+    assert abs(ev.longest_run_s - 1.0) < 1e-9  # one continuous run spanning the drone
+
+
+def test_anatomy_short_spikes_with_debounce_gaps_have_tiny_runs_and_loud6():
+    """Many isolated spikes bridged by debounce: each run is momentary; loud6 ~ 0."""
+    d = Detector(threshold_dbfs=-30, min_duration_s=0.1, debounce_s=2.0)
+    readings = [
+        (0.0, -10.0),  # spike (opens)
+        (0.5, -60.0),  # dip ends the run, debounce keeps event open
+        (1.0, -10.0),  # spike
+        (1.5, -60.0),
+        (2.0, -10.0),  # spike
+        (2.5, -60.0),
+        (3.0, -10.0),  # spike
+        (5.5, -60.0),  # quiet beyond debounce -> close
+    ]
+    events = _run(d, readings)
+    assert len(events) == 1
+    ev = events[0]
+    # Each spike is a single instantaneous reading, so no run has any span.
+    assert ev.longest_run_s == 0.0
+    # No interval both starts and stays above threshold, so no loud6 time accrues.
+    assert ev.loud6_s == 0.0
+    assert ev.rise_time_s == 0.0  # the first spike is itself already above threshold+6
+
+
+def test_anatomy_never_reaching_threshold_plus_6_has_none_rise_time():
+    """An event that stays above threshold but never above +6 dB has rise_time None."""
+    d = Detector(threshold_dbfs=-30, min_duration_s=0.3, debounce_s=1.0)
+    # -28 dBFS is above threshold (-30) but below threshold+6 (-24).
+    readings = [(0.0, -28.0), (0.5, -28.0), (1.0, -28.0), (3.0, -60.0)]
+    events = _run(d, readings)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.rise_time_s is None  # +6 dB never reached
+    assert ev.loud6_s == 0.0
+    assert abs(ev.longest_run_s - 1.0) < 1e-9  # still one unbroken above-threshold run
+
+
+def test_anatomy_rise_time_measures_delay_to_first_loud6_reading():
+    """Rise time is the gap from event start to the first reading at/above +6 dB."""
+    d = Detector(threshold_dbfs=-30, min_duration_s=0.3, debounce_s=1.0)
+    readings = [
+        (0.0, -28.0),  # above threshold, below +6
+        (0.5, -26.0),  # still below +6
+        (0.8, -10.0),  # first reading at/above +6 -> rise_time = 0.8
+        (1.2, -10.0),
+        (3.0, -60.0),
+    ]
+    events = _run(d, readings)
+    assert len(events) == 1
+    assert abs(events[0].rise_time_s - 0.8) < 1e-9

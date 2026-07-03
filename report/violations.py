@@ -52,6 +52,9 @@ class ViolationRow:
     within_quiet_hours: bool  # start-attributed: did the event *start* in quiet hours?
     seconds_within_quiet_hours: float  # pro-rated portion of the duration inside the window
     monitored: bool  # False if the event overlaps a recorded monitoring gap
+    rise_time_s: float | None  # envelope anatomy: shape descriptor, never audio
+    loud6_s: float | None  # envelope anatomy: shape descriptor, never audio
+    longest_run_s: float | None  # envelope anatomy: shape descriptor, never audio
     coarse_tag: str | None
     # The calibration offset already included in peak_dbfs/avg_dbfs for this row, in dB
     # (0.0 = raw, uncalibrated dBFS). Recorded so the export is self-describing:
@@ -107,9 +110,8 @@ def compute_violations(
         quiet_secs = quiet_hours.overlap_seconds(dt, end_dt)
         if is_within:
             within += 1
-            within_secs += ev.duration
-        else:
-            outside_secs += ev.duration
+        within_secs += quiet_secs
+        outside_secs += ev.duration - quiet_secs
         monitored = not any(g.start < ev.end and g.end > ev.start for g in gap_list)
         rows.append(
             ViolationRow(
@@ -120,6 +122,9 @@ def compute_violations(
                 duration_s=ev.duration,
                 peak_dbfs=ev.peak_level,
                 avg_dbfs=ev.avg_level,
+                rise_time_s=ev.rise_time_s,
+                loud6_s=ev.loud6_s,
+                longest_run_s=ev.longest_run_s,
                 within_quiet_hours=is_within,
                 seconds_within_quiet_hours=quiet_secs,
                 monitored=monitored,
@@ -148,12 +153,20 @@ _CSV_HEADER = [
     "peak_dbfs",
     "avg_dbfs",
     "calibration_offset_db",
+    "rise_time_s",
+    "loud6_s",
+    "longest_run_s",
     "within_quiet_hours",
     "seconds_within_quiet_hours",
     "quiet_window",
     "monitored",
     "coarse_tag",
 ]
+
+
+def _anatomy_cell(value: float | None) -> str:
+    """One-decimal seconds for an envelope descriptor, or blank on a legacy None."""
+    return "" if value is None else f"{value:.1f}"
 
 
 def violations_to_csv(
@@ -194,6 +207,9 @@ def violations_to_csv(
                     f"{r.peak_dbfs:.1f}",
                     f"{r.avg_dbfs:.1f}",
                     f"{r.calibration_offset_db:+.1f}",
+                    _anatomy_cell(r.rise_time_s),
+                    _anatomy_cell(r.loud6_s),
+                    _anatomy_cell(r.longest_run_s),
                     "yes" if r.within_quiet_hours else "no",
                     f"{r.seconds_within_quiet_hours:.1f}",
                     report.window,
@@ -240,6 +256,9 @@ def build_violation_report_html(
             f"<td>{_fmt_seconds(r.duration_s)}</td>"
             f"<td>{r.peak_dbfs:.1f}</td><td>{r.avg_dbfs:.1f}</td>"
             f"<td>{r.calibration_offset_db:+.1f}</td>"
+            f"<td>{_anatomy_cell(r.rise_time_s)}</td>"
+            f"<td>{_anatomy_cell(r.loud6_s)}</td>"
+            f"<td>{_anatomy_cell(r.longest_run_s)}</td>"
             f"<td>{escape(r.coarse_tag or '')}</td></tr>"
             for r in report.rows
         )
@@ -252,6 +271,9 @@ def build_violation_report_html(
             '<th scope="col">Peak (dBFS)</th>'
             '<th scope="col">Avg (dBFS)</th>'
             '<th scope="col">Calibration offset (dB)</th>'
+            '<th scope="col">Rise (s)</th>'
+            '<th scope="col">Loud +6 dB (s)</th>'
+            '<th scope="col">Longest run (s)</th>'
             '<th scope="col">Coarse tag</th>'
             f"</tr></thead><tbody>{body_rows}</tbody></table>"
         )

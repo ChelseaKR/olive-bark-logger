@@ -239,7 +239,12 @@ is deliberately *not* something to automate past a human.
 **Excellent looks like:** `main` == the best known state; a tagged, changelogged,
 SBOM'd release; `git branch -a` shows no stranded feature branches.
 
-## FIX-13 · A written, tested "derived-data privacy budget"
+## FIX-13 · A written, tested "derived-data privacy budget" — ⚠️ ENFORCED; SME REVIEW OPEN
+**Status (2026-07-12):** `docs/audits/derived-data-budget.md` defines a provisional
+record-based ceiling and `tests/test_privacy_budget.py` freezes persisted tables,
+event columns, five signal-derived scalars, and forbidden spectral/reconstruction
+fields. The required external audio-privacy/re-identification review remains open; the
+document explicitly does not claim expert-validated safety until that review is committed.
 **Pitch:** Formalize the boundary for *what derived numbers may ever be persisted*, so
 future features are judged against a rule instead of vibes.
 **Why it matters:** Today the implicit rule is "six numbers per event plus a tag."
