@@ -40,6 +40,61 @@ def test_quiet_hours_breakdown():
     assert s.quiet_hours_loud_seconds == 4.0
 
 
+def _ev_at(dt: datetime, duration: float) -> Event:
+    start = dt.timestamp()
+    return Event(
+        start=start, end=start + duration, duration=duration, peak_level=-10, avg_level=-13
+    )
+
+
+def test_overlap_seconds_prorates_boundary():
+    # 120 s event straddling the 22:00 quiet-hours start contributes exactly 60 s.
+    qh = QuietHours(22, 8)
+    start = datetime(2026, 1, 1, 21, 59, 0, tzinfo=timezone.utc)
+    end = start + timedelta(seconds=120)
+    assert qh.overlap_seconds(start, end) == 60.0
+
+
+def test_overlap_seconds_fully_inside_and_outside():
+    qh = QuietHours(22, 8)
+    inside_s = datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc)
+    assert qh.overlap_seconds(inside_s, inside_s + timedelta(seconds=45)) == 45.0
+    outside_s = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)  # long but wholly outside
+    assert qh.overlap_seconds(outside_s, outside_s + timedelta(hours=2)) == 0.0
+
+
+def test_overlap_seconds_midnight_wrap():
+    qh = QuietHours(22, 8)
+    start = datetime(2026, 1, 1, 23, 59, 30, tzinfo=timezone.utc)  # crosses midnight
+    assert qh.overlap_seconds(start, start + timedelta(seconds=60)) == 60.0
+
+
+def test_overlap_seconds_partition_invariant():
+    # For any event, the pro-rated quiet seconds are within [0, duration], and the quiet
+    # portion plus the non-quiet portion equal the whole duration (a clean partition).
+    qh = QuietHours(22, 8)
+    starts = [datetime(2026, 1, 1, h, m, tzinfo=timezone.utc) for h in range(24) for m in (0, 37)]
+    for s in starts:
+        for dur in (5.0, 90.0, 3600.0, 7200.0):
+            e = s + timedelta(seconds=dur)
+            quiet = qh.overlap_seconds(s, e)
+            nonquiet = QuietHours(qh.end_hour, qh.start_hour).overlap_seconds(s, e)
+            assert 0.0 <= quiet <= dur + 1e-9
+            assert abs(quiet + nonquiet - dur) < 1e-6
+
+
+def test_summary_reports_both_prorated_and_start_attributed():
+    qh = QuietHours(22, 8)
+    # 120 s event straddling 22:00 start: pro-rated = 60 s, but start-attributed = 0
+    # (it started at 21:59, outside quiet hours, so the whole duration is credited outside).
+    straddle = _ev_at(datetime(2026, 1, 1, 21, 59, 0, tzinfo=timezone.utc), 120.0)
+    inside = _ev_at(datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc), 40.0)
+    s = summarize([straddle, inside], quiet_hours=qh)
+    assert s.quiet_hours_event_count == 1  # only the 23:00 event started in quiet hours
+    assert s.quiet_hours_loud_seconds == 100.0  # 60 (pro-rated straddle) + 40 (inside)
+    assert s.quiet_hours_loud_seconds_start_attributed == 40.0  # whole-duration, start only
+
+
 def test_peak_stats():
     events = [_ev(1, peak=-20), _ev(2, peak=-5), _ev(3, peak=-15)]
     s = summarize(events, quiet_hours=QuietHours())

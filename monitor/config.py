@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, time, timezone, tzinfo
+from datetime import datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 
 try:  # zoneinfo is stdlib from 3.9; tzdata may be absent on some hosts.
@@ -46,6 +46,46 @@ class QuietHours:
             return start <= t < end
         # Wraps midnight (e.g. 22:00 -> 08:00).
         return t >= start or t < end
+
+    def overlap_seconds(self, start_dt: datetime, end_dt: datetime) -> float:
+        """Seconds of the half-open interval [start_dt, end_dt) inside the quiet window.
+
+        Where ``contains`` classifies a single instant (used for event *counts*, which
+        cannot be fractional), this pro-rates an event's *duration* across the quiet-hours
+        boundary: an event that begins before 22:00 and ends after it contributes only the
+        portion that actually falls inside quiet hours.
+
+        The window is reconstructed concretely, day by day, in the local zone of the input
+        datetimes so hour/day boundaries and DST are handled by real datetime arithmetic
+        rather than wall-clock comparisons. We build each day's quiet interval(s) — a single
+        ``[start, end)`` span for a non-wrapping window, or ``[start, 24h) + [0, end)`` for a
+        window that wraps midnight — intersect each with ``[start_dt, end_dt]``, and sum.
+        Adding whole hours onto local midnight keeps ``end_hour == 24`` exact and is
+        fold-agnostic (deterministic across a DST transition, if imprecise by an hour at the
+        exact fold — acceptable and documented).
+        """
+        if end_dt <= start_dt:
+            return 0.0
+        tz = start_dt.tzinfo
+        s = self.start_hour % 24
+        e = self.end_hour % 24
+        # A non-wrapping window is a single [s, e) slice per day; one that wraps midnight
+        # splits into a late-evening [s, 24h) and an early-morning [0, e) slice.
+        day_intervals = [(s, e)] if s <= e else [(s, 24), (0, e)]
+        total = 0.0
+        # Start a day early so a wrap window's late-evening slice from the prior date is
+        # considered; iterate through end_dt's date inclusive.
+        day = start_dt.date() - timedelta(days=1)
+        last_day = end_dt.date()
+        while day <= last_day:
+            midnight = datetime.combine(day, time(0), tzinfo=tz)
+            for h0, h1 in day_intervals:
+                lo = max(midnight + timedelta(hours=h0), start_dt)
+                hi = min(midnight + timedelta(hours=h1), end_dt)
+                if hi > lo:
+                    total += (hi - lo).total_seconds()
+            day += timedelta(days=1)
+        return total
 
 
 @dataclass(frozen=True)

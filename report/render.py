@@ -158,7 +158,10 @@ def build_report(
         "Loudest peak": f"{summary.loudest_peak_dbfs:.1f} dBFS",
         "Mean peak": f"{summary.mean_peak_dbfs:.1f} dBFS",
         f"Events during quiet hours ({quiet_window})": str(summary.quiet_hours_event_count),
-        "Loud time during quiet hours": _fmt_seconds(summary.quiet_hours_loud_seconds),
+        "Loud time during quiet hours (pro-rated)": _fmt_seconds(summary.quiet_hours_loud_seconds),
+        "Loud time during quiet hours (start-attributed)": _fmt_seconds(
+            summary.quiet_hours_loud_seconds_start_attributed
+        ),
     }
     stats_html = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in stats.items())
 
@@ -216,8 +219,13 @@ transmitted to produce it.</p>
 <h2>Quiet hours</h2>
 <p>Quiet-hours window: <strong>{quiet_window}</strong> in time zone
 <strong>{escape(config.tz)}</strong> (daylight-saving aware). Of {summary.event_count}
-total events, <strong>{summary.quiet_hours_event_count}</strong> fell within quiet hours,
-totaling {_fmt_seconds(summary.quiet_hours_loud_seconds)} of loud time.</p>
+total events, <strong>{summary.quiet_hours_event_count}</strong> started within quiet hours,
+and <strong>{_fmt_seconds(summary.quiet_hours_loud_seconds)}</strong> of loud time fell
+inside the window
+(vs. {_fmt_seconds(summary.quiet_hours_loud_seconds_start_attributed)} if counted whole by
+start time). Event counts are attributed by start time, since a count cannot be split; loud
+seconds are pro-rated across the quiet-window boundary, so an event that begins before the
+window and ends inside it contributes only the seconds actually within quiet hours.</p>
 
 <h2>{METHODOLOGY_HEADING}</h2>
 <p>Each ~{config.frame_size / config.sample_rate * 1000:.0f} ms frame of audio is read
