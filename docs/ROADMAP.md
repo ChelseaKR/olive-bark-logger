@@ -83,6 +83,7 @@ docs/
 - **Runtime egress proof.** In addition to the static import scan, a test booby-traps `socket` and runs the full pipeline + report to prove no network access at runtime.
 - **Coarse tagging (opt-in).** A cheap zero-crossing-rate feature, computed in memory and discarded, classifies events as bark-like/ambient; surfaced as a clearly-hedged "hint" in the report. No audio stored.
 - **PWA parity.** The browser variant re-implements the detector/level/report in JS with its own Node tests; documented as a parallel implementation sharing semantics and the honest framing.
+- **FIX-06 Cross-implementation conformance harness (Python ↔ PWA). ✅ Done.** `spec/detector/*.json` holds language-neutral golden vectors (threshold `>=` boundary, min-duration filtering, debounce bridging/splitting, flush-at-end, zero min-duration, peak/avg over loud readings only). Both `tests/test_conformance.py` (pytest, `monitor.detector.Detector`) and `pwa/conformance.test.mjs` (`node --test`, `pwa/detector.js`) replay the same vectors and assert equality to `1e-9`, so the two ports cannot drift silently. Intentional divergences (no `coarse_tag`/calibration/sessions in the PWA; CSV timezone divergence) and the rule "changing detection semantics means changing a vector on purpose" are documented in [`spec/SEMANTICS.md`](../spec/SEMANTICS.md), which also notes the quiet-hours/summarize extension point.
 
 ## 9. Go-to-market & community
 - **Positioning.** "Honest, level-only noise evidence — no recording."

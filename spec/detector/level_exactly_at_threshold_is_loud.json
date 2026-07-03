@@ -1,0 +1,36 @@
+{
+  "name": "level_exactly_at_threshold_is_loud",
+  "description": "A reading equal to the threshold counts as loud (>= boundary).",
+  "params": {
+    "threshold_dbfs": -30,
+    "min_duration_s": 0.3,
+    "debounce_s": 0.5
+  },
+  "readings": [
+    [
+      0.0,
+      -30
+    ],
+    [
+      0.5,
+      -30
+    ],
+    [
+      1.0,
+      -30
+    ],
+    [
+      3.0,
+      -60
+    ]
+  ],
+  "expected_events": [
+    {
+      "start": 0.0,
+      "end": 1.0,
+      "duration": 1.0,
+      "peak_level": -30,
+      "avg_level": -30.0
+    }
+  ]
+}
