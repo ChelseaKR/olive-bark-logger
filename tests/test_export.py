@@ -29,11 +29,30 @@ def test_events_to_csv_writes_header_and_rows(tmp_path):
         "duration_s",
         "peak_dbfs",
         "avg_dbfs",
+        "monitored",
         "coarse_tag",
     ]
     assert len(rows) == 3  # header + 2
     assert rows[1][-1] == "bark-like"
     assert rows[2][-1] == ""  # untagged event -> empty tag
+    # With no gaps supplied, every event is reported as monitored.
+    assert rows[1][-2] == "yes" and rows[2][-2] == "yes"
+
+
+def test_events_to_csv_marks_events_in_a_gap_unmonitored(tmp_path):
+    from store import Gap
+
+    out = tmp_path / "events.csv"
+    evs = _events()
+    # A gap covering the first event's span only.
+    gap = Gap(
+        id=1, session_id=None, start=evs[0].start - 1, end=evs[0].end + 1, reason="device-error"
+    )
+    events_to_csv(evs, out, gaps=[gap])
+    rows = list(csv.reader(out.read_text().splitlines()))
+    mon_idx = rows[0].index("monitored")
+    assert rows[1][mon_idx] == "no"  # overlaps the gap
+    assert rows[2][mon_idx] == "yes"  # outside the gap
 
 
 def test_report_cli_also_exports_csv(tmp_path, capsys):

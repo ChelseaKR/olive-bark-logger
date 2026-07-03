@@ -18,9 +18,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, tzinfo
 from html import escape
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from monitor.config import QuietHours
 from monitor.detector import Event
+
+if TYPE_CHECKING:
+    from store import Gap
 
 from report.render import (
     _STYLE,
@@ -42,6 +46,7 @@ class ViolationRow:
     peak_dbfs: float
     avg_dbfs: float
     within_quiet_hours: bool
+    monitored: bool  # False if the event overlaps a recorded monitoring gap
     coarse_tag: str | None
 
 
@@ -69,8 +74,15 @@ def compute_violations(
     quiet_hours: QuietHours,
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
+    gaps: list[Gap] | None = None,
 ) -> ViolationReport:
-    """Classify every event as within / outside the quiet-hours window by its start time."""
+    """Classify every event as within / outside the quiet-hours window by its start time.
+
+    When `gaps` is given, each row also carries a `monitored` flag (False if the event
+    overlaps a monitoring gap), so a reader can tell an event logged at the edge of an
+    outage from one logged with full coverage.
+    """
+    gap_list = gaps or []
     rows: list[ViolationRow] = []
     within = 0
     within_secs = 0.0
@@ -83,6 +95,7 @@ def compute_violations(
             within_secs += ev.duration
         else:
             outside_secs += ev.duration
+        monitored = not any(g.start < ev.end and g.end > ev.start for g in gap_list)
         rows.append(
             ViolationRow(
                 start_unix=ev.start,
@@ -93,6 +106,7 @@ def compute_violations(
                 peak_dbfs=ev.peak_level,
                 avg_dbfs=ev.avg_level,
                 within_quiet_hours=is_within,
+                monitored=monitored,
                 coarse_tag=ev.coarse_tag,
             )
         )
@@ -118,6 +132,7 @@ _CSV_HEADER = [
     "avg_dbfs",
     "within_quiet_hours",
     "quiet_window",
+    "monitored",
     "coarse_tag",
 ]
 
@@ -129,13 +144,15 @@ def violations_to_csv(
     quiet_hours: QuietHours,
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
+    gaps: list[Gap] | None = None,
 ) -> int:
     """Write every event with a within/outside-quiet-hours flag. Returns rows written.
 
     The export is honest by construction: it lists *all* events, not only the flagged
-    ones, so a reader can see the full picture rather than a cherry-picked subset.
+    ones, so a reader can see the full picture rather than a cherry-picked subset. The
+    `monitored` column marks whether each event fell in a period of confirmed coverage.
     """
-    report = compute_violations(events, quiet_hours=quiet_hours, tz=tz, tz_name=tz_name)
+    report = compute_violations(events, quiet_hours=quiet_hours, tz=tz, tz_name=tz_name, gaps=gaps)
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(_CSV_HEADER)
@@ -151,6 +168,7 @@ def violations_to_csv(
                     f"{r.avg_dbfs:.1f}",
                     "yes" if r.within_quiet_hours else "no",
                     report.window,
+                    "yes" if r.monitored else "no",
                     r.coarse_tag or "",
                 ]
             )

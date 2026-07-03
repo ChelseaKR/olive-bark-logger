@@ -66,12 +66,33 @@ def test_violations_csv_lists_all_events_flagged(tmp_path):
         "avg_dbfs",
         "within_quiet_hours",
         "quiet_window",
+        "monitored",
         "coarse_tag",
     ]
     assert len(rows) == 3  # header + 2 events
     assert rows[1][7] == "yes" and rows[1][-1] == "bark-like"  # 23:00 violates
     assert rows[2][7] == "no"  # 12:00 does not
     assert rows[1][8] == "22:00–08:00"
+    assert rows[1][9] == "yes" and rows[2][9] == "yes"  # no gaps -> all monitored
+
+
+def test_violations_csv_flags_unmonitored_events(tmp_path):
+    from store import Gap
+
+    out = tmp_path / "violations.csv"
+    events = [_ev(23), _ev(12)]
+    gap = Gap(
+        id=1,
+        session_id=None,
+        start=events[0].start - 1,
+        end=events[0].end + 1,
+        reason="shutdown",
+    )
+    violations_to_csv(events, out, quiet_hours=QuietHours(22, 8), tz=timezone.utc, gaps=[gap])
+    rows = list(csv.reader(out.read_text().splitlines()))
+    mon = rows[0].index("monitored")
+    assert rows[1][mon] == "no"  # the 23:00 event overlaps the gap
+    assert rows[2][mon] == "yes"
 
 
 def test_violation_html_is_honest_and_accessible():

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from monitor.detector import Event
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Ordered migrations. Each entry upgrades the database from version i to i+1. A fresh
 # database (user_version 0) runs them all; an existing one runs only the new ones.
@@ -61,6 +61,20 @@ _MIGRATIONS: list[str] = [
     );
     ALTER TABLE events ADD COLUMN session_id INTEGER;
     """,
+    # 2 -> 3: monitoring-gap ledger. Each row is an interval when the device was *not*
+    # listening, so "no data" can be reported distinctly from a genuinely quiet hour.
+    # Metadata only (two timestamps and a reason) — never any audio.
+    """
+    CREATE TABLE IF NOT EXISTS gaps (
+        id          INTEGER PRIMARY KEY,
+        session_id  INTEGER,
+        start       REAL NOT NULL,
+        end         REAL NOT NULL,
+        reason      TEXT NOT NULL
+                    CHECK(reason IN ('device-error','shutdown','clock-jump'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_gaps_start ON gaps(start);
+    """,
 ]
 
 
@@ -88,8 +102,27 @@ class Session:
         return 1.0 if total == 0 else self.frames_seen / total
 
 
+@dataclass(frozen=True)
+class Gap:
+    """One interval when the device was not listening. Metadata only — no audio.
+
+    `reason` is one of 'device-error' (a source outage caught by resilient_source),
+    'shutdown' (the monitor was not running), or 'clock-jump' (wall-clock discontinuity).
+    """
+
+    id: int
+    session_id: int | None
+    start: float
+    end: float
+    reason: str
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+
 class EventStore:
-    """Event log, calibration record, and capture-session lineage."""
+    """Event log, calibration record, capture-session lineage, and monitoring gaps."""
 
     def __init__(self, path: str | Path = "olive.db") -> None:
         self.path = str(path)
@@ -159,6 +192,48 @@ class EventStore:
         cur = self._conn.execute("DELETE FROM events WHERE start < ?", (before,))
         self._conn.commit()
         return cur.rowcount
+
+    # -- monitoring gaps -----------------------------------------------------
+    def add_gap(
+        self, start: float, end: float, reason: str, *, session_id: int | None = None
+    ) -> int:
+        """Record an interval [start, end) when the device was not listening."""
+        cur = self._conn.execute(
+            "INSERT INTO gaps (session_id, start, end, reason) VALUES (?, ?, ?, ?)",
+            (session_id, start, end, reason),
+        )
+        self._conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def gaps(self, *, since: float | None = None, until: float | None = None) -> list[Gap]:
+        """Gaps overlapping [since, until), ordered by start.
+
+        Overlap semantics (a gap counts if any part of it falls in the window) so a
+        report window slicing through an outage still sees it.
+        """
+        sql = "SELECT id, session_id, start, end, reason FROM gaps"
+        clauses: list[str] = []
+        params: list[float] = []
+        if since is not None:
+            clauses.append("end > ?")
+            params.append(since)
+        if until is not None:
+            clauses.append("start < ?")
+            params.append(until)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY start ASC"
+        rows: Iterable[sqlite3.Row] = self._conn.execute(sql, params)
+        return [
+            Gap(
+                id=r["id"],
+                session_id=r["session_id"],
+                start=r["start"],
+                end=r["end"],
+                reason=r["reason"],
+            )
+            for r in rows
+        ]
 
     # -- calibration ---------------------------------------------------------
     def set_calibration(self, offset: float, note: str) -> None:
