@@ -48,7 +48,7 @@ def synthetic_session(
     values rather than the digital-silence floor.
     """
     frame_dt = frame_size / sample_rate
-    n_frames = int(math.ceil(duration_s / frame_dt))
+    n_frames = math.ceil(duration_s / frame_dt)
     phase = 0.0
     for i in range(n_frames):
         t = i * frame_dt

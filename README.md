@@ -3,6 +3,7 @@
 **A privacy-first, on-device noise monitor that timestamps barking events and sound-level spikes and turns them into a clean report** — so the next time a downstairs neighbor complains, you have objective data instead of a he-said-she-said. It measures sound *levels* and event metadata only. It never records, stores, or transmits audio. By design, there is no recording to leak, subpoena, or wiretap.
 
 **Status:** `Beta` · **Track:** Personal (on-device monitor + report generator) · **License:** MIT · **Data:** on-device/local
+**Supported versions:** pre-1.0 — only the latest `0.y` release receives fixes; no LTS branch (REL-24).
 
 ## Why it matters
 You've been on the receiving end of vague noise complaints about Olive with nothing concrete to point to. A small device that runs in your apartment and logs *when* sound crossed a threshold and for *how long* gives you an honest, time-stamped record — useful for property management or just for understanding the real pattern — without the legal and ethical problems of recording your home (or your neighbors).
@@ -22,7 +23,7 @@ You've been on the receiving end of vague noise complaints about Olive with noth
 ## Quickstart
 ```bash
 make dev                       # create .venv and install (dev extras)
-make verify                    # run every merge-blocking gate locally
+make verify                    # lint, type, coverage, security, a11y, PWA tests, i18n gate
 make report                    # render report.html from a demo session (no hardware)
 # Live capture on a Pi/laptop (optional audio dependency):
 .venv/bin/pip install -e ".[live]"
@@ -49,7 +50,38 @@ on any Python 3.9+ with no installs; only live microphone capture needs the `liv
   same no-audio guarantee, works offline. See [`pwa/README.md`](./pwa/README.md).
 - **Container:** `Dockerfile` builds the report/analysis side for reproducible CI.
 
-- **Definition of done:** the monitor runs unattended, logs noise events (levels + timestamps, zero audio) to local SQLite, and produces an honest, accessible report with charts and a stated methodology — all `/STANDARDS` gates green and the no-audio test passing.
+- **Definition of done:** the monitor runs unattended, logs noise events (levels + timestamps, zero audio) to local SQLite, and produces an honest, accessible report with charts and a stated methodology — all **applicable** `/STANDARDS` gates green (see Standards Conformance below) and the no-audio test passing. Full checklist: [`DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md).
 
-## Standards
-Inherits [`/STANDARDS`](../STANDARDS/).
+## Observability
+Tier C — OTel tracing out-of-scope (no network surface). Opt-in `--log-format json` is
+not implemented yet (tracked: [`GAP-OBS-1`](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation));
+today's surface is operator-facing `print()` lines plus a heartbeat JSON file
+(`monitor/service.py`) with no secret/PII fields by design.
+
+## Standards Conformance
+Inherits [`/STANDARDS`](../STANDARDS/) (this table is the individual declaration DOC-11
+requires; a bare "inherits" statement with no table is the exact silent-omission defect
+the standard forbids — a prior version of this README made that mistake). `Applies —
+gap tracked in GAP-NN` rows resolve to a real, dated, append-only entry in
+[`docs/GAP-LEDGER.md`](./docs/GAP-LEDGER.md) (a GitHub issue was the original plan, but
+this repo's tooling correctly refuses unsolicited issue creation as an external
+write-effect, so gaps live here instead — see that file's header for why).
+
+| Standard | State |
+|----------|-------|
+| Quality & Metrics | Applies — gap tracked in [GAP-QM-1](./docs/GAP-LEDGER.md#gap-qm-1--quality--metrics-dora-ledger--release-gate-checklist-execution) (DORA ledger; release-gate checklist exists in `DEFINITION_OF_DONE.md` but has never been run, since no release has happened) |
+| Code Quality | Applies — gap tracked in [GAP-CQ-1](./docs/GAP-LEDGER.md#gap-cq-1--code-quality-python-floor-formal-adr-uvlockfile-pre-commit-hook-wiring-src-layout-hatchling) (Python-floor divergence recorded in [ADR-0002](./docs/adr/0002-python-39-floor.md); lockfile, hatchling, src/ layout still open) |
+| Security & Supply-Chain | Applies — hardened posture (ASVS **L2**); gap tracked in [GAP-SEC-1](./docs/GAP-LEDGER.md#gap-sec-1--security--supply-chain-harden-runner-block-mode-codeql-lockfileosv-scanner-trufflehog-sbomsigning-scorecard) |
+| CI/CD | Applies — gap tracked in [GAP-CICD-1](./docs/GAP-LEDGER.md#gap-cicd-1--cicd-apply-the-branch-ruleset-add-zizmor--codeql-actions) (ruleset committed at `.github/rulesets/main.json`, not yet applied — that's a live GitHub action for the maintainer, see the file's header) |
+| Release & Versioning | Applies — release-producing deployed app; gap tracked in [GAP-REL-1](./docs/GAP-LEDGER.md#gap-rel-1--release--versioning-the-releasesupply-chain-pipeline-is-still-absent) (no release pipeline/tag yet; `CITATION.cff` intentionally carries no `date-released` until one exists) |
+| Accessibility | Applies — gap tracked in [GAP-A11Y-1](./docs/GAP-LEDGER.md#gap-a11y-1--accessibility-scan-the-pwa-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat) (PWA surface unscanned; walkthrough stale since `8a9f1eb`) |
+| Observability | Applies — Tier C: OTel out-of-scope (no network surface); `--log-format json` opt-in planned, gap tracked in [GAP-OBS-1](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation) |
+| Internationalization | N/A — single-user tool, operator-only English output ([`docs/I18N.md`](./docs/I18N.md)) |
+| AI Evaluation | N/A — no model/prompt/retrieval surface; nothing in this codebase calls an LLM SDK |
+| Documentation | Applies — gap tracked in [GAP-DOC-1](./docs/GAP-LEDGER.md#gap-doc-1--documentation-vendor-standards-as-a-pinned-submodule-finish-the-adr-migration) (`/STANDARDS` vendoring blocked on a portfolio-level tag prerequisite; ADR migration in progress) |
+| Responsible-Tech Framework | Applies — this repo's strongest standard: no-audio, no-egress, and honest-report-content are merge-blocking tests (`tests/test_no_audio.py`, `tests/test_no_egress.py`, `tests/test_report_content.py`); full treatment in [`docs/RESPONSIBLE-TECH-AUDITS.md`](./docs/RESPONSIBLE-TECH-AUDITS.md); gap tracked in [GAP-RTF-1](./docs/GAP-LEDGER.md#gap-rtf-1--responsible-tech-framework-per-section-sign-off-dates) (per-section sign-off dates) |
+
+Last full audit: 2026-07-05 (`audit-2026-07-05/olive-bark-logger-AUDIT.md`,
+33/138 controls PASS before that day's remediation pass; this table reflects the
+post-remediation state and will drift from a fresh audit run — treat the audit file as
+the point-in-time evidence trail, this table as the current claim).

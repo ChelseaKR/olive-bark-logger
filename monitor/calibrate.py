@@ -45,7 +45,7 @@ def meter_bar(
     span = ceil - floor
     frac = 0.0 if span <= 0 else (level_dbfs - floor) / span
     frac = max(0.0, min(1.0, frac))
-    filled = int(round(frac * width))
+    filled = round(frac * width)
     return f"[{'#' * filled}{'-' * (width - filled)}] {level_dbfs:6.1f} dBFS"
 
 
@@ -88,7 +88,7 @@ def main_calibrate(
     )
     with EventStore(config.db_path) as store:
         store.set_calibration(offset, note)
-    print(  # noqa: T201
+    print(
         f"Measured {measured:.1f} dBFS at {args.reference_db:.1f} dB reference -> "
         f"offset {offset:+.1f} dB. Stored to {config.db_path}."
     )
@@ -105,14 +105,14 @@ def main_tune(argv: list[str] | None = None) -> int:  # pragma: no cover - live 
     config = Config.load(args.config)
 
     levels: list[float] = []
-    print("Live level (Ctrl-C to stop and see a suggested threshold):")  # noqa: T201
+    print("Live level (Ctrl-C to stop and see a suggested threshold):")
     try:
         for level in _iter_levels(_live(config), config):
             levels.append(level)
-            print("\r" + meter_bar(level), end="", flush=True)  # noqa: T201
+            print("\r" + meter_bar(level), end="", flush=True)
     except KeyboardInterrupt:
         pass
-    print(f"\nSuggested threshold: {suggest_threshold(levels)} dBFS")  # noqa: T201
+    print(f"\nSuggested threshold: {suggest_threshold(levels)} dBFS")
     return 0
 
 

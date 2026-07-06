@@ -116,9 +116,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
     if config.retention_days > 0:
         removed = store.prune(before=started_at - config.retention_days * 86400)
         if removed:
-            print(  # noqa: T201
-                f"Retention: pruned {removed} event(s) older than {config.retention_days} days."
-            )
+            print(f"Retention: pruned {removed} event(s) older than {config.retention_days} days.")
     session_id = store.start_session(
         started_at=started_at,
         device_label=config.device_label,
@@ -151,7 +149,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
                 ),
             )
 
-    print(  # noqa: T201 - operator-facing status line
+    print(
         f"Monitoring (threshold {config.threshold_dbfs} dBFS). "
         f"Logging events to {config.db_path}. Audio is never recorded. Ctrl-C to stop."
     )
@@ -164,13 +162,13 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             stats=stats,
             session_id=session_id,
         ):
-            print(  # noqa: T201
+            print(
                 f"event @ {event.start:.0f}  dur {event.duration:.1f}s  "
                 f"peak {event.peak_level:.1f} dBFS"
             )
             heartbeat()
     except KeyboardInterrupt:  # pragma: no cover - interactive
-        print("\nStopped.")  # noqa: T201
+        print("\nStopped.")
     finally:
         store.update_session(
             session_id,

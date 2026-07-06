@@ -6,6 +6,13 @@ which reduces each frame to a single number; the frame is then dropped. Only der
 levels and event metadata ever leave the pipeline. See tests/test_no_audio.py.
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
 
-__all__ = ["__version__", "level", "detector", "config", "health"]
+try:
+    # Single source of truth is `pyproject.toml`'s `[project].version` (REL-02);
+    # this reads the installed package metadata instead of hand-copying the string.
+    __version__ = version("olive-bark-logger")
+except PackageNotFoundError:  # pragma: no cover - only when run from an uninstalled checkout
+    __version__ = "0.0.0+unknown"
+
+__all__ = ["__version__", "config", "detector", "health", "level"]

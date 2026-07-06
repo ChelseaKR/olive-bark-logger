@@ -14,8 +14,13 @@ authors:
   - given-names: "Chelsea"
     family-names: "Kelly-Reif"
     alias: "ChelseaKR"
+# `version` mirrors the in-development version in pyproject.toml (single source of
+# truth; monitor/__init__.py derives __version__ from installed package metadata).
+# `date-released` is deliberately omitted: no `git tag` exists yet for this project
+# (a prior 2026-06-30 date here implied a release that never happened — corrected
+# 2026-07-05, see docs/GAP-LEDGER.md#gap-rel-1 and CHANGELOG.md). Add `date-released`
+# back only once a version is actually tagged.
 version: "0.1.0"
-date-released: "2026-06-30"
 license: "MIT"
 repository-code: "https://github.com/ChelseaKR/olive-bark-logger"
 url: "https://github.com/ChelseaKR/olive-bark-logger"

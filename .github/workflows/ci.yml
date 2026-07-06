@@ -13,6 +13,15 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      # 0. egress monitoring (SEC-04). AUDIT mode: logs, does not block yet — this
+      #    repo's actual outbound needs (pypi.org, files.pythonhosted.org, npm for
+      #    pa11y, Docker Hub for the base image, github.com) haven't been collected
+      #    from a real run yet. Flip to `egress-policy: block` with an explicit
+      #    allowlist once one audit-mode run's log has been reviewed — see
+      #    docs/GAP-LEDGER.md#gap-sec-1--security--supply-chain-harden-runner-block-mode-codeql-lockfileosv-scanner-trufflehog-sbomsigning-scorecard.
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
@@ -23,20 +32,27 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install ruff mypy bandit pip-audit
+          pip install -e . --group dev
 
-      # 1. format + lint
+      # 1. format + lint — via the Makefile so CI runs literally the same command
+      #    as `make lint` (CICD-27: no more local/CI drift on this gate).
       - name: Lint & format
-        run: |
-          ruff check monitor store report tests scripts
-          ruff format --check monitor store report tests scripts
+        run: make lint
 
-      # 2. type-check (strict)
+      # 2. type-check (strict) — via `make type` (same parity rationale).
       - name: Type-check
-        run: mypy
+        run: make type
 
-      # 4. security: SAST + deps + secrets
+      # 2b. i18n N/A-declaration gate — `make verify` runs this locally; CI was
+      #     silently skipping it until now (CICD-27 / I18N-02 CI-wiring gap).
+      - name: i18n declaration gate
+        run: make i18n
+
+      # 4. security: SAST + deps + secrets. Kept as discrete steps (rather than
+      #    `make security`) because that target's gitleaks check expects a CLI
+      #    binary on PATH, whereas gitleaks-action below runs it as a container
+      #    action; see docs/RESPONSIBLE-TECH-AUDITS.md §F and the README
+      #    Standards Conformance table for the exact local/CI parity statement.
       - name: SAST (bandit)
         run: bandit -q -r monitor store report
       - name: Dependency audit
@@ -57,13 +73,22 @@ jobs:
 
       # 6b. PWA variant: detector/report ports tested with Node's test runner
       - name: PWA tests
-        run: node --test pwa/*.test.mjs
+        run: make pwa-test
 
       # 8. portability: the container builds and its bring-up runs from scratch
       - name: Build container & smoke test
         run: |
           docker build -t olive .
           docker run --rm olive --help
+
+      # 8b. container CVE scan (SEC-28, Tier-1 red until now; feeds REL-18).
+      - name: Container CVE scan (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: "olive"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
 
       # 7. responsible-tech checks are the no-audio / no-egress / report-content tests,
       #    run in the matrix test job below (merge-blocking).
@@ -77,6 +102,14 @@ jobs:
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
+      # 0. egress monitoring (SEC-04), audit mode — see the `verify` job's identical
+      #    step above for why this isn't block mode yet. macOS runners are not
+      #    supported by harden-runner (Linux-only network interception), so this only
+      #    takes effect on the ubuntu-latest legs of this matrix.
+      - if: runner.os == 'Linux'
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
@@ -86,7 +119,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e . --group dev
           pip install tzdata  # guarantees IANA zones for the DST test on every runner
       - name: Tests & coverage
         run: pytest --cov --cov-report=term-missing --cov-fail-under=85

@@ -49,7 +49,7 @@ class ViolationRow:
 class ViolationReport:
     """Counts and per-event rows for the quiet-hours analysis of an event log."""
 
-    window: str  # e.g. "22:00–08:00"
+    window: str  # e.g. "22:00–08:00"  # noqa: RUF003 - intentional en dash
     tz_name: str
     total_events: int
     within_count: int
@@ -60,7 +60,7 @@ class ViolationReport:
 
 
 def _window_label(quiet_hours: QuietHours) -> str:
-    return f"{quiet_hours.start_hour % 24:02d}:00–{quiet_hours.end_hour % 24:02d}:00"
+    return f"{quiet_hours.start_hour % 24:02d}:00–{quiet_hours.end_hour % 24:02d}:00"  # noqa: RUF001 - intentional en dash
 
 
 def compute_violations(
