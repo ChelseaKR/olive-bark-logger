@@ -1,0 +1,22 @@
+# Code owners (CQ-39, CICD-17/18). This only enforces anything once the ruleset in
+# `.github/rulesets/main.json` is applied and "Require review from Code Owners" is
+# turned on for `main` — see that file's header for the exact activation step, which
+# is a live GitHub action outside this remediation pass's scope.
+#
+# Single-maintainer posture: see docs/adr/0001-single-maintainer-review-posture.md
+# for why "require review" is still the declared target even though the sole
+# maintainer cannot self-review a self-authored PR under GitHub's own rules.
+
+# Default owner for everything not matched below.
+* @ChelseaKR
+
+# Routes the CI/CD surface and the responsible-tech guarantee tests through explicit
+# ownership (CICD-17 path-coverage) — a change to any of these should never land
+# without the owner's eyes, since they define or enforce the merge-blocking gates.
+/.github/workflows/ @ChelseaKR
+/.github/rulesets/ @ChelseaKR
+/tests/test_no_audio.py @ChelseaKR
+/tests/test_no_egress.py @ChelseaKR
+/tests/test_report_content.py @ChelseaKR
+/Makefile @ChelseaKR
+/pyproject.toml @ChelseaKR

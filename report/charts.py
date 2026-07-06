@@ -43,7 +43,7 @@ def bar_chart(
     bars: list[str] = []
     for i, (label, value) in enumerate(zip(labels, values)):
         x = gap + i * (bar_w + gap)
-        h = int(round((value / max_v) * chart_h)) if max_v else 0
+        h = round((value / max_v) * chart_h) if max_v else 0
         y = pad_top + (chart_h - h)
         bars.append(
             f'<rect x="{x}" y="{y}" width="{bar_w}" height="{h}" fill="{_BAR_COLOR}">'

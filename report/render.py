@@ -149,7 +149,7 @@ def build_report(
         )
 
     qh = config.quiet_hours
-    quiet_window = f"{qh.start_hour:02d}:00–{qh.end_hour:02d}:00"
+    quiet_window = f"{qh.start_hour:02d}:00–{qh.end_hour:02d}:00"  # noqa: RUF001 - intentional en dash
 
     stats = {
         "Total events": str(summary.event_count),
@@ -309,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
 
     html = generate_report_from_db(db_path, config, generated_at=generated_at)
     args.out.write_text(html, encoding="utf-8")
-    print(f"Wrote {args.out} ({len(html)} bytes).")  # noqa: T201
+    print(f"Wrote {args.out} ({len(html)} bytes).")
 
     if args.csv is not None:
         from store import EventStore
@@ -318,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
 
         with EventStore(db_path) as store:
             rows = events_to_csv(store.events(), args.csv, tz=config.tzinfo())
-        print(f"Wrote {args.csv} ({rows} rows).")  # noqa: T201
+        print(f"Wrote {args.csv} ({rows} rows).")
 
     if args.violations_csv is not None or args.violations_html is not None:
         from store import EventStore
@@ -339,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
                 tz=config.tzinfo(),
                 tz_name=config.tz,
             )
-            print(f"Wrote {args.violations_csv} ({rows} rows).")  # noqa: T201
+            print(f"Wrote {args.violations_csv} ({rows} rows).")
         if args.violations_html is not None:
             report = compute_violations(
                 events, quiet_hours=config.quiet_hours, tz=config.tzinfo(), tz_name=config.tz
@@ -352,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
                 calibrated=config.calibration_offset != 0.0,
             )
             args.violations_html.write_text(vhtml, encoding="utf-8")
-            print(f"Wrote {args.violations_html} ({len(vhtml)} bytes).")  # noqa: T201
+            print(f"Wrote {args.violations_html} ({len(vhtml)} bytes).")
     return 0
 
 

@@ -19,7 +19,21 @@ dependencies = []
 # core pipeline and all tests run without it. Installing audio libs does NOT add
 # any path that writes or transmits audio — capture only yields in-memory frames.
 live = ["sounddevice>=0.4"]
-dev = ["pytest>=8", "pytest-cov>=5", "hypothesis>=6"]
+
+[dependency-groups]
+# PEP 735 dependency group (CQ-27): dev-only tooling, not a runtime extra.
+# `mypy<2` is a real floor, not decoration: mypy 2.x dropped support for a
+# Python 3.9 host interpreter (this repo's own venv target), so `mypy>=2`
+# cannot be installed into `.venv` here — verified locally 2026-07-05.
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "hypothesis>=6",
+    "ruff>=0.15",
+    "mypy>=1.13,<2",
+    "bandit>=1.8",
+    "pip-audit>=2.7",
+]
 
 [project.scripts]
 olive-monitor = "monitor.service:main"
@@ -31,8 +45,13 @@ olive-calibrate = "monitor.calibrate:main_calibrate"
 packages = ["monitor", "store", "report"]
 
 [tool.pytest.ini_options]
+minversion = "8.0"
 testpaths = ["tests"]
-addopts = "-q"
+# `tests/` is added to sys.path explicitly (rather than relying on "prepend"
+# import-mode's implicit rootdir insertion) so the guarantee tests' own
+# `from conftest import source_files` keeps working under `--import-mode=importlib`.
+pythonpath = ["tests"]
+addopts = "-q --strict-markers --strict-config --import-mode=importlib"
 
 [tool.coverage.run]
 branch = true
@@ -50,8 +69,17 @@ line-length = 100
 src = ["monitor", "store", "report", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "S", "C90", "RUF"]
 ignore = ["E501"]  # line length is handled by the formatter
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# `assert` is the standard pytest idiom, not a production security concern (S101).
+"tests/*" = ["S101"]
+# Mirrors the intentional en-dash time-range literal from report/violations.py.
+"tests/test_violations.py" = ["RUF001", "RUF003"]
 
 [tool.mypy]
 # Runtime target is 3.9 (see requires-python); the code uses `from __future__ import

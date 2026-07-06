@@ -3,6 +3,13 @@
 **Standard:** WCAG 2.2 AA · **Scope:** the generated HTML report (the primary deliverable).
 **Recheck cadence: per report-template change.**
 
+> **Stale as of 2026-07-05.** Commit `8a9f1eb` (2026-06-29) changed the report template
+> substantially (calendar heatmap, quiet-hours violation export) after this walkthrough
+> was performed, and it has not been regenerated per this file's own cadence. Treat the
+> manual-walkthrough rows below as evidence of the *pre-2026-06-29* template, not the
+> current one. Tracked: `docs/GAP-LEDGER.md#gap-a11y-1--accessibility-scan-the-pwa-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat`.
+> The canonical, current accessibility statement is [`docs/a11y/STATEMENT.md`](../a11y/STATEMENT.md).
+
 ## Automated (auto-gated)
 
 The structural subset is enforced in CI by `tests/test_a11y.py` (merge-blocking):
@@ -39,6 +46,7 @@ with no interactive widgets, which keeps the manual surface small.
 
 ## Accessibility statement
 
-This report aims to meet WCAG 2.2 AA. All chart data is available as text in an adjacent
-table, nothing relies on color alone, and the document is fully navigable by keyboard and
-screen reader. Report accessibility issues via the project repository.
+Moved to [`docs/a11y/STATEMENT.md`](../a11y/STATEMENT.md) (A11Y-16: the statement needs
+its own dedicated location with a conformance level, known gaps, contact, and date — not
+embedded as the last paragraph of a dated audit artifact). That file also carries the
+honest "known gaps" list this audit's staleness implies.
