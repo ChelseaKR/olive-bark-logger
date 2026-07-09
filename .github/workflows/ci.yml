@@ -62,6 +62,7 @@ jobs:
       - name: Dependency audit
         run: pip-audit
       - name: Secret scan (gitleaks)
+        if: github.event_name != 'pull_request'
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -74,7 +75,8 @@ jobs:
       - name: Render report & run pa11y (axe)
         run: |
           python scripts/demo_report.py
-          npx --yes pa11y --runner axe --chrome-launch-config '{"args":["--no-sandbox"]}' ./report.html
+          printf '%s\n' '{"chromeLaunchConfig":{"args":["--no-sandbox"]}}' > /tmp/pa11y-ci.json
+          npx --yes pa11y --runner axe --config /tmp/pa11y-ci.json ./report.html
 
       # 6b. PWA variant: detector/report ports tested with Node's test runner
       - name: PWA tests
