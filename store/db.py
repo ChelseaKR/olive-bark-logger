@@ -11,7 +11,11 @@ model.
 
 Durability: WAL journaling with synchronous=NORMAL survives process and OS crashes
 without corruption. Schema changes are applied as ordered migrations keyed on
-PRAGMA user_version, so an existing database upgrades in place.
+PRAGMA user_version, so an existing database upgrades in place. A `schema_migrations`
+side table records *when* each migration ran: those timestamps are forensic era
+boundaries — in particular, the v3 timestamp separates rows whose levels may carry a
+baked-in calibration offset (written by pre-v3 binaries) from rows stored raw
+(see docs/adr/0003).
 """
 
 from __future__ import annotations
@@ -134,11 +138,36 @@ class EventStore:
         self._migrate()
 
     def _migrate(self) -> None:
+        # Bookkeeping first (idempotent): record when each migration runs. A migration's
+        # timestamp is an era boundary for interpreting old rows — e.g. events stored
+        # before v3 ran may carry a baked-in calibration offset, while later rows are
+        # raw (ADR-0003). Migrations applied by binaries that predate this table simply
+        # have no row, which is itself honest ("time of application unknown").
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at REAL NOT NULL)"
+        )
         version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
         for target in range(version, len(_MIGRATIONS)):
             self._conn.executescript(_MIGRATIONS[target])
             self._conn.execute(f"PRAGMA user_version = {target + 1}")
+            self._conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                (target + 1, time.time()),
+            )
         self._conn.commit()
+
+    def migration_applied_at(self, version: int) -> float | None:
+        """When schema migration `version` ran on this database (unix seconds), or None.
+
+        None means the migration was applied by an older binary from before this
+        bookkeeping existed, so the time is unknown. The v3 timestamp is the boundary
+        between baked-offset-era event rows and raw-level rows (ADR-0003).
+        """
+        row = self._conn.execute(
+            "SELECT applied_at FROM schema_migrations WHERE version = ?", (version,)
+        ).fetchone()
+        return float(row["applied_at"]) if row else None
 
     # -- events --------------------------------------------------------------
     def add_event(self, event: Event, *, session_id: int | None = None) -> int:

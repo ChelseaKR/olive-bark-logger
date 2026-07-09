@@ -120,6 +120,55 @@ def test_report_main_writes_file(tmp_path, capsys):
     assert "Wrote" in capsys.readouterr().out
 
 
+def test_report_exports_apply_render_time_calibration(tmp_path, capsys):
+    """Regression (FIX-01 review finding 1): --csv/--violations-csv/--violations-html
+    must carry the same render-time calibration as the HTML report, with the calibrated
+    flag derived from the store's history — not the deprecated config field. Pre-fix,
+    the exports emitted unadjusted levels, so on a calibrated device they disagreed
+    numerically with the report and the violations HTML misstated the calibration."""
+    import csv as csv_mod
+
+    db = tmp_path / "olive.db"
+    with EventStore(db) as store:
+        store.add_calibration(6.5, "bench cal", effective_from=0.0)
+        # One event during quiet hours, raw peak -8.0 / avg -12.0 dBFS.
+        start = 1_767_326_400.0  # 2026-01-02T04:00:00Z
+        store.add_event(Event(start, start + 4.0, 4.0, -8.0, -12.0))
+    cfg = tmp_path / "cfg.json"
+    # Config calibration_offset stays 0.0 — the store's history must win everywhere.
+    cfg.write_text(json.dumps({"db_path": str(db), "tz": "UTC"}))
+
+    out = tmp_path / "r.html"
+    csv_out = tmp_path / "events.csv"
+    vcsv = tmp_path / "v.csv"
+    vhtml = tmp_path / "v.html"
+    args = ["--config", str(cfg), "--db", str(db), "--out", str(out), "--csv", str(csv_out)]
+    args += ["--violations-csv", str(vcsv), "--violations-html", str(vhtml)]
+    args += ["--generated-at", "2026-01-01 UTC"]
+    rc = report_main(args)
+    assert rc == 0
+    capsys.readouterr()
+
+    # The HTML report applies +6.5 at render: raw peak -8.0 -> -1.5.
+    assert "-1.5 dBFS" in out.read_text()
+
+    # The event CSV agrees numerically and records the offset it applied per row.
+    rows = list(csv_mod.reader(csv_out.read_text().splitlines()))
+    assert rows[1][rows[0].index("peak_dbfs")] == "-1.5"
+    assert rows[1][rows[0].index("calibration_offset_db")] == "+6.5"
+
+    # The violations CSV agrees too.
+    vrows = list(csv_mod.reader(vcsv.read_text().splitlines()))
+    assert vrows[1][vrows[0].index("peak_dbfs")] == "-1.5"
+    assert vrows[1][vrows[0].index("calibration_offset_db")] == "+6.5"
+
+    # The violations HTML derives its calibration statement from the store, not config.
+    vh = vhtml.read_text()
+    assert "A calibration offset is applied" in vh
+    assert "No calibration offset is applied" not in vh
+    assert "-1.5" in vh
+
+
 def test_store_time_window_filters(tmp_path):
     db = tmp_path / "olive.db"
     with EventStore(db) as store:

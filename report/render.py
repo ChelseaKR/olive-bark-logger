@@ -140,6 +140,23 @@ def _apply_offset(event: Event, offset: float) -> Event:
     )
 
 
+def _per_event_offsets(
+    events: list[Event], history: list[CalibrationEpoch], config: Config
+) -> list[float]:
+    """The calibration offset applied to each event at render time (parallel list).
+
+    This is the single resolver every rendered artifact must go through — the HTML
+    report and the CSV/violations exports all adjust levels with exactly these values,
+    so no two artifacts generated from the same log can disagree numerically.
+    Attribution is by event *start*: an event that straddles a recalibration uses the
+    epoch in force when it began. With no calibration history at all, the config's
+    bootstrap offset applies uniformly (the deprecated-but-supported fallback).
+    """
+    if history:
+        return [_offset_at(history, ev.start) for ev in events]
+    return [config.calibration_offset] * len(events)
+
+
 def _fmt_effective_from(effective_from: float, tz: tzinfo) -> str:
     """Human label for an epoch boundary; epoch 0 is the start of the record."""
     if effective_from <= 0.0:
@@ -158,8 +175,13 @@ def _calibration_epochs_html(epochs: list[CalibrationEpoch], *, tz: tzinfo) -> s
     )
     return (
         "\n<p>This reporting window spans <strong>more than one calibration epoch</strong>. "
-        "Each event's level is adjusted by the offset that was in force when it was "
-        "measured, so recalibrating never rewrote earlier numbers. The offsets applied are:"
+        "Each event's level is adjusted by the offset that was in force when it began, "
+        "so recalibrating does not rewrite stored numbers. One caveat: events stored by "
+        "versions of this tool from before the calibration history existed had any "
+        "then-configured offset already included in their stored levels; if that offset "
+        "was nonzero, those older rows render over-adjusted here. The database records "
+        "when that upgrade happened, so affected rows are identifiable. "
+        "The offsets applied are:"
         "</p>\n"
         "<table><caption>Calibration offsets by epoch</caption>"
         '<thead><tr><th scope="col">Effective from</th><th scope="col">Offset</th>'
@@ -349,12 +371,14 @@ def generate_report_from_db(
         session = store.latest_session()
 
     # Which epochs actually cover the events in this window? Only those drive the choice
-    # between the single-offset path and the multi-epoch disclosure.
+    # between the single-offset path and the multi-epoch disclosure. Levels are always
+    # adjusted through the shared per-event resolver, the same one the exports use.
     epochs_in_window = _epochs_covering(history, events)
+    offsets = _per_event_offsets(events, history, config)
+    adjusted = [_apply_offset(ev, off) for ev, off in zip(events, offsets)]
+    summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=config.tzinfo())
 
     if len(epochs_in_window) > 1:
-        adjusted = [_apply_offset(ev, _offset_at(history, ev.start)) for ev in events]
-        summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=config.tzinfo())
         latest = epochs_in_window[-1]
         return build_report(
             summary,
@@ -374,8 +398,6 @@ def generate_report_from_db(
         offset, note = history[-1].offset, history[-1].note or config.calibration_note
     else:
         offset, note = config.calibration_offset, config.calibration_note
-    adjusted = [_apply_offset(ev, offset) for ev in events]
-    summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=config.tzinfo())
     return build_report(
         summary,
         config=config,
@@ -425,48 +447,65 @@ def main(argv: list[str] | None = None) -> int:
     args.out.write_text(html, encoding="utf-8")
     print(f"Wrote {args.out} ({len(html)} bytes).")
 
-    if args.csv is not None:
+    if args.csv is not None or args.violations_csv is not None or args.violations_html is not None:
         from store import EventStore
 
-        from report.export import events_to_csv
-
         with EventStore(db_path) as store:
-            rows = events_to_csv(store.events(), args.csv, tz=config.tzinfo())
-        print(f"Wrote {args.csv} ({rows} rows).")
+            raw_events = store.events()  # raw dBFS; calibration is applied below, at render
+            history = store.calibration_history()
+        # Exports must agree numerically with the main report: the same render-time,
+        # per-epoch calibration is applied to every exported artifact, and each CSV row
+        # records the offset it received (raw = value - offset). The calibrated flag is
+        # derived from the store's history, never from the deprecated config field.
+        offsets = _per_event_offsets(raw_events, history, config)
+        events = [_apply_offset(ev, off) for ev, off in zip(raw_events, offsets)]
+        multi_epoch = len(set(offsets)) > 1
+        if events:
+            calibrated = all(off != 0.0 for off in offsets)
+        else:  # nothing to adjust; disclose the calibration in force (store, then config)
+            calibrated = (history[-1].offset if history else config.calibration_offset) != 0.0
 
-    if args.violations_csv is not None or args.violations_html is not None:
-        from store import EventStore
+        if args.csv is not None:
+            from report.export import events_to_csv
 
-        from report.violations import (
-            build_violation_report_html,
-            compute_violations,
-            violations_to_csv,
-        )
+            rows = events_to_csv(events, args.csv, tz=config.tzinfo(), offsets_db=offsets)
+            print(f"Wrote {args.csv} ({rows} rows).")
 
-        with EventStore(db_path) as store:
-            events = store.events()
-        if args.violations_csv is not None:
-            rows = violations_to_csv(
-                events,
-                args.violations_csv,
-                quiet_hours=config.quiet_hours,
-                tz=config.tzinfo(),
-                tz_name=config.tz,
+        if args.violations_csv is not None or args.violations_html is not None:
+            from report.violations import (
+                build_violation_report_html,
+                compute_violations,
+                violations_to_csv,
             )
-            print(f"Wrote {args.violations_csv} ({rows} rows).")
-        if args.violations_html is not None:
-            report = compute_violations(
-                events, quiet_hours=config.quiet_hours, tz=config.tzinfo(), tz_name=config.tz
-            )
-            vhtml = build_violation_report_html(
-                report,
-                threshold_dbfs=config.threshold_dbfs,
-                min_duration_s=config.min_duration_s,
-                generated_at=generated_at,
-                calibrated=config.calibration_offset != 0.0,
-            )
-            args.violations_html.write_text(vhtml, encoding="utf-8")
-            print(f"Wrote {args.violations_html} ({len(vhtml)} bytes).")
+
+            if args.violations_csv is not None:
+                rows = violations_to_csv(
+                    events,
+                    args.violations_csv,
+                    quiet_hours=config.quiet_hours,
+                    tz=config.tzinfo(),
+                    tz_name=config.tz,
+                    offsets_db=offsets,
+                )
+                print(f"Wrote {args.violations_csv} ({rows} rows).")
+            if args.violations_html is not None:
+                report = compute_violations(
+                    events,
+                    quiet_hours=config.quiet_hours,
+                    tz=config.tzinfo(),
+                    tz_name=config.tz,
+                    offsets_db=offsets,
+                )
+                vhtml = build_violation_report_html(
+                    report,
+                    threshold_dbfs=config.threshold_dbfs,
+                    min_duration_s=config.min_duration_s,
+                    generated_at=generated_at,
+                    calibrated=calibrated,
+                    multi_epoch=multi_epoch,
+                )
+                args.violations_html.write_text(vhtml, encoding="utf-8")
+                print(f"Wrote {args.violations_html} ({len(vhtml)} bytes).")
     return 0
 
 

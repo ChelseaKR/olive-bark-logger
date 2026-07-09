@@ -46,6 +46,39 @@ def test_old_v1_database_upgrades_in_place(tmp_path):
         store._conn.execute("SELECT session_id FROM events")  # column now present
 
 
+def test_migrations_record_applied_timestamps(tmp_path):
+    """`schema_migrations` records when each migration ran. The v3 timestamp is the
+    forensic era boundary between rows that may carry a baked-in calibration offset
+    (pre-v3 binaries) and raw-level rows (ADR-0003)."""
+    import time
+
+    # Fresh DB: every migration ran now, so every version has a timestamp.
+    before = time.time()
+    with EventStore(tmp_path / "fresh.db") as store:
+        for v in range(1, SCHEMA_VERSION + 1):
+            at = store.migration_applied_at(v)
+            assert at is not None
+            assert before <= at <= time.time()
+        assert store.migration_applied_at(99) is None  # never applied
+
+    # A v2-era DB upgraded in place: v1/v2 predate the bookkeeping (honestly unknown),
+    # v3 records the upgrade moment — the baked-era/raw-era boundary for this database.
+    legacy = tmp_path / "legacy.db"
+    conn = sqlite3.connect(legacy)
+    conn.executescript(_MIGRATIONS[0])
+    conn.executescript(_MIGRATIONS[1])
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+    upgrade_start = time.time()
+    with EventStore(legacy) as store:
+        assert store.migration_applied_at(1) is None
+        assert store.migration_applied_at(2) is None
+        at3 = store.migration_applied_at(3)
+        assert at3 is not None
+        assert upgrade_start <= at3 <= time.time()
+
+
 def test_old_v2_database_upgrades_to_v3_preserving_offset_as_epoch_zero(tmp_path):
     db = tmp_path / "olive.db"
     # Hand-build a v2 database (events + calibration + sessions) with a single legacy

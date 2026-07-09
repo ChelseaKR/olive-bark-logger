@@ -42,6 +42,10 @@ on any Python 3.9+ with no installs; only live microphone capture needs the `liv
 > a database that has never been calibrated and are ignored once `olive-calibrate` has run.
 > The monitor never writes calibration, so `olive-calibrate` followed by `olive-monitor`
 > with a default config no longer reverts the device to uncalibrated.
+> `threshold_dbfs` is defined against the same raw stored scale, so recalibrating never
+> changes detection sensitivity. Render-time calibration is applied identically to the
+> HTML report **and** to the `--csv` / `--violations-csv` / `--violations-html` exports;
+> each CSV row records the offset included in its levels (`calibration_offset_db`).
 
 ## CLIs
 | Command | What it does |

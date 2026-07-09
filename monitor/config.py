@@ -54,7 +54,10 @@ class Config:
     sample_rate: int = 16000
     frame_size: int = 1600  # 100 ms frames -> one reading every 100 ms
 
-    # Detection.
+    # Detection. threshold_dbfs is defined against the RAW dBFS scale as stored —
+    # calibration offsets are applied at render time only (see ADR-0003) — so
+    # recalibrating never changes detection sensitivity. If you tuned a threshold on a
+    # pre-v3 build with a nonzero calibration_offset baked in, re-tune with olive-tune.
     threshold_dbfs: float = -35.0
     min_duration_s: float = 0.4
     debounce_s: float = 1.0
