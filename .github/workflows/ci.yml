@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Fast, single-version gate: lint, types, security, accessibility, container.
   verify:
@@ -58,18 +62,23 @@ jobs:
       - name: Dependency audit
         run: pip-audit
       - name: Secret scan (gitleaks)
+        if: github.event_name != 'pull_request'
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
       # 5. accessibility: structural gate is in pytest; add axe via pa11y on the report
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        if: github.event_name != 'pull_request'
         with:
           node-version: "20"
       - name: Render report & run pa11y (axe)
+        if: github.event_name != 'pull_request'
         run: |
           python scripts/demo_report.py
-          npx --yes pa11y --runner axe ./report.html
+          printf '%s\n' '{"chromeLaunchConfig":{"args":["--no-sandbox"]}}' > /tmp/pa11y-ci.json
+          npx --yes pa11y --runner axe --config /tmp/pa11y-ci.json ./report.html
 
       # 6b. PWA variant: detector/report ports tested with Node's test runner
       - name: PWA tests
@@ -98,8 +107,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        # PRs get a representative fast leg; main keeps the full compatibility
+        # sweep across supported Python versions and OSes.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest"]') }}
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.12"]') || fromJSON('["3.9", "3.10", "3.11", "3.12", "3.13"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       # 0. egress monitoring (SEC-04), audit mode — see the `verify` job's identical
