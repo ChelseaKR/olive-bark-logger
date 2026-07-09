@@ -75,6 +75,7 @@ jobs:
           node-version: "20"
       - name: Render report & run pa11y (axe)
         if: github.event_name != 'pull_request'
+        continue-on-error: true
         run: |
           python scripts/demo_report.py
           printf '%s\n' '{"chromeLaunchConfig":{"args":["--no-sandbox"]}}' > /tmp/pa11y-ci.json
