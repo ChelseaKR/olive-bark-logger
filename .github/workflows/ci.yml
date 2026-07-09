@@ -64,6 +64,7 @@ jobs:
       - name: Secret scan (gitleaks)
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
       # 5. accessibility: structural gate is in pytest; add axe via pa11y on the report
@@ -73,7 +74,7 @@ jobs:
       - name: Render report & run pa11y (axe)
         run: |
           python scripts/demo_report.py
-          npx --yes pa11y --runner axe ./report.html
+          npx --yes pa11y --runner axe --chrome-launch-config '{"args":["--no-sandbox"]}' ./report.html
 
       # 6b. PWA variant: detector/report ports tested with Node's test runner
       - name: PWA tests
