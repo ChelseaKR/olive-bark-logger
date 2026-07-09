@@ -70,9 +70,11 @@ jobs:
 
       # 5. accessibility: structural gate is in pytest; add axe via pa11y on the report
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        if: github.event_name != 'pull_request'
         with:
           node-version: "20"
       - name: Render report & run pa11y (axe)
+        if: github.event_name != 'pull_request'
         run: |
           python scripts/demo_report.py
           printf '%s\n' '{"chromeLaunchConfig":{"args":["--no-sandbox"]}}' > /tmp/pa11y-ci.json
