@@ -17,6 +17,7 @@ htmlcov/
 *.db-journal
 *.db-wal
 /report.html
+/report.pdf
 /demo.db
 
 # OS

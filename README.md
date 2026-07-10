@@ -12,7 +12,7 @@ You've been on the receiving end of vague noise complaints about Olive with noth
 - **Listens for levels, not content:** computes sound level (dBFS, with a documented calibration offset) frame-by-frame in memory and discards the audio immediately.
 - **Detects events:** threshold + minimum-duration + debounce → a "bark/noise event" with start, duration, and peak/average level.
 - **Logs to SQLite:** events only — timestamps and levels, no audio.
-- **Generates reports:** daily/hourly distributions, quiet-hours summaries, and event counts as a clean PDF/HTML with charts and a methodology + limitations section.
+- **Generates reports:** daily/hourly distributions, quiet-hours summaries, and event counts as an accessible HTML report with charts and a methodology + limitations section. An optional, opt-in tagged PDF/A-3a export (`--pdf`, needs the `pdf` extra) is also available — see [Standards Conformance](#standards-conformance) for exactly what its accessibility claim does and does not cover.
 - **Runs on-device:** a Raspberry Pi service (primary) or a browser PWA (zero-hardware alternative), no network required.
 
 ## For Claude Code
@@ -53,7 +53,7 @@ on any Python 3.9+ with no installs; only live microphone capture needs the `liv
 | `olive-monitor` | Run the monitor: capture → level → detect → SQLite. Creates a capture *session* (lineage), writes a heartbeat file, reconnects on device failure, prunes per `retention_days`. |
 | `olive-tune` | Show the live level so you can pick a threshold by ear; prints a suggestion. |
 | `olive-calibrate` | Measure mean level against a reference SPL reading and append a calibration offset (with optional `--reference-instrument` provenance). This is the **only** writer of calibration; it is an append-only history applied at report time, so recalibrating never rewrites earlier events. |
-| `olive-report` | Render the accessible HTML report (distributions + day×hour calendar heatmap + quiet-hours summary). Optional `--csv` event export, and `--violations-csv` / `--violations-html` for an honest quiet-hours report suitable for a neighbor/landlord/HOA submission. |
+| `olive-report` | Render the accessible HTML report (distributions + day×hour calendar heatmap + quiet-hours summary). Optional `--csv` event export, `--violations-csv` / `--violations-html` for an honest quiet-hours report suitable for a neighbor/landlord/HOA submission, and `--pdf` / `--violations-pdf` for a tagged PDF/A-3a of either (needs the `pdf` extra; see [Standards Conformance](#standards-conformance)). |
 
 ## Local status page
 When `health_path` is configured, the monitor writes a static **`status.html`** next to
@@ -130,7 +130,7 @@ write-effect, so gaps live here instead — see that file's header for why).
 | Security & Supply-Chain | Applies — hardened posture (ASVS **L2**); gap tracked in [GAP-SEC-1](./docs/GAP-LEDGER.md#gap-sec-1--security--supply-chain-harden-runner-block-mode-codeql-lockfileosv-scanner-trufflehog-sbomsigning-scorecard) |
 | CI/CD | Applies — gap tracked in [GAP-CICD-1](./docs/GAP-LEDGER.md#gap-cicd-1--cicd-apply-the-branch-ruleset-add-zizmor--codeql-actions) (ruleset committed at `.github/rulesets/main.json`, not yet applied — that's a live GitHub action for the maintainer, see the file's header) |
 | Release & Versioning | Applies — release-producing deployed app; gap tracked in [GAP-REL-1](./docs/GAP-LEDGER.md#gap-rel-1--release--versioning-the-releasesupply-chain-pipeline-is-still-absent) (tag-triggered `release.yml` now exists, REL-14 — no tag cut yet, and PyPI/GHCR/cosign are still open; `CITATION.cff` intentionally carries no `date-released` until a tag exists) |
-| Accessibility | Applies — gap tracked in [GAP-A11Y-1](./docs/GAP-LEDGER.md#gap-a11y-1--accessibility-scan-the-pwa-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat) (PWA surface unscanned; walkthrough stale since `8a9f1eb`) |
+| Accessibility | Applies — gap tracked in [GAP-A11Y-1](./docs/GAP-LEDGER.md#gap-a11y-1--accessibility-scan-the-pwa-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat) (PWA surface unscanned; walkthrough stale since `8a9f1eb`) and [GAP-A11Y-2](./docs/GAP-LEDGER.md#gap-a11y-2--accessibility-tagged-pdfa-export-exp-06-has-no-human-at-walkthrough-or-verapdf-ci-gate) (the optional tagged PDF/A-3a export's structure is tested; its PDF/UA/"fully accessible" conformance is **not** verified — no human AT walkthrough has been done) |
 | Observability | Applies — Tier C: OTel out-of-scope (no network surface); `--log-format json` opt-in planned, gap tracked in [GAP-OBS-1](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation) |
 | Internationalization | N/A — single-user tool, operator-only English output ([`docs/I18N.md`](./docs/I18N.md)) |
 | AI Evaluation | N/A — no model/prompt/retrieval surface; nothing in this codebase calls an LLM SDK |

@@ -57,6 +57,22 @@ jobs:
       - name: i18n declaration gate
         run: make i18n
 
+      # 3b. EXP-06 tagged PDF/A export: the optional `pdf` extra needs a >=3.10 host
+      #     (this job already runs 3.12) plus WeasyPrint's native text/image-rendering
+      #     libraries (Pango, HarfBuzz, GDK-Pixbuf — not a PyPI package, see
+      #     docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md). Structural-only gate
+      #     (tests/test_pdf_export.py); does not and cannot verify PDF/UA conformance
+      #     — see that ADR and docs/GAP-LEDGER.md#gap-a11y-2 for the human gate that
+      #     stays open regardless of this test passing.
+      - name: Install WeasyPrint's native libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libgdk-pixbuf2.0-0
+      - name: Install pdf extra
+        run: pip install -e ".[pdf]"
+      - name: Tagged PDF/A structural tests
+        run: pytest tests/test_pdf_export.py -q
+
       # 4. security: SAST + deps + secrets. Kept as discrete steps (rather than
       #    `make security`) because that target's gitleaks check expects a CLI
       #    binary on PATH, whereas gitleaks-action below runs it as a container

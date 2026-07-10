@@ -767,6 +767,29 @@ def generate_report_from_db(
     )
 
 
+def _write_tagged_pdf_cli(html: str, path: Path, *, violation: bool = False) -> bool:
+    """Write one optional PDF, returning False after an actionable user-facing error."""
+    from report.pdf_export import (
+        PdfExportUnavailable,
+        TaggedPdfGenerationError,
+        write_tagged_pdf,
+    )
+
+    try:
+        n = write_tagged_pdf(html, path)
+    except (PdfExportUnavailable, TaggedPdfGenerationError) as exc:
+        print(f"Skipped {path}: {exc}")
+        return False
+    suffix = (
+        "structural tags only; not a verified PDF/UA conformance claim"
+        if violation
+        else "structural tags only; not a verified PDF/UA conformance claim, see "
+        "docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md"
+    )
+    print(f"Wrote {path} ({n} bytes, tagged PDF/A-3a -- {suffix}).")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="olive-report",
@@ -796,6 +819,23 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="render a standalone honest quiet-hours violation report to this HTML path",
     )
+    parser.add_argument(
+        "--pdf",
+        type=Path,
+        default=None,
+        help=(
+            "also export a tagged PDF/A-3a of the main report to this path (needs the "
+            "'pdf' extra: pip install -e '.[pdf]'; see "
+            "docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md -- structural tags "
+            "only, not a verified PDF/UA conformance claim)"
+        ),
+    )
+    parser.add_argument(
+        "--violations-pdf",
+        type=Path,
+        default=None,
+        help="also export a tagged PDF/A-3a of the quiet-hours violation report to this path",
+    )
     args = parser.parse_args(argv)
 
     config = Config.load(args.config)
@@ -806,7 +846,15 @@ def main(argv: list[str] | None = None) -> int:
     args.out.write_text(html, encoding="utf-8")
     print(f"Wrote {args.out} ({len(html)} bytes).")
 
-    if args.csv is not None or args.violations_csv is not None or args.violations_html is not None:
+    if args.pdf is not None and not _write_tagged_pdf_cli(html, args.pdf):
+        return 1
+
+    if (
+        args.csv is not None
+        or args.violations_csv is not None
+        or args.violations_html is not None
+        or args.violations_pdf is not None
+    ):
         from store import EventStore
 
         with EventStore(db_path) as store:
@@ -833,7 +881,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"Wrote {args.csv} ({rows} rows).")
 
-        if args.violations_csv is not None or args.violations_html is not None:
+        if (
+            args.violations_csv is not None
+            or args.violations_html is not None
+            or args.violations_pdf is not None
+        ):
             from report.violations import (
                 build_violation_report_html,
                 compute_violations,
@@ -851,7 +903,7 @@ def main(argv: list[str] | None = None) -> int:
                     gaps=gaps,
                 )
                 print(f"Wrote {args.violations_csv} ({rows} rows).")
-            if args.violations_html is not None:
+            if args.violations_html is not None or args.violations_pdf is not None:
                 report = compute_violations(
                     events,
                     quiet_hours=config.quiet_hours,
@@ -868,8 +920,13 @@ def main(argv: list[str] | None = None) -> int:
                     calibrated=calibrated,
                     multi_epoch=multi_epoch,
                 )
-                args.violations_html.write_text(vhtml, encoding="utf-8")
-                print(f"Wrote {args.violations_html} ({len(vhtml)} bytes).")
+                if args.violations_html is not None:
+                    args.violations_html.write_text(vhtml, encoding="utf-8")
+                    print(f"Wrote {args.violations_html} ({len(vhtml)} bytes).")
+                if args.violations_pdf is not None and not _write_tagged_pdf_cli(
+                    vhtml, args.violations_pdf, violation=True
+                ):
+                    return 1
     return 0
 
 
