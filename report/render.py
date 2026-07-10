@@ -404,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
 
         with EventStore(db_path) as store:
             rows = events_to_csv(store.events(), args.csv, tz=config.tzinfo(), gaps=store.gaps())
-        print(f"Wrote {args.csv} ({rows} rows).")  # noqa: T201
+        print(f"Wrote {args.csv} ({rows} rows).")
 
     if args.violations_csv is not None or args.violations_html is not None:
         from store import EventStore

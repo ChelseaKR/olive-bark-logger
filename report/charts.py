@@ -99,6 +99,51 @@ def _heat_fill(ratio: float) -> str:
 _UNMON_LABEL = "not monitored"
 
 
+def _heat_cell(
+    *,
+    label: str,
+    hour: int,
+    value: int,
+    x: int,
+    y: int,
+    cell_w: int,
+    cell_h: int,
+    max_v: int,
+    is_unmon: bool,
+    hatch_id: str,
+    value_caption: str,
+) -> tuple[list[str], str]:
+    """Render one heatmap cell (rect + optional count text). Returns (parts, busiest).
+
+    `busiest` is the "<day> <hour> with <n> <caption>" phrase when this cell holds the
+    grid maximum, else "" — extracted from `heatmap` to keep its complexity in bounds.
+    """
+    ratio = (value / max_v) if max_v else 0.0
+    if is_unmon:
+        fill = f"url(#{escape(hatch_id)})"
+        cell_title = f"{escape(label)} {hour:02d}:00 — {_UNMON_LABEL}"
+    else:
+        fill = _HEAT_EMPTY if value == 0 else _heat_fill(ratio)
+        cell_title = f"{escape(label)} {hour:02d}:00 — {value} {escape(value_caption)}"
+    parts = [
+        f'<rect x="{x}" y="{y}" width="{cell_w}" height="{cell_h}" fill="{fill}" '
+        f'stroke="#fff" stroke-width="1">'
+        f"<title>{cell_title}</title>"
+        "</rect>"
+    ]
+    busiest = ""
+    if value and not is_unmon:
+        if value == max_v:
+            busiest = f"{label} {hour:02d}:00 with {value} {value_caption}"
+        # White text on the darkest cells, dark text on the lighter ones.
+        text_fill = "#fff" if ratio >= 0.55 else "#111"
+        parts.append(
+            f'<text x="{x + cell_w / 2:.0f}" y="{y + cell_h - 5}" font-size="9" '
+            f'text-anchor="middle" fill="{text_fill}">{value}</text>'
+        )
+    return parts, busiest
+
+
 def heatmap(
     *,
     chart_id: str,
@@ -161,30 +206,22 @@ def heatmap(
             f'fill="{_AXIS_COLOR}">{escape(label)}</text>'
         )
         for h, value in enumerate(row):
-            x = gutter + h * cell_w
-            is_unmon = (label, h) in unmon
-            ratio = (value / max_v) if max_v else 0.0
-            if is_unmon:
-                fill = f"url(#{escape(hatch_id)})"
-                cell_title = f"{escape(label)} {h:02d}:00 — {_UNMON_LABEL}"
-            else:
-                fill = _HEAT_EMPTY if value == 0 else _heat_fill(ratio)
-                cell_title = f"{escape(label)} {h:02d}:00 — {value} {escape(value_caption)}"
-            parts.append(
-                f'<rect x="{x}" y="{y}" width="{cell_w}" height="{cell_h}" fill="{fill}" '
-                f'stroke="#fff" stroke-width="1">'
-                f"<title>{cell_title}</title>"
-                "</rect>"
+            cell_parts, cell_busiest = _heat_cell(
+                label=label,
+                hour=h,
+                value=value,
+                x=gutter + h * cell_w,
+                y=y,
+                cell_w=cell_w,
+                cell_h=cell_h,
+                max_v=max_v,
+                is_unmon=(label, h) in unmon,
+                hatch_id=hatch_id,
+                value_caption=value_caption,
             )
-            if value and not is_unmon:
-                if value == max_v:
-                    busiest = f"{label} {h:02d}:00 with {value} {value_caption}"
-                # White text on the darkest cells, dark text on the lighter ones.
-                text_fill = "#fff" if ratio >= 0.55 else "#111"
-                parts.append(
-                    f'<text x="{x + cell_w / 2:.0f}" y="{y + cell_h - 5}" font-size="9" '
-                    f'text-anchor="middle" fill="{text_fill}">{value}</text>'
-                )
+            parts.extend(cell_parts)
+            if cell_busiest:
+                busiest = cell_busiest
 
     aria = (
         f"{title}. {len(grid)} days by 24 hours. Maximum {max_v} {value_caption} in a single hour."

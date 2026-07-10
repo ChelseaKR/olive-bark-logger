@@ -153,6 +153,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
         f"Monitoring (threshold {config.threshold_dbfs} dBFS). "
         f"Logging events to {config.db_path}. Audio is never recorded. Ctrl-C to stop."
     )
+
     def record_gap(start: float, end: float, reason: str) -> None:
         # Persist an outage span so "no data" is later reported distinctly from quiet.
         store.add_gap(start, end, reason, session_id=session_id)
