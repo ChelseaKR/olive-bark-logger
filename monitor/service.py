@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             frames_dropped=stats.frames_dropped,
         )
 
-    print(  # noqa: T201 - operator-facing status line
+    print(
         f"Monitoring (threshold {config.threshold_dbfs} dBFS). "
         f"Logging events to {config.db_path}. Audio is never recorded. Ctrl-C to stop."
     )
