@@ -75,17 +75,23 @@ exists; no NVDA or iOS VoiceOver pass.
 Plan: REMEDIATION.md P1-7, P2-2.
 
 ## GAP-REL-1 — Release & Versioning: the release/supply-chain pipeline is still absent
-**Status: Open (2026-07-05).** Controls: REL-08, REL-13, REL-14, REL-15, REL-16,
-REL-18 (digest pin + HEALTHCHECK closed this pass; GHCR publish still open), REL-20.
-This is the largest remaining gap and an explicit **L-effort, multi-day** item — not
-attempted in this pass per the remediation plan's own effort sizing, and because
-several of its steps (tagging a release, pushing to a registry, running cosign/SLSA
-attestation against real infrastructure) are exactly the class of live, externally
-visible action this remediation pass is scoped to *plan and stage*, not execute. See
-the README Standards Conformance table's Release & Versioning row and
-`CITATION.cff`'s in-file note for the corrected (un-released) version claim.
-Plan: REMEDIATION.md P2-1 (full pipeline design, already written — implement from
-there when ready to cut `v0.1.1`).
+**Status: Partially open (2026-07-10).** Controls: REL-08, REL-13 (closed this pass),
+REL-14 (closed this pass), REL-15, REL-16, REL-18 (digest pin + HEALTHCHECK closed
+2026-07-05; GHCR publish still open), REL-20.
+`.github/workflows/release.yml` now exists (STANDARDS conformance remediation
+2026-07-10): tag-triggered on `v*`, re-runs `make verify` at the tagged commit, builds
+sdist + wheel, generates a CycloneDX SBOM, attests build provenance via GitHub's native
+keyless OIDC attestation, and publishes a GitHub Release with the matching CHANGELOG
+section — all using only built-in `GITHUB_TOKEN`/OIDC, no external credentials. It has
+never fired (no `v*` tag exists yet).
+Still open, and still an explicit **L-effort, multi-day, externally-visible-action**
+item not attempted in this pass: PyPI trusted-publisher configuration, a GHCR/registry
+publish decision, and cosign key-based signing (provisioning/protecting a long-lived
+signing key) — see the workflow file's own header for the enumerated list. See the
+README Standards Conformance table's Release & Versioning row and `CITATION.cff`'s
+in-file note for the corrected (un-released) version claim.
+Plan: implement the PyPI/GHCR/cosign slice when ready to cut `v0.1.0` and a registry
+decision has actually been made.
 
 ## GAP-DOC-1 — Documentation: vendor `/STANDARDS` as a pinned submodule, finish the ADR migration
 **Status: Partially open (2026-07-05).** Controls: DOC-01, DOC-02, DOC-03, DOC-04
