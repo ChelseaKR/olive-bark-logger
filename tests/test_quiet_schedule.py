@@ -104,7 +104,7 @@ def test_multiple_windows_in_a_single_day():
 
 def test_label_covers_all_days_without_suffix():
     sched = QuietSchedule.from_legacy(22, 8)
-    assert sched.label() == "22:00–08:00"
+    assert sched.label() == "22:00–08:00"  # noqa: RUF001 - intentional en dash
 
 
 def test_label_shows_day_ranges_for_subsets():
@@ -113,7 +113,7 @@ def test_label_shows_day_ranges_for_subsets():
     )
     weekend = QuietWindow(start_minute=23 * 60, end_minute=8 * 60, days=frozenset({5, 6}))
     sched = QuietSchedule((weekday, weekend))
-    assert sched.label() == "22:30–07:00 (Mon-Fri); 23:00–08:00 (Sat-Sun)"
+    assert sched.label() == "22:30–07:00 (Mon-Fri); 23:00–08:00 (Sat-Sun)"  # noqa: RUF001 - intentional en dash
 
 
 # --- validation errors ------------------------------------------------------
@@ -189,7 +189,7 @@ def test_config_load_new_form_roundtrip(tmp_path):
     )
     c = Config.load(p)
     assert len(c.quiet_hours.windows) == 2
-    assert c.quiet_hours.label() == "22:30–07:00 (Mon-Fri); 23:00–08:00 (Sat-Sun)"
+    assert c.quiet_hours.label() == "22:30–07:00 (Mon-Fri); 23:00–08:00 (Sat-Sun)"  # noqa: RUF001 - intentional en dash
     # Config.to_dict emits a JSON-serializable form that reloads to the same schedule.
     reloaded = QuietSchedule.from_json(c.to_dict()["quiet_hours"])
     assert reloaded == c.quiet_hours

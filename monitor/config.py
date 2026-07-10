@@ -120,7 +120,7 @@ class QuietWindow:
 
     def label(self) -> str:
         """Human label like "22:30-07:00" or, for a day subset, "22:30-07:00 (Mon-Fri)"."""
-        span = f"{_fmt_minute(self.start_minute)}–{_fmt_minute(self.end_minute)}"
+        span = f"{_fmt_minute(self.start_minute)}–{_fmt_minute(self.end_minute)}"  # noqa: RUF001 - intentional en dash
         if self.days != _ALL_DAYS:
             span += f" ({_fmt_days(self.days)})"
         return span
@@ -197,7 +197,7 @@ class QuietSchedule:
         return {"windows": [w.to_dict() for w in self.windows]}
 
 
-def QuietHours(start_hour: int = 22, end_hour: int = 8) -> QuietSchedule:  # noqa: N802
+def QuietHours(start_hour: int = 22, end_hour: int = 8) -> QuietSchedule:
     """Deprecated legacy constructor kept for back-compat.
 
     Returns a :class:`QuietSchedule` equivalent to the old daily hour-only window (which
