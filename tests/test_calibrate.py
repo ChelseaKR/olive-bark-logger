@@ -93,5 +93,5 @@ def test_main_calibrate_records_reference_instrument(tmp_path, capsys):
     )
     assert rc == 0
     with EventStore(db) as store:
-        offset, note = store.get_calibration()
+        _offset, note = store.get_calibration()
     assert "Reference instrument: Brand X, IEC 61672 Class 2." in note
