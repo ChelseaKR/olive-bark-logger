@@ -82,8 +82,12 @@ jobs:
           npx --yes pa11y --runner axe --config /tmp/pa11y-ci.json ./report.html
 
       # 5b. accessibility (PWA UI): same axe pass against the browser edition's page.
+      #     Chrome needs --no-sandbox on hosted runners (same config as the step above,
+      #     recreated here because that step is skipped on pull_request events).
       - name: Run pa11y (axe) on the PWA UI
-        run: npx --yes pa11y --runner axe ./pwa/index.html
+        run: |
+          printf '%s\n' '{"chromeLaunchConfig":{"args":["--no-sandbox"]}}' > /tmp/pa11y-pwa.json
+          npx --yes pa11y --runner axe --config /tmp/pa11y-pwa.json ./pwa/index.html
 
       # 6b. PWA variant: detector/report ports tested with Node's test runner
       - name: PWA tests
