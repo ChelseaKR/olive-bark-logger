@@ -62,7 +62,6 @@ jobs:
       - name: Dependency audit
         run: pip-audit
       - name: Secret scan (gitleaks)
-        if: github.event_name != 'pull_request'
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,12 +69,9 @@ jobs:
 
       # 5. accessibility: structural gate is in pytest; add axe via pa11y on the report
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        if: github.event_name != 'pull_request'
         with:
           node-version: "20"
       - name: Render report & run pa11y (axe)
-        if: github.event_name != 'pull_request'
-        continue-on-error: true
         run: |
           python scripts/demo_report.py
           printf '%s\n' '{"chromeLaunchConfig":{"args":["--no-sandbox"]}}' > /tmp/pa11y-ci.json
