@@ -169,8 +169,8 @@ def _write_status_page(config: Config, store: EventStore, payload: dict[str, obj
             heartbeat_interval_s=config.checkpoint_interval_s,
         )
         write_status(status_path, html)
-    except Exception as exc:  # noqa: BLE001 - status page is strictly best-effort
-        print(f"status page not written ({exc}).")  # noqa: T201
+    except Exception as exc:
+        print(f"status page not written ({exc}).")
 
 
 def _bootstrap_session(store: EventStore, config: Config, started_at: float) -> int:

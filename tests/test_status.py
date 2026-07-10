@@ -50,7 +50,7 @@ def _aggregates(events: list[Event] | None = None, **overrides: object) -> Statu
         busiest = max(summary.by_hour, key=lambda h: summary.by_hour[h])
     base: dict[str, object] = {
         "summary": summary,
-        "quiet_window": "22:00–08:00",
+        "quiet_window": "22:00–08:00",  # noqa: RUF001 - intentional en dash
         "tz_name": "UTC",
         "busiest_hour": busiest,
         "gaps": None,
@@ -107,7 +107,7 @@ def test_gap_ledger_absent_renders_unavailable_state():
 def test_gap_ledger_present_lists_gaps():
     html = render_status(
         _payload(),
-        _aggregates(_events(), gaps=["2026-01-01 02:00–02:30 (monitor down)"]),
+        _aggregates(_events(), gaps=["2026-01-01 02:00–02:30 (monitor down)"]),  # noqa: RUF001
         now=START,
     )
     assert "monitor down" in html

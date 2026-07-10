@@ -80,7 +80,7 @@ def collect_status_aggregates(
     if any(summary.by_hour.values()):
         busiest_hour = max(summary.by_hour, key=lambda h: summary.by_hour[h])
     gaps = [
-        f"{_fmt_ts(gap.start, tz)}–{_fmt_ts(gap.end, tz)} "
+        f"{_fmt_ts(gap.start, tz)}–{_fmt_ts(gap.end, tz)} "  # noqa: RUF001 - range dash
         f"({_fmt_duration(gap.duration)}, {gap.reason.replace('-', ' ')})"
         for gap in store.gaps(since=since, until=now)
     ]
@@ -215,7 +215,7 @@ def render_status(
     else:
         h = aggregates.busiest_hour
         count = summary.by_hour.get(h, 0)
-        loudest_window = f"{h:02d}:00–{(h + 1) % 24:02d}:00 ({count} events)"
+        loudest_window = f"{h:02d}:00–{(h + 1) % 24:02d}:00 ({count} events)"  # noqa: RUF001 - intentional en dash
     peak_str = (
         f"{summary.loudest_peak_dbfs:.1f} dBFS" if summary.event_count else "no events in window"
     )
