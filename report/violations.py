@@ -25,9 +25,12 @@ from monitor.detector import Event
 
 from report.render import (
     _STYLE,
+    NO_AUDIO_RATIONALE,
     NO_SOURCE_NOTE,
     RELATIVE_DBFS_NOTE,
     _fmt_seconds,
+    cover_html,
+    cover_text_lines,
 )
 
 
@@ -150,13 +153,17 @@ def violations_to_csv(
     """Write every event with a within/outside-quiet-hours flag. Returns rows written.
 
     The export is honest by construction: it lists *all* events, not only the flagged
-    ones, so a reader can see the full picture rather than a cherry-picked subset; and
-    each row records the calibration offset included in its levels (0.0 = raw dBFS).
+    ones, so a reader can see the full picture rather than a cherry-picked subset; each
+    row records the calibration offset included in its levels (0.0 = raw dBFS); and the
+    "what this can and cannot prove" cover block (R1) is written as a leading ``#`` comment
+    preamble so the caveat travels with the file; data rows below it are unchanged.
     """
     report = compute_violations(
         events, quiet_hours=quiet_hours, tz=tz, tz_name=tz_name, offsets_db=offsets_db
     )
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
+        for line in cover_text_lines():
+            fh.write(f"# {line}\n" if line else "#\n")
         writer = csv.writer(fh)
         writer.writerow(_CSV_HEADER)
         for r in report.rows:
@@ -260,6 +267,8 @@ def build_violation_report_html(
 against a configured quiet-hours window. No audio was recorded, stored, or transmitted to
 produce it.</p>
 
+{cover_html()}
+
 <h2>Quiet-hours window</h2>
 <p>Quiet hours: <strong>{escape(report.window)}</strong> in time zone
 <strong>{escape(report.tz_name)}</strong> (daylight-saving aware). Configure this to match
@@ -284,6 +293,9 @@ your local ordinance, lease, or HOA rule before relying on the counts below.</p>
 level in memory and immediately discarded; only six numbers per event are stored — never
 audio. An event counts toward quiet hours when its start time falls inside the window above.
 {calib_line}</p>
+
+<h2>Why there is deliberately no audio</h2>
+<div class="note"><p>{escape(NO_AUDIO_RATIONALE)}</p></div>
 
 <h2>Limitations</h2>
 <div class="note">

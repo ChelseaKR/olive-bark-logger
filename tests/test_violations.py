@@ -55,7 +55,12 @@ def test_violations_csv_lists_all_events_flagged(tmp_path):
     events = [_ev(23, tag="bark-like"), _ev(12)]
     n = violations_to_csv(events, out, quiet_hours=QuietHours(22, 8), tz=timezone.utc)
     assert n == 2
-    rows = list(csv.reader(out.read_text().splitlines()))
+    text = out.read_text()
+    # R1: the "what this can and cannot prove" cover travels as a leading comment preamble;
+    # the machine-readable data rows below it are unchanged.
+    assert "# What this can and cannot prove" in text
+    data_lines = [ln for ln in text.splitlines() if not ln.startswith("#")]
+    rows = list(csv.reader(data_lines))
     assert rows[0] == [
         "start_unix",
         "start_iso",
@@ -92,6 +97,10 @@ def test_violation_html_is_honest_and_accessible():
     assert "<h2>Methodology</h2>" in html and "<h2>Limitations</h2>" in html
     assert 'scope="col"' in html and 'scope="row"' in html
     assert "No calibration offset is applied" in html
+    # R1 cover + R5 reader-facing no-audio note travel with the shared artifact.
+    assert "<h2>What this can and cannot prove</h2>" in html
+    assert "<h2>Why there is deliberately no audio</h2>" in html
+    assert "deliberate privacy choice, not missing data" in html
 
 
 def test_violation_html_multi_epoch_is_disclosed_per_row():
@@ -166,7 +175,9 @@ def test_report_cli_exports_violations(tmp_path, capsys):
         ]
     )
     assert rc == 0
-    assert vcsv.exists() and len(vcsv.read_text().splitlines()) == 3
+    assert vcsv.exists()
+    data_lines = [ln for ln in vcsv.read_text().splitlines() if not ln.startswith("#")]
+    assert len(data_lines) == 3  # header + 2 events, excluding the R1 cover preamble
     assert vhtml.exists() and "Quiet-Hours Report" in vhtml.read_text()
     out = capsys.readouterr().out
     assert "v.csv" in out and "v.html" in out

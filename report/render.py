@@ -40,6 +40,73 @@ NO_SOURCE_NOTE = (
     "where it came from; it does not record or identify any voice or source."
 )
 
+# R5 — reader-facing "why there is deliberately no audio" note. The rationale already
+# lives in docs/audits/recording-law-notes.md; this surfaces it to the neighbor / PM /
+# board who reads the report, so the absence of audio reads as a privacy choice, not as
+# missing data. General information, not jurisdiction-specific legal advice.
+NO_AUDIO_RATIONALE = (
+    "This device measures sound levels only — it never records, stores, or transmits any "
+    "audio. That is a deliberate privacy choice, not missing data: each level reading is "
+    "computed in memory and immediately discarded, so no speech and nothing intelligible "
+    "is ever kept. There is no recording of anyone in this home or next door that could be "
+    "leaked, subpoenaed, or misused. Recording a household or a neighbor can also raise "
+    "consent and eavesdropping concerns under some recording laws; measuring levels only "
+    "sidesteps that by never capturing content. (General information, not legal advice — "
+    "check the rules where you live.)"
+)
+
+# R1 — a single, reusable plain-language "What this can and cannot prove" cover block.
+# It restates limitations that already hold elsewhere in the report; it adds prominence,
+# never a new claim. The same block is prepended to the report and to every exported
+# artifact (the violations HTML and CSV) so the caveat travels with the file.
+COVER_CAN = (
+    "When sound at this device crossed a set loudness threshold, and for how long, with "
+    "timestamps — an honest, time-stamped record of the pattern.",
+    "How that pattern lines up with a quiet-hours window you configure.",
+)
+COVER_CANNOT = (
+    "What made a sound, or who caused it — no audio is recorded, so there is no source "
+    "attribution.",
+    "Absolute loudness in dB SPL or dB(A): uncalibrated readings are relative dBFS, not "
+    "the units an ordinance, lease, or HOA rule is written in.",
+    "That any law, lease, or rule was broken — only the relevant authority decides that, "
+    "and being within quiet hours is not the same as a violation.",
+    "Anything about a place this device was not in — readings are specific to this "
+    "microphone in this spot, and change if it moves.",
+)
+COVER_PRIVACY = (
+    "By design no audio is ever recorded, stored, or transmitted, so there is nothing to "
+    "leak, subpoena, or misuse. This is general information, not legal advice; verify your "
+    "local rule before relying on these numbers."
+)
+
+
+def cover_text_lines() -> list[str]:
+    """The cover block as plain-text lines, for the comment preamble of CSV exports."""
+    lines = ["What this can and cannot prove", "", "What it can show:"]
+    lines += [f"  - {x}" for x in COVER_CAN]
+    lines += ["", "What it cannot prove:"]
+    lines += [f"  - {x}" for x in COVER_CANNOT]
+    lines += ["", COVER_PRIVACY]
+    return lines
+
+
+def cover_html() -> str:
+    """The R1 cover block as an accessible HTML <section>. Deterministic; no new claims."""
+    can = "".join(f"<li>{escape(x)}</li>" for x in COVER_CAN)
+    cannot = "".join(f"<li>{escape(x)}</li>" for x in COVER_CANNOT)
+    return (
+        '<section class="cover" aria-label="What this report can and cannot prove">\n'
+        "<h2>What this can and cannot prove</h2>\n"
+        "<p><strong>What it can show:</strong></p>\n"
+        f"<ul>{can}</ul>\n"
+        "<p><strong>What it cannot prove:</strong></p>\n"
+        f"<ul>{cannot}</ul>\n"
+        f'<p class="note">{escape(COVER_PRIVACY)}</p>\n'
+        "</section>"
+    )
+
+
 _STYLE = """
 :root { color-scheme: light dark; }
 body { font: 16px/1.5 system-ui, sans-serif; margin: 0; color: #111; background: #fff; }
@@ -55,12 +122,17 @@ table { border-collapse: collapse; margin-top: .75rem; width: 100%; }
 caption { text-align: left; font-style: italic; margin-bottom: .25rem; }
 th, td { border: 1px solid #bbb; padding: .25rem .5rem; text-align: left; }
 .note { background: #f3f3f3; border-left: 4px solid #3b6ea5; padding: .75rem 1rem; }
+section.cover { border: 1px solid #bbb; padding: .5rem 1.25rem 1rem; margin: 1rem 0; background: #fafafa; }
+section.cover ul { margin: .25rem 0; }
+.banner { padding: .75rem 1rem; margin: 1rem 0; border: 2px solid #b35900; background: #fff4e5; }
+.banner.banner-ok { border-color: #2f6f3e; background: #eef7ef; }
 :focus-visible { outline: 3px solid #3b6ea5; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media print {
   body { color: #000; background: #fff; }
   .skip { display: none; }
-  figure.chart, table { break-inside: avoid; page-break-inside: avoid; }
+  .banner { border: 2px solid #000; }
+  section.cover, figure.chart, table { break-inside: avoid; page-break-inside: avoid; }
   main { max-width: none; }
 }
 """.strip()
@@ -282,6 +354,60 @@ def build_report(
         )
         calib_epochs_section = ""
 
+    # R2 — unmissable calibration-honesty banner. Uncalibrated readings must never get to
+    # look like dB(A)/SPL; when calibrated, the reference-instrument provenance (carried in
+    # the calibration note) is surfaced prominently rather than buried in methodology.
+    if calibrated:
+        banner_html = (
+            '<aside class="banner banner-ok" role="note" aria-label="Calibration status">\n'
+            f"<strong>Calibrated.</strong> An offset of {offset:+.1f} dB is applied "
+            f"({escape(note)}). Readings approximate sound level (SPL) but remain estimates "
+            "affected by microphone, placement, and room acoustics.\n"
+            "</aside>"
+        )
+    else:
+        banner_html = (
+            '<aside class="banner" role="note" aria-label="Calibration status">\n'
+            "<strong>Uncalibrated — these readings are relative, not dB(A).</strong> "
+            "Levels are relative dBFS, not absolute sound level in dB(A) or dB SPL. Do not "
+            "read them as the decibel numbers an ordinance or lease specifies; only their "
+            "pattern relative to each other on this device is meaningful. Run "
+            "<code>olive-calibrate</code> against a reference meter to estimate SPL (still "
+            "an estimate, not a Class 1/2 sound-level-meter reading).\n"
+            "</aside>"
+        )
+
+    # R3 — quiet-hours duration rollup. Ordinances/CC&Rs commonly key on accumulated
+    # duration in a day; this totals detected loud time within the configured window, per
+    # day, WITHOUT rendering a verdict. The no-verdict framing is mandatory.
+    if summary.quiet_hours_loud_seconds_by_day:
+        rollup_rows = "".join(
+            f'<tr><th scope="row">{escape(day)}</th><td>{_fmt_seconds(secs)}</td></tr>'
+            for day, secs in summary.quiet_hours_loud_seconds_by_day.items()
+        )
+        rollup_section = (
+            "\n<h2>Quiet-hours duration rollup</h2>\n"
+            "<p>Detected loud time within the quiet-hours window, totaled per day and "
+            "attributed by each event's start time. Some ordinances and CC&amp;Rs key on "
+            "accumulated duration in a day — figures of around <strong>30 minutes "
+            "continuous</strong> or <strong>60 minutes intermittent</strong> are sometimes "
+            "cited — but the threshold, the unit, and the definition vary by jurisdiction.</p>\n"
+            '<div class="note"><p>This is a measurement, not a determination. Being within '
+            "quiet hours is not the same as a violation, and only the relevant authority can "
+            "decide whether a rule was broken. Compare these durations against your own local "
+            "ordinance, lease, or HOA rule.</p></div>\n"
+            "<table><caption>Loud time within quiet hours, per day</caption>"
+            '<thead><tr><th scope="col">Day</th>'
+            '<th scope="col">Loud time within quiet hours</th></tr></thead>'
+            f"<tbody>{rollup_rows}</tbody></table>"
+        )
+    else:
+        rollup_section = (
+            "\n<h2>Quiet-hours duration rollup</h2>\n"
+            "<p>No events fell within the quiet-hours window, so there is nothing to roll "
+            "up. Being within quiet hours is not the same as a violation in any case.</p>"
+        )
+
     tags_section = ""
     if summary.by_tag:
         rows = "".join(
@@ -314,6 +440,10 @@ def build_report(
 when sound crossed a threshold and for how long. No audio was recorded, stored, or
 transmitted to produce it.</p>
 
+{cover_html()}
+
+{banner_html}
+
 <h2>Summary</h2>
 <dl class="stats">{stats_html}</dl>
 
@@ -331,6 +461,10 @@ transmitted to produce it.</p>
 <strong>{escape(config.tz)}</strong> (daylight-saving aware). Of {summary.event_count}
 total events, <strong>{summary.quiet_hours_event_count}</strong> fell within quiet hours,
 totaling {_fmt_seconds(summary.quiet_hours_loud_seconds)} of loud time.</p>
+{rollup_section}
+
+<h2>Why there is deliberately no audio</h2>
+<div class="note"><p>{escape(NO_AUDIO_RATIONALE)}</p></div>
 
 <h2>{METHODOLOGY_HEADING}</h2>
 <p>Each ~{config.frame_size / config.sample_rate * 1000:.0f} ms frame of audio is read

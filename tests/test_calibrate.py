@@ -64,9 +64,13 @@ def test_main_calibrate_stores_offset(tmp_path, capsys):
     # measured ~ -10.5 dBFS for amplitude 0.3, so offset ~ 70 - (-10.5) = ~80.5
     assert 75.0 < offset < 86.0
     assert "70.0 dB" in note
+    # Provenance not supplied -> recorded as not recorded.
+    assert "Reference instrument not recorded" in note
 
 
 def test_main_calibrate_appends_and_records_reference_instrument(tmp_path, capsys):
+    # R2: the reference-instrument provenance is stored both structurally (column on
+    # the append-only history) and in the human-readable calibration note.
     db = tmp_path / "olive.db"
     cfg = tmp_path / "cfg.json"
     cfg.write_text(f'{{"db_path": "{db}"}}')
@@ -87,7 +91,7 @@ def test_main_calibrate_appends_and_records_reference_instrument(tmp_path, capsy
             "--seconds",
             "2",
             "--reference-instrument",
-            "B&K 2250",
+            "Brand X, IEC 61672 Class 2",
         ],
         source_factory=factory,
     )
@@ -96,7 +100,11 @@ def test_main_calibrate_appends_and_records_reference_instrument(tmp_path, capsy
 
     with EventStore(db) as store:
         history = store.calibration_history()
+        calib = store.get_calibration()
     assert len(history) == 2  # appended, not overwritten
     latest = history[-1]
-    assert latest.reference_instrument == "B&K 2250"
-    assert "B&K 2250" in (latest.note or "")
+    assert latest.reference_instrument == "Brand X, IEC 61672 Class 2"
+    assert "Reference instrument: Brand X, IEC 61672 Class 2." in (latest.note or "")
+    # Backward-compatible accessor surfaces the same provenance-bearing note.
+    assert calib is not None
+    assert "Reference instrument: Brand X, IEC 61672 Class 2." in calib[1]
