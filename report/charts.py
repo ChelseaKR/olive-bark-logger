@@ -98,6 +98,59 @@ def _heat_fill(ratio: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+_UNMON_LABEL = "not monitored"
+
+
+def _heat_cell(
+    *,
+    label: str,
+    hour: int,
+    value: int,
+    x: int,
+    y: int,
+    cell_w: int,
+    cell_h: int,
+    max_v: int,
+    is_unmon: bool,
+    hatch_id: str,
+    value_caption: str,
+) -> tuple[list[str], str]:
+    """Render one heatmap cell (rect + optional count text). Returns (parts, busiest).
+
+    `busiest` is the "<day> <hour> with <n> <caption>" phrase when this cell holds the
+    grid maximum, else "" — extracted from `heatmap` to keep its complexity in bounds.
+    """
+    ratio = (value / max_v) if max_v else 0.0
+    if is_unmon:
+        fill = f"url(#{escape(hatch_id)})"
+        cell_title = f"{escape(label)} {hour:02d}:00 — {_UNMON_LABEL}"
+    else:
+        fill = _HEAT_EMPTY if value == 0 else _heat_fill(ratio)
+        cell_title = f"{escape(label)} {hour:02d}:00 — {value} {escape(value_caption)}"
+    parts = [
+        f'<rect x="{x}" y="{y}" width="{cell_w}" height="{cell_h}" fill="{fill}" '
+        f'stroke="#fff" stroke-width="1">'
+        f"<title>{cell_title}</title>"
+        "</rect>"
+    ]
+    busiest = ""
+    if value and not is_unmon:
+        if value == max_v:
+            busiest = f"{label} {hour:02d}:00 with {value} {value_caption}"
+        # Dark glyph over a white halo (paint-order draws the stroke beneath the fill),
+        # so the count meets WCAG 1.4.3 against its halo at every cell shade. The
+        # previous white-text-on-darker-cells switch (ratio >= 0.55) genuinely failed
+        # 4.5:1 on mid-intensity cells; exact computed ratios are merge-blocking in
+        # tests/test_svg_contrast.py.
+        parts.append(
+            f'<text x="{x + cell_w / 2:.0f}" y="{y + cell_h - 5}" font-size="9" '
+            f'text-anchor="middle" fill="{_LABEL_FILL}" stroke="{_LABEL_HALO}" '
+            f'stroke-width="2" stroke-linejoin="round" '
+            f'paint-order="stroke">{value}</text>'
+        )
+    return parts, busiest
+
+
 def heatmap(
     *,
     chart_id: str,
@@ -105,6 +158,7 @@ def heatmap(
     day_labels: list[str],
     grid: list[list[int]],
     value_caption: str = "events",
+    unmonitored: set[tuple[str, int]] | None = None,
 ) -> str:
     """Render a day x hour calendar heatmap as an accessible <figure>.
 
@@ -112,12 +166,18 @@ def heatmap(
     not color-only: every non-zero cell also carries its numeric count as text, the cell
     has a <title> tooltip, the SVG is role="img" with a summarizing aria-label, and the
     whole grid is repeated as a real data table. Output is byte-stable for snapshotting.
+
+    `unmonitored` is a set of (day_label, hour) cells during which the device was not
+    listening. These get a distinct third state — a diagonal hatch fill plus the literal
+    text "not monitored" in the data table — so "no data" is never mistaken for a quiet
+    hour, and the distinction survives with color removed.
     """
     if len(day_labels) != len(grid):
         raise ValueError("day_labels and grid must be the same length")
     if any(len(row) != 24 for row in grid):
         raise ValueError("each grid row must have 24 hourly values")
 
+    unmon = unmonitored or set()
     max_v = max((max(row) for row in grid), default=0)
     cell_w = 22
     cell_h = 18
@@ -125,8 +185,18 @@ def heatmap(
     top = 18  # row for the hour-of-day axis labels
     width = gutter + 24 * cell_w
     height = top + max(1, len(grid)) * cell_h
+    hatch_id = f"{chart_id}-unmon"
 
     parts: list[str] = []
+    if unmon:
+        # A diagonal-line hatch used to fill unmonitored cells (visual third state).
+        parts.append(
+            f'<defs><pattern id="{escape(hatch_id)}" width="6" height="6" '
+            'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
+            '<rect width="6" height="6" fill="#eee"/>'
+            f'<line x1="0" y1="0" x2="0" y2="6" stroke="{_AXIS_COLOR}" stroke-width="2"/>'
+            "</pattern></defs>"
+        )
     # Hour axis labels (00..23) along the top.
     for h in range(24):
         cx = gutter + h * cell_w + cell_w / 2
@@ -143,42 +213,37 @@ def heatmap(
             f'fill="{_AXIS_COLOR}">{escape(label)}</text>'
         )
         for h, value in enumerate(row):
-            x = gutter + h * cell_w
-            ratio = (value / max_v) if max_v else 0.0
-            fill = _HEAT_EMPTY if value == 0 else _heat_fill(ratio)
-            parts.append(
-                f'<rect x="{x}" y="{y}" width="{cell_w}" height="{cell_h}" fill="{fill}" '
-                f'stroke="#fff" stroke-width="1">'
-                f"<title>{escape(label)} {h:02d}:00 — {value} {escape(value_caption)}</title>"
-                "</rect>"
+            cell_parts, cell_busiest = _heat_cell(
+                label=label,
+                hour=h,
+                value=value,
+                x=gutter + h * cell_w,
+                y=y,
+                cell_w=cell_w,
+                cell_h=cell_h,
+                max_v=max_v,
+                is_unmon=(label, h) in unmon,
+                hatch_id=hatch_id,
+                value_caption=value_caption,
             )
-            if value:
-                if value == max_v:
-                    busiest = f"{label} {h:02d}:00 with {value} {value_caption}"
-                # Dark glyph over a white halo (paint-order draws the stroke beneath
-                # the fill), so the count meets WCAG 1.4.3 against its halo at every
-                # cell shade. The previous white-text-on-darker-cells switch (ratio
-                # >= 0.55) genuinely failed 4.5:1 on mid-intensity cells; exact
-                # computed ratios are merge-blocking in tests/test_svg_contrast.py.
-                parts.append(
-                    f'<text x="{x + cell_w / 2:.0f}" y="{y + cell_h - 5}" font-size="9" '
-                    f'text-anchor="middle" fill="{_LABEL_FILL}" stroke="{_LABEL_HALO}" '
-                    f'stroke-width="2" stroke-linejoin="round" '
-                    f'paint-order="stroke">{value}</text>'
-                )
+            parts.extend(cell_parts)
+            if cell_busiest:
+                busiest = cell_busiest
 
     aria = (
         f"{title}. {len(grid)} days by 24 hours. Maximum {max_v} {value_caption} in a single hour."
     )
     if busiest:
         aria += f" Busiest: {busiest}."
+    if unmon:
+        aria += f" {len(unmon)} hours not monitored (hatched)."
     svg = (
         f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
         f'role="img" aria-label="{escape(aria)}" '
         f'xmlns="http://www.w3.org/2000/svg">' + "".join(parts) + "</svg>"
     )
 
-    table = _heat_table(chart_id, title, day_labels, grid, value_caption)
+    table = _heat_table(chart_id, title, day_labels, grid, value_caption, unmon)
     return f'<figure class="chart"><figcaption>{escape(title)}</figcaption>{svg}{table}</figure>'
 
 
@@ -188,12 +253,19 @@ def _heat_table(
     day_labels: list[str],
     grid: list[list[int]],
     value_caption: str,
+    unmonitored: set[tuple[str, int]] | None = None,
 ) -> str:
+    unmon = unmonitored or set()
     head = "".join(f'<th scope="col">{h:02d}</th>' for h in range(24))
     rows: list[str] = []
     for label, row in zip(day_labels, grid):
-        cells = "".join(f"<td>{v}</td>" for v in row)
-        rows.append(f'<tr><th scope="row">{escape(label)}</th>{cells}<td>{sum(row)}</td></tr>')
+        cells = "".join(
+            f"<td>{_UNMON_LABEL}</td>" if (label, h) in unmon else f"<td>{v}</td>"
+            for h, v in enumerate(row)
+        )
+        # Row total counts only monitored hours (unmonitored hours contribute no events).
+        total = sum(v for h, v in enumerate(row) if (label, h) not in unmon)
+        rows.append(f'<tr><th scope="row">{escape(label)}</th>{cells}<td>{total}</td></tr>')
     return (
         f'<table id="{escape(chart_id)}-table">'
         f"<caption>{escape(title)} — data table ({escape(value_caption)} per hour)</caption>"

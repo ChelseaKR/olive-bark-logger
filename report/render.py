@@ -24,7 +24,7 @@ from report.charts import bar_chart, heatmap
 if TYPE_CHECKING:
     from datetime import tzinfo
 
-    from store import CalibrationEpoch, Session
+    from store import CalibrationEpoch, Gap, Session
 
 # Phrases the report-content gate checks for. Keeping them as constants makes the
 # contract between the renderer and the test explicit.
@@ -379,6 +379,9 @@ def build_report(
     calibration_epochs: list[CalibrationEpoch] | None = None,
     session: Session | None = None,
     sessions: list[Session] | None = None,
+    unmonitored: set[tuple[str, int]] | None = None,
+    monitored_hours: float | None = None,
+    wall_clock_hours: float | None = None,
     title: str = "Olive's Bark Logger — Noise Report",
 ) -> str:
     """Render the full report as a single self-contained HTML string.
@@ -413,17 +416,25 @@ def build_report(
     if summary.by_day_hour:
         heat_days = list(summary.by_day_hour.keys())
         heat_grid = [[summary.by_day_hour[d][h] for h in range(24)] for d in heat_days]
+        unmon_note = (
+            " Hours the device was not listening are hatched and labeled "
+            '"not monitored" in the table, so absence of data is never read as quiet.'
+            if unmonitored
+            else ""
+        )
         calendar_section = (
             "\n<h2>Calendar heatmap</h2>\n"
             "<p>Each cell is the number of sound-level events that began in that hour, by "
             "day and hour of day. Darker cells saw more events; the count is printed in "
             "every non-empty cell and repeated in the data table below, so the pattern "
-            "does not depend on color. These are event counts only — never audio.</p>\n"
+            "does not depend on color. These are event counts only — never audio."
+            f"{unmon_note}</p>\n"
             + heatmap(
                 chart_id="calendar",
                 title="Events by day and hour",
                 day_labels=heat_days,
                 grid=heat_grid,
+                unmonitored=unmonitored,
             )
         )
     else:
@@ -518,6 +529,14 @@ def build_report(
 
     methodology_html = _methodology_html(config, calib_line, sessions)
 
+    coverage_html = ""
+    if monitored_hours is not None and wall_clock_hours is not None:
+        coverage_html = (
+            f"<p>Over this reporting window the device monitored "
+            f"{monitored_hours:.1f} of {wall_clock_hours:.1f} wall-clock hours; the "
+            "remainder is shown as not monitored rather than quiet.</p>\n"
+        )
+
     tags_section = ""
     if summary.by_tag:
         rows = "".join(
@@ -578,7 +597,7 @@ totaling {_fmt_seconds(summary.quiet_hours_loud_seconds)} of loud time.</p>
 
 <h2>{METHODOLOGY_HEADING}</h2>
 {methodology_html}
-{calib_epochs_section}
+{coverage_html}{calib_epochs_section}
 <h2>{LIMITATIONS_HEADING}</h2>
 <div class="note">
 <p>{escape(RELATIVE_DBFS_NOTE)}</p>
@@ -591,6 +610,64 @@ numbers are offered to inform, not to manufacture a case.</p>
 </body>
 </html>
 """
+
+
+def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
+    """Length of the overlap between intervals [a_start, a_end) and [b_start, b_end)."""
+    return max(0.0, min(a_end, b_end) - max(a_start, b_start))
+
+
+def _unmonitored_buckets(
+    gaps: list[Gap], day_hour: dict[str, dict[int, int]], tz: tzinfo
+) -> set[tuple[str, int]]:
+    """Which (day_label, hour) heatmap cells a gap covers.
+
+    Only cells that appear in the heatmap (days that had events) and that hold zero
+    events are marked, so a partly-monitored hour with a real event still shows its count.
+    A gap is expanded hour by hour; each touched hour whose cell is empty becomes
+    'not monitored'.
+    """
+    buckets: set[tuple[str, int]] = set()
+    for gap in gaps:
+        # Walk each clock hour the gap touches. Step by 3600 s from the gap start.
+        t = gap.start
+        while t < gap.end:
+            dt = datetime.fromtimestamp(t, tz=tz)
+            day = dt.date().isoformat()
+            hour = dt.hour
+            if day in day_hour and day_hour[day].get(hour, 0) == 0:
+                buckets.add((day, hour))
+            t += 3600.0
+    return buckets
+
+
+def _coverage_hours(
+    events: list[Event], gaps: list[Gap], session: Session | None
+) -> tuple[float, float] | None:
+    """Monitored vs wall-clock hours over the reporting window, or None if undeterminable.
+
+    The window spans the earliest observed moment to the latest across events, gaps, and
+    the latest session. Time inside a recorded gap (including any stretch outside a
+    session) is unmonitored; everything else is treated as monitored.
+    """
+    starts: list[float] = [e.start for e in events]
+    ends: list[float] = [e.end for e in events]
+    for g in gaps:
+        starts.append(g.start)
+        ends.append(g.end)
+    if session is not None:
+        starts.append(session.started_at)
+        if session.ended_at is not None:
+            ends.append(session.ended_at)
+    if not starts or not ends:
+        return None
+    win_start, win_end = min(starts), max(ends)
+    span = win_end - win_start
+    if span <= 0:
+        return None
+    gap_seconds = sum(_overlap(g.start, g.end, win_start, win_end) for g in gaps)
+    monitored = max(0.0, span - gap_seconds)
+    return monitored / 3600.0, span / 3600.0
 
 
 def generate_report_from_db(
@@ -606,15 +683,23 @@ def generate_report_from_db(
         events = store.events()  # raw dBFS levels; calibration is applied here, at render
         history = store.calibration_history()
         session = store.latest_session()
+        gaps = store.gaps()
         sessions = store.sessions()
 
     # Which epochs actually cover the events in this window? Only those drive the choice
     # between the single-offset path and the multi-epoch disclosure. Levels are always
     # adjusted through the shared per-event resolver, the same one the exports use.
+    tz = config.tzinfo()
     epochs_in_window = _epochs_covering(history, events)
     offsets = _per_event_offsets(events, history, config)
     adjusted = [_apply_offset(ev, off) for ev, off in zip(events, offsets)]
-    summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=config.tzinfo())
+    summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=tz)
+
+    # Monitoring-gap honesty: unmonitored heatmap buckets plus monitored-vs-wall-clock
+    # coverage, rendered on both the single-offset and multi-epoch paths.
+    unmonitored = _unmonitored_buckets(gaps, summary.by_day_hour, tz) if gaps else None
+    coverage = _coverage_hours(events, gaps, session)
+    monitored_hours, wall_clock_hours = coverage if coverage else (None, None)
 
     if len(epochs_in_window) > 1:
         latest = epochs_in_window[-1]
@@ -627,6 +712,9 @@ def generate_report_from_db(
             calibration_epochs=epochs_in_window,
             session=session,
             sessions=sessions,
+            unmonitored=unmonitored,
+            monitored_hours=monitored_hours,
+            wall_clock_hours=wall_clock_hours,
         )
 
     # Single-offset path: the whole window is under one calibration (or none -> config).
@@ -645,6 +733,9 @@ def generate_report_from_db(
         calibration_note=note,
         session=session,
         sessions=sessions,
+        unmonitored=unmonitored,
+        monitored_hours=monitored_hours,
+        wall_clock_hours=wall_clock_hours,
     )
 
 
@@ -693,6 +784,7 @@ def main(argv: list[str] | None = None) -> int:
         with EventStore(db_path) as store:
             raw_events = store.events()  # raw dBFS; calibration is applied below, at render
             history = store.calibration_history()
+            gaps = store.gaps()
         # Exports must agree numerically with the main report: the same render-time,
         # per-epoch calibration is applied to every exported artifact, and each CSV row
         # records the offset it received (raw = value - offset). The calibrated flag is
@@ -708,7 +800,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.csv is not None:
             from report.export import events_to_csv
 
-            rows = events_to_csv(events, args.csv, tz=config.tzinfo(), offsets_db=offsets)
+            rows = events_to_csv(
+                events, args.csv, tz=config.tzinfo(), offsets_db=offsets, gaps=gaps
+            )
             print(f"Wrote {args.csv} ({rows} rows).")
 
         if args.violations_csv is not None or args.violations_html is not None:
@@ -726,6 +820,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz=config.tzinfo(),
                     tz_name=config.tz,
                     offsets_db=offsets,
+                    gaps=gaps,
                 )
                 print(f"Wrote {args.violations_csv} ({rows} rows).")
             if args.violations_html is not None:
@@ -735,6 +830,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz=config.tzinfo(),
                     tz_name=config.tz,
                     offsets_db=offsets,
+                    gaps=gaps,
                 )
                 vhtml = build_violation_report_html(
                     report,

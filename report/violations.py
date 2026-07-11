@@ -19,9 +19,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, tzinfo
 from html import escape
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from monitor.config import QuietHours
 from monitor.detector import Event
+
+if TYPE_CHECKING:
+    from store import Gap
 
 from report.render import (
     _STYLE,
@@ -46,6 +50,7 @@ class ViolationRow:
     peak_dbfs: float
     avg_dbfs: float
     within_quiet_hours: bool
+    monitored: bool  # False if the event overlaps a recorded monitoring gap
     coarse_tag: str | None
     # The calibration offset already included in peak_dbfs/avg_dbfs for this row, in dB
     # (0.0 = raw, uncalibrated dBFS). Recorded so the export is self-describing:
@@ -78,16 +83,22 @@ def compute_violations(
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
+    gaps: list[Gap] | None = None,
 ) -> ViolationReport:
     """Classify every event as within / outside the quiet-hours window by its start time.
 
     `offsets_db`, when given, must parallel `events` and record the calibration offset
     already applied (at render time) to each event's levels, so every row is
     self-describing about its calibration state. Omitted means the levels are raw (0.0).
+
+    When `gaps` is given, each row also carries a `monitored` flag (False if the event
+    overlaps a monitoring gap), so a reader can tell an event logged at the edge of an
+    outage from one logged with full coverage.
     """
     offs = list(offsets_db) if offsets_db is not None else [0.0] * len(events)
     if len(offs) != len(events):
         raise ValueError("offsets_db must have one entry per event")
+    gap_list = gaps or []
     rows: list[ViolationRow] = []
     within = 0
     within_secs = 0.0
@@ -100,6 +111,7 @@ def compute_violations(
             within_secs += ev.duration
         else:
             outside_secs += ev.duration
+        monitored = not any(g.start < ev.end and g.end > ev.start for g in gap_list)
         rows.append(
             ViolationRow(
                 start_unix=ev.start,
@@ -110,6 +122,7 @@ def compute_violations(
                 peak_dbfs=ev.peak_level,
                 avg_dbfs=ev.avg_level,
                 within_quiet_hours=is_within,
+                monitored=monitored,
                 coarse_tag=ev.coarse_tag,
                 calibration_offset_db=off,
             )
@@ -137,6 +150,7 @@ _CSV_HEADER = [
     "calibration_offset_db",
     "within_quiet_hours",
     "quiet_window",
+    "monitored",
     "coarse_tag",
 ]
 
@@ -149,17 +163,19 @@ def violations_to_csv(
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
+    gaps: list[Gap] | None = None,
 ) -> int:
     """Write every event with a within/outside-quiet-hours flag. Returns rows written.
 
     The export is honest by construction: it lists *all* events, not only the flagged
     ones, so a reader can see the full picture rather than a cherry-picked subset; each
-    row records the calibration offset included in its levels (0.0 = raw dBFS); and the
+    row records the calibration offset included in its levels (0.0 = raw dBFS) and a
+    `monitored` column marking whether it fell in a period of confirmed coverage; and the
     "what this can and cannot prove" cover block (R1) is written as a leading ``#`` comment
     preamble so the caveat travels with the file; data rows below it are unchanged.
     """
     report = compute_violations(
-        events, quiet_hours=quiet_hours, tz=tz, tz_name=tz_name, offsets_db=offsets_db
+        events, quiet_hours=quiet_hours, tz=tz, tz_name=tz_name, offsets_db=offsets_db, gaps=gaps
     )
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
         for line in cover_text_lines():
@@ -179,6 +195,7 @@ def violations_to_csv(
                     f"{r.calibration_offset_db:+.1f}",
                     "yes" if r.within_quiet_hours else "no",
                     report.window,
+                    "yes" if r.monitored else "no",
                     r.coarse_tag or "",
                 ]
             )
