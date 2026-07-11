@@ -1,0 +1,32 @@
+{
+  "name": "closed_by_flush_at_stream_end",
+  "description": "An event still open at end of stream is closed by flush().",
+  "params": {
+    "threshold_dbfs": -30,
+    "min_duration_s": 0.3,
+    "debounce_s": 1.0
+  },
+  "readings": [
+    [
+      0.0,
+      -10
+    ],
+    [
+      0.5,
+      -10
+    ],
+    [
+      1.0,
+      -10
+    ]
+  ],
+  "expected_events": [
+    {
+      "start": 0.0,
+      "end": 1.0,
+      "duration": 1.0,
+      "peak_level": -10,
+      "avg_level": -10.0
+    }
+  ]
+}

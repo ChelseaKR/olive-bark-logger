@@ -10,9 +10,13 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
+from typing import TYPE_CHECKING
 
 from monitor.config import QuietSchedule
 from monitor.detector import Event
+
+if TYPE_CHECKING:
+    from store import ClockAnomaly
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,29 @@ class Summary:
     by_day_hour: dict[str, dict[int, int]] = field(default_factory=dict)
     quiet_hours_event_count: int = 0
     quiet_hours_loud_seconds: float = 0.0
+    # ISO date -> seconds of detected loud time within the quiet-hours window on that day
+    # (attributed by each event's start time). Feeds the ordinance/CC&R duration rollup;
+    # it reports accumulated duration, never a violation verdict.
+    quiet_hours_loud_seconds_by_day: dict[str, float] = field(default_factory=dict)
+
+
+def describe_clock_anomalies(
+    anomalies: list[ClockAnomaly], *, tz: tzinfo = timezone.utc
+) -> list[str]:
+    """Plain-language disclosure lines for detected clock jumps, wall times in `tz`.
+
+    Empty input yields an empty list; the renderer turns that into an explicit
+    "no anomalies" reassurance so the absence of jumps is stated, not merely implied.
+    """
+    lines: list[str] = []
+    for a in anomalies:
+        before = datetime.fromtimestamp(a.wall_before, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
+        after = datetime.fromtimestamp(a.wall_after, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
+        direction = "forward" if a.delta > 0 else "backward"
+        lines.append(
+            f"Clock jumped {direction} by {abs(a.delta):.1f} s (wall time {before} → {after})."
+        )
+    return lines
 
 
 def summarize(
@@ -57,6 +84,7 @@ def summarize(
     by_day_hour: dict[str, Counter[int]] = {}
     quiet_count = 0
     quiet_seconds = 0.0
+    quiet_seconds_by_day: dict[str, float] = {}
     total_seconds = 0.0
     peaks: list[float] = []
 
@@ -73,6 +101,7 @@ def summarize(
         if quiet_hours.contains(dt):
             quiet_count += 1
             quiet_seconds += ev.duration
+            quiet_seconds_by_day[day] = quiet_seconds_by_day.get(day, 0.0) + ev.duration
 
     return Summary(
         event_count=len(events),
@@ -89,4 +118,5 @@ def summarize(
         },
         quiet_hours_event_count=quiet_count,
         quiet_hours_loud_seconds=quiet_seconds,
+        quiet_hours_loud_seconds_by_day=dict(sorted(quiet_seconds_by_day.items())),
     )

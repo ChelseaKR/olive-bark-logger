@@ -37,12 +37,65 @@ roadmap mandates (§8, "Claude Code approach").
   any column whose name suggests audio/samples/frames/blobs.
 - `test_no_source_file_uses_audio_write_api` — static scan: no `wave`, `soundfile`,
   `scipy.io.wavfile`, `aifc`, `sunau`, `audioop`, or `.tobytes(` anywhere in the code.
-- `test_no_file_open_in_write_binary_mode` — AST scan: nothing opens a file `"wb"`.
+- `test_no_file_open_in_write_binary_mode` — AST scan: nothing writes bytes to disk.
 - `test_capture_live_only_sinks_frames_to_memory` — the live frame is only enqueued.
 
 `tests/test_no_egress.py`:
 - `test_no_first_party_module_imports_network` — AST scan: no first-party module
   imports a networking library, so nothing can transmit anything (audio included).
+- `test_no_first_party_module_shells_out` — AST scan: no `subprocess`/`ctypes` import
+  and no `os.system`/`os.popen`/`os.spawn*`/`os.exec*` call, so nothing can shell out.
+
+## Closed bypasses (FIX-11 — hardened gates)
+
+The gates originally scanned only the obvious sinks. FIX-11 extended them so the
+harder-to-spot ways to write bytes or reach the network are also merge-blocked, and
+added canary self-tests so the scanners themselves stay honest:
+
+- **Byte-dump bypasses** (`scan_binary_write`): beyond `open('x','wb')`, the gate now
+  flags `io.open('x','wb')`, `Path(...).write_bytes(...)`, and low-level
+  `os.open(..., O_WRONLY/O_RDWR/O_CREAT)` writable descriptors.
+- **Shell-out / native-call bypasses** (`scan_exec_imports`, `scan_os_shell_calls`):
+  importing `subprocess` or `ctypes`, or calling `os.system`/`os.popen`/`os.spawn*`/
+  `os.exec*`, is now banned — a shell is just another route to disk or the wire. The
+  runtime pipeline test also booby-traps `subprocess.Popen` and `os.system` alongside
+  `socket.socket`.
+- **Scanner self-tests** (`tests/test_gate_selftest.py`): the scan helpers moved to
+  `tests/gates.py`; each is fed a known-bad canary string (e.g. `import subprocess`,
+  `os.system('curl x')`, `Path('x').write_bytes(b'')`) and asserted to report it, so a
+  broken scanner fails loudly instead of quietly going green on a clean tree.
 
 If any future change adds a way to persist or send audio, one of these tests fails and
 the merge is blocked.
+
+## The browser (PWA) implementation — same guarantee, enforced identically
+
+The PWA (`pwa/`) is a second implementation of the same product, so it carries the same
+merge-blocking gates in the browser's terms. The guarantee holds in **both**
+implementations, enforced two ways: static scans and a strict Content-Security-Policy.
+
+| Guarantee            | Python core (`monitor/`, `store/`, `report/`) | Browser PWA (`pwa/`)                                              |
+| -------------------- | --------------------------------------------- | ---------------------------------------------------------------- |
+| No audio persisted   | `tests/test_no_audio.py` (Event/schema/API scans) | `tests/test_pwa_gates.py` — forbids `MediaRecorder`, `AudioWorklet`, `decodeAudioData`; only sanctioned mic use is `getUserMedia({ audio: true })` feeding an in-memory `AnalyserNode` |
+| No network egress    | `tests/test_no_egress.py` (network-import scan) | `tests/test_pwa_gates.py` — forbids `XMLHttpRequest`, `WebSocket`, `sendBeacon`, `EventSource`, and `fetch(` except the service worker's same-origin cache passthrough; plus a strict CSP meta in `pwa/index.html` |
+
+`tests/test_pwa_gates.py`:
+- `test_no_pwa_source_uses_recording_api` — no recording-capable Web Audio API appears.
+- `test_only_sanctioned_media_devices_use` / `test_sanctioned_media_call_is_present_and_singular`
+  — `mediaDevices` is used exactly once, as the level-only `getUserMedia({ audio: true })`.
+- `test_no_pwa_source_makes_network_egress` — no wire-opening API; `fetch(` allowlisted
+  only for `sw.js`'s `fetch(e.request)` cache fallback.
+- `test_index_html_references_no_external_resources` — every `src`/`href` is local.
+- `test_egress_scanner_flags_a_planted_violation` / `..._planted_fetch` — canary
+  self-tests that plant `new WebSocket(` / `fetch(` and assert the scanner catches them,
+  so the gate cannot silently rot.
+- `test_index_html_has_strict_csp` / `test_csp_connect_src_is_local_only` — assert the
+  `<meta http-equiv="Content-Security-Policy">` in `pwa/index.html` denies by default
+  (`default-src 'none'`) and keeps `connect-src` local-only (`'self'`/`'none'`).
+
+The CSP meta (`pwa/index.html`) is the runtime backstop: `default-src 'none'` with each
+source opened only as narrowly as the local app needs (`script-src 'self'`,
+`style-src 'self' 'unsafe-inline'`, `img-src 'self'`, `manifest-src 'self'`,
+`connect-src 'self'`, `worker-src 'self'`). Even if a scan were bypassed, the browser
+blocks any cross-origin request. CI also runs pa11y (axe) against `pwa/index.html`,
+matching the report's accessibility gate.

@@ -84,6 +84,64 @@ def test_report_includes_heatmap_when_events_exist():
     assert "2026-01-01" in html and "2026-01-02" in html
 
 
+def test_heatmap_renders_unmonitored_hatch_and_table_text():
+    grid = [[0] * 24]
+    grid[0][5] = 4  # a monitored, busy hour
+    html = heatmap(
+        chart_id="cal",
+        title="t",
+        day_labels=["2026-01-01"],
+        grid=grid,
+        unmonitored={("2026-01-01", 3)},
+    )
+    # The hatch pattern is defined and referenced for the unmonitored cell.
+    assert '<pattern id="cal-unmon"' in html
+    assert "url(#cal-unmon)" in html
+    # Not color-only: the cell reads "not monitored" as text in the SVG title and table.
+    assert "03:00 — not monitored" in html
+    assert "<td>not monitored</td>" in html
+    # The busy monitored hour still shows its count, and the empty monitored hours don't
+    # claim to be unmonitored.
+    assert ">4<" in html
+    # Present in the SVG cell title, the aria-label, and the data table cell.
+    assert html.count("not monitored") >= 2
+
+
+def test_heatmap_unmonitored_excluded_from_row_total():
+    grid = [[0] * 24]
+    grid[0][1] = 2
+    grid[0][2] = 3
+    html = heatmap(
+        chart_id="cal",
+        title="t",
+        day_labels=["d"],
+        grid=grid,
+        unmonitored={("d", 4)},  # an empty hour, marked not monitored
+    )
+    # Row total counts only monitored events (2 + 3), unaffected by the unmonitored cell.
+    assert "<td>5</td>" in html
+
+
+def test_report_shows_not_monitored_when_gaps_present(tmp_path):
+    from datetime import datetime, timezone
+
+    from report.render import generate_report_from_db
+    from store import EventStore
+
+    db = tmp_path / "olive.db"
+    base = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc).timestamp()
+    with EventStore(db) as store:
+        # Two events on 2026-01-01 so the day appears as a heatmap row.
+        for hour in (1, 20):
+            store.add_event(_ev(1, hour))
+        # An outage during hour 10 (no events there).
+        store.add_gap(base + 10 * 3600, base + 10 * 3600 + 1800, "device-error")
+    config = Config(tz="UTC")
+    html = generate_report_from_db(str(db), config, generated_at="2026-01-01 00:00 UTC")
+    assert "not monitored" in html
+    assert "wall-clock hours" in html  # methodology coverage sentence
+
+
 def test_summary_by_day_hour_grid():
     events = [_ev(1, 23), _ev(1, 23), _ev(2, 2)]
     s = summarize(events, quiet_hours=QuietHours(), tz=timezone.utc)

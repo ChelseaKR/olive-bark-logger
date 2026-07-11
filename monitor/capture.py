@@ -68,20 +68,39 @@ def resilient_source(
     base_delay: float = 1.0,
     max_delay: float = 30.0,
     sleep: Callable[[float], None] = time.sleep,
+    on_gap: Callable[[float, float, str], None] | None = None,
+    clock: Callable[[], float] = time.time,
 ) -> Iterator[tuple[float, list[float]]]:
     """Wrap a source factory so a device error (e.g. a USB mic unplugged) is retried.
 
     On failure, re-invokes make_source() with exponential backoff rather than crashing
     the unattended service. Gives up after `retries` consecutive failures so a truly dead
     device surfaces an error instead of looping forever.
+
+    When `on_gap` is given it is called once per outage with (outage_start, recovery_time,
+    'device-error'): the outage begins when an exception is first caught and ends either
+    when the source resumes yielding frames or, if the retries are exhausted, at the point
+    the error is re-raised. `clock` supplies wall-clock time (injectable for tests) so the
+    gap is recorded in the same time base as event timestamps.
     """
     attempt = 0
+    outage_start: float | None = None
     while True:
         try:
-            yield from make_source()
+            for item in make_source():
+                # The first frame after an outage marks recovery: close the gap now.
+                if outage_start is not None and on_gap is not None:
+                    on_gap(outage_start, clock(), "device-error")
+                outage_start = None
+                yield item
             return  # source ended normally
         except Exception:
             attempt += 1
+            if outage_start is None:
+                outage_start = clock()
             if attempt > retries:
+                # Retries exhausted: record the outage up to the moment we give up.
+                if on_gap is not None:
+                    on_gap(outage_start, clock(), "device-error")
                 raise
             sleep(min(max_delay, base_delay * (2 ** (attempt - 1))))

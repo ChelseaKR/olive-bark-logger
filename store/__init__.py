@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from store.db import EventStore, Session
+from store.db import CalibrationEpoch, ClockAnomaly, EventStore, Gap, Session
 
-__all__ = ["EventStore", "Session"]
+__all__ = ["CalibrationEpoch", "ClockAnomaly", "EventStore", "Gap", "Session"]
