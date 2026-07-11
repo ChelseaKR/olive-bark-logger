@@ -122,8 +122,11 @@ function heatTable(byDayHour) {
         const cg = Math.round(255 - (255 - 110) * ratio);
         const cb = Math.round(255 - (255 - 165) * ratio);
         const bg = v === 0 ? "#f5f5f5" : `rgb(${ch},${cg},${cb})`;
-        const fg = ratio >= 0.55 ? "#fff" : "#111";
-        return `<td style="background:${bg};color:${fg};text-align:center" title="${esc(d)} ${String(h).padStart(2, "0")}:00 — ${v} events">${v}</td>`;
+        // Dark count on a small white chip: WCAG AA (4.5:1) holds at every cell
+        // shade. The old fg switch (white text when ratio >= 0.55) genuinely failed
+        // AA on mid-intensity cells — same defect class fixed in report/charts.py
+        // (see tests/test_svg_contrast.py for the exact ratios on the shared ramp).
+        return `<td style="background:${bg};text-align:center" title="${esc(d)} ${String(h).padStart(2, "0")}:00 — ${v} events"><span style="background:#fff;color:#111;padding:0 3px;border-radius:2px">${v}</span></td>`;
       }).join("");
       return `<tr><th scope="row">${esc(d)}</th>${cells}<td>${rowTotal}</td></tr>`;
     })
