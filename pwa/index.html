@@ -2,21 +2,40 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- Strict CSP: no network egress. default-src 'none' denies everything; each source is
+     opened only as narrowly as the local app needs. connect-src 'self' lets the service
+     worker re-fetch same-origin cached assets when offline; there is no cross-origin
+     connect target anywhere. This mirrors the Python no-egress gate for the browser. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; manifest-src 'self'; connect-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#3b6ea5">
 <link rel="manifest" href="./manifest.webmanifest">
 <title>Olive's Bark Logger (PWA)</title>
 <style>
+  /* Explicit colors (not just color-scheme) so contrast is unambiguous in both
+     themes — WCAG AA / axe color-contrast. */
   :root { color-scheme: light dark; }
-  body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 0 auto; padding: 1.5rem; }
-  fieldset { margin: 1rem 0; }
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 0 auto; padding: 1.5rem;
+         color: #1a1a1a; background: #ffffff; }
+  fieldset { margin: 1rem 0; border: 1px solid #767676; }
   label { display: inline-block; min-width: 9rem; }
-  input { width: 5rem; }
+  input { width: 5rem; color: #1a1a1a; background: #ffffff; border: 1px solid #595959; }
   meter { width: 100%; height: 1.5rem; }
-  button { font-size: 1rem; padding: .5rem 1rem; margin: .25rem .25rem 0 0; }
+  button { font-size: 1rem; padding: .5rem 1rem; margin: .25rem .25rem 0 0;
+           color: #ffffff; background: #1f4e79; border: 1px solid #14395a; }
+  button:disabled { color: #ffffff; background: #595959; border-color: #4a4a4a; }
   .row { margin: .25rem 0; }
-  :focus-visible { outline: 3px solid #3b6ea5; outline-offset: 2px; }
-  .note { background: #f3f3f3; border-left: 4px solid #3b6ea5; padding: .75rem 1rem; }
+  :focus-visible { outline: 3px solid #1f4e79; outline-offset: 2px; }
+  .note { background: #eef4fa; border-left: 4px solid #1f4e79; padding: .75rem 1rem; color: #1a1a1a; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e9e9e9; background: #121212; }
+    input { color: #e9e9e9; background: #1c1c1c; border-color: #9a9a9a; }
+    fieldset { border-color: #9a9a9a; }
+    button { color: #ffffff; background: #2a628f; border-color: #6ea8dc; }
+    button:disabled { color: #d0d0d0; background: #3a3a3a; border-color: #565656; }
+    :focus-visible { outline-color: #6ea8dc; }
+    .note { background: #172230; border-left-color: #6ea8dc; color: #e9e9e9; }
+  }
 </style>
 </head>
 <body>

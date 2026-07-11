@@ -1,67 +1,55 @@
 """Merge-blocking: prove the monitor makes no network egress.
 
 Local-only is a guardrail. The strongest practical check for a dependency-free core
-is a static one: no first-party module imports a networking library. (The report is
-a local HTML file; the store is local SQLite; capture is local audio.)
+is a static one: no first-party module imports a networking library, and none shells
+out (subprocess/ctypes/os.system/os.popen/os.spawn*/os.exec*) — a shell is just
+another route to the network. (The report is a local HTML file; the store is local
+SQLite; capture is local audio.)
+
+The scanner functions live in `tests/gates.py` and are exercised against known
+violations by `tests/test_gate_selftest.py`, so we know they still bite.
 """
 
 from __future__ import annotations
 
-import ast
-
 from conftest import source_files
-
-NETWORK_MODULES = {
-    "socket",
-    "ssl",
-    "http",
-    "http.client",
-    "urllib",
-    "urllib.request",
-    "ftplib",
-    "smtplib",
-    "telnetlib",
-    "asyncio",
-    "requests",
-    "httpx",
-    "aiohttp",
-    "websocket",
-    "websockets",
-    "boto3",
-    "google.cloud",
-}
-
-
-def _imported_modules(tree: ast.AST) -> set[str]:
-    mods: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            mods.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            mods.add(node.module)
-    return mods
+from gates import scan_exec_imports, scan_network_imports, scan_os_shell_calls
 
 
 def test_no_first_party_module_imports_network():
     offenders: dict[str, set[str]] = {}
     for path in source_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        mods = _imported_modules(tree)
-        bad = {m for m in mods if m in NETWORK_MODULES or m.split(".")[0] in NETWORK_MODULES}
+        bad = scan_network_imports(path.read_text(encoding="utf-8"))
         if bad:
             offenders[path.name] = bad
     assert not offenders, f"network imports found: {offenders}"
 
 
+def test_no_first_party_module_shells_out():
+    """No first-party module imports subprocess/ctypes or calls an os shell primitive."""
+    offenders: dict[str, set[str]] = {}
+    for path in source_files():
+        source = path.read_text(encoding="utf-8")
+        bad = scan_exec_imports(source) | scan_os_shell_calls(source)
+        if bad:
+            offenders[path.name] = bad
+    assert not offenders, f"shell-out / native-call bypasses found: {offenders}"
+
+
 def test_runtime_pipeline_opens_no_socket(tmp_path, monkeypatch):
-    """Run the full pipeline + report with sockets booby-trapped; nothing should reach
-    for the network. This complements the static scan with a behavioral guarantee."""
+    """Run the full pipeline + report with sockets and shell-out booby-trapped;
+    nothing should reach for the network. This complements the static scan with a
+    behavioral guarantee."""
+    import os
     import socket
+    import subprocess
 
     def _boom(*_a, **_k):
-        raise AssertionError("network access attempted — egress guarantee violated")
+        raise AssertionError("network/shell access attempted — egress guarantee violated")
 
     monkeypatch.setattr(socket, "socket", _boom)
+    monkeypatch.setattr(subprocess, "Popen", _boom)
+    monkeypatch.setattr(os, "system", _boom)
 
     from monitor.capture import LoudRegion, synthetic_session
     from monitor.config import Config
