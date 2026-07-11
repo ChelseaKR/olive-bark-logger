@@ -64,3 +64,34 @@ def test_main_calibrate_stores_offset(tmp_path, capsys):
     # measured ~ -10.5 dBFS for amplitude 0.3, so offset ~ 70 - (-10.5) = ~80.5
     assert 75.0 < offset < 86.0
     assert "70.0 dB" in note
+    # Provenance not supplied -> recorded as not recorded.
+    assert "Reference instrument not recorded" in note
+
+
+def test_main_calibrate_records_reference_instrument(tmp_path, capsys):
+    # R2: the reference-instrument provenance is stored in the calibration note so a
+    # reader knows what the offset was measured against.
+    db = tmp_path / "olive.db"
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(f'{{"db_path": "{db}"}}')
+
+    def factory(config):
+        return synthetic_session(3.0, [LoudRegion(0.0, 3.0, 0.3)], frame_size=config.frame_size)
+
+    rc = main_calibrate(
+        [
+            "--config",
+            str(cfg),
+            "--reference-db",
+            "70",
+            "--seconds",
+            "2",
+            "--reference-instrument",
+            "Brand X, IEC 61672 Class 2",
+        ],
+        source_factory=factory,
+    )
+    assert rc == 0
+    with EventStore(db) as store:
+        _offset, note = store.get_calibration()
+    assert "Reference instrument: Brand X, IEC 61672 Class 2." in note
