@@ -87,9 +87,10 @@ jobs:
           npx --yes pa11y --runner htmlcs --runner axe --ignore color-contrast \
             --config /tmp/pa11y-ci.json ./report.html
 
-      # 5b. accessibility (PWA UI): same axe pass against the browser edition's page.
-      #     Chrome needs --no-sandbox on hosted runners (same config as the step above,
-      #     recreated here because that step is skipped on pull_request events).
+      # 5b. accessibility (PWA UI): axe pass against the browser edition's page.
+      #     Unlike the report step above, plain axe (color-contrast included) is right
+      #     here: this is real HTML, so axe can compute every background. Chrome needs
+      #     --no-sandbox on hosted runners.
       - name: Run pa11y (axe) on the PWA UI
         run: |
           printf '%s\n' '{"chromeLaunchConfig":{"args":["--no-sandbox"]}}' > /tmp/pa11y-pwa.json
