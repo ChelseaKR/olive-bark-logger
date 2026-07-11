@@ -64,3 +64,47 @@ def test_main_calibrate_stores_offset(tmp_path, capsys):
     # measured ~ -10.5 dBFS for amplitude 0.3, so offset ~ 70 - (-10.5) = ~80.5
     assert 75.0 < offset < 86.0
     assert "70.0 dB" in note
+    # Provenance not supplied -> recorded as not recorded.
+    assert "Reference instrument not recorded" in note
+
+
+def test_main_calibrate_appends_and_records_reference_instrument(tmp_path, capsys):
+    # R2: the reference-instrument provenance is stored both structurally (column on
+    # the append-only history) and in the human-readable calibration note.
+    db = tmp_path / "olive.db"
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(f'{{"db_path": "{db}"}}')
+
+    def factory(config):
+        return synthetic_session(3.0, [LoudRegion(0.0, 3.0, 0.3)], frame_size=config.frame_size)
+
+    # Seed an existing epoch so we can prove calibrate appends (never updates).
+    with EventStore(db) as store:
+        store.add_calibration(1.0, "old", effective_from=0.0)
+
+    rc = main_calibrate(
+        [
+            "--config",
+            str(cfg),
+            "--reference-db",
+            "70",
+            "--seconds",
+            "2",
+            "--reference-instrument",
+            "Brand X, IEC 61672 Class 2",
+        ],
+        source_factory=factory,
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    with EventStore(db) as store:
+        history = store.calibration_history()
+        calib = store.get_calibration()
+    assert len(history) == 2  # appended, not overwritten
+    latest = history[-1]
+    assert latest.reference_instrument == "Brand X, IEC 61672 Class 2"
+    assert "Reference instrument: Brand X, IEC 61672 Class 2." in (latest.note or "")
+    # Backward-compatible accessor surfaces the same provenance-bearing note.
+    assert calib is not None
+    assert "Reference instrument: Brand X, IEC 61672 Class 2." in calib[1]

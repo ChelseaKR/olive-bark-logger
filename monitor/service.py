@@ -42,6 +42,11 @@ def run_pipeline(
     Yielding (rather than only storing) keeps this a pure generator that tests can
     drive and assert on. If a store is given, events are persisted as a side effect;
     if stats is given, every processed frame is counted (for frame-coverage reporting).
+
+    Levels are computed and stored as **raw** dBFS — no calibration offset is baked in,
+    so a later recalibration never changes the meaning of a stored row. `threshold_dbfs`
+    is therefore defined against raw dBFS as well. The calibration offset is an append-
+    only history in the store and is applied at *render* time (see report/render.py).
     """
     detector = Detector(
         threshold_dbfs=config.threshold_dbfs,
@@ -63,7 +68,9 @@ def run_pipeline(
     for t, frame in source:
         if stats is not None:
             stats.frames_seen += 1
-        level = dbfs(frame, calibration_offset=config.calibration_offset)
+        # Store the raw dBFS level; the calibration offset is applied at render time so
+        # the threshold and every persisted row are defined against the same raw scale.
+        level = dbfs(frame)
         if config.tagging:
             feats.append((t, zero_crossing_rate(frame)))
         # `frame` is not referenced again; it is dropped on the next iteration.
@@ -138,7 +145,15 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
     config = Config.load(args.config)
     started_at = now or time.time()
     store = EventStore(config.db_path)
-    store.set_calibration(config.calibration_offset, config.calibration_note)
+    # Calibration is a single source of truth owned by `olive-calibrate`. The monitor
+    # never writes it; it only reads the offset in force for this session's lineage
+    # record, falling back to the config's bootstrap value if no calibration exists yet.
+    stored_calibration = store.get_calibration()
+    calibration_offset, calibration_note = (
+        stored_calibration
+        if stored_calibration is not None
+        else (config.calibration_offset, config.calibration_note)
+    )
     if config.retention_days > 0:
         removed = store.prune(before=started_at - config.retention_days * 86400)
         if removed:
@@ -149,9 +164,14 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
         mic_model=config.mic_model,
         placement_note=config.placement_note,
         tz=config.tz,
-        calibration_offset=config.calibration_offset,
-        calibration_note=config.calibration_note,
+        calibration_offset=calibration_offset,
+        calibration_note=calibration_note,
         app_version=__version__,
+        threshold_dbfs=config.threshold_dbfs,
+        min_duration_s=config.min_duration_s,
+        debounce_s=config.debounce_s,
+        sample_rate=config.sample_rate,
+        frame_size=config.frame_size,
     )
     stats = CaptureStats()
 

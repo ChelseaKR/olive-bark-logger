@@ -1,0 +1,24 @@
+{
+  "name": "just_below_threshold_no_event",
+  "description": "Readings strictly below the threshold never open an event.",
+  "params": {
+    "threshold_dbfs": -30,
+    "min_duration_s": 0.3,
+    "debounce_s": 0.5
+  },
+  "readings": [
+    [
+      0.0,
+      -31
+    ],
+    [
+      0.5,
+      -30.0001
+    ],
+    [
+      1.0,
+      -31
+    ]
+  ],
+  "expected_events": []
+}
