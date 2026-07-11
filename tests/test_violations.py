@@ -69,14 +69,16 @@ def test_violations_csv_lists_all_events_flagged(tmp_path):
         "duration_s",
         "peak_dbfs",
         "avg_dbfs",
+        "calibration_offset_db",
         "within_quiet_hours",
         "quiet_window",
         "coarse_tag",
     ]
     assert len(rows) == 3  # header + 2 events
-    assert rows[1][7] == "yes" and rows[1][-1] == "bark-like"  # 23:00 violates
-    assert rows[2][7] == "no"  # 12:00 does not
-    assert rows[1][8] == "22:00–08:00"
+    assert rows[1][8] == "yes" and rows[1][-1] == "bark-like"  # 23:00 violates
+    assert rows[2][8] == "no"  # 12:00 does not
+    assert rows[1][9] == "22:00–08:00"
+    assert rows[1][7] == "+0.0"  # no offsets given -> rows declare themselves raw
 
 
 def test_violation_html_is_honest_and_accessible():
@@ -99,6 +101,30 @@ def test_violation_html_is_honest_and_accessible():
     assert "<h2>What this can and cannot prove</h2>" in html
     assert "<h2>Why there is deliberately no audio</h2>" in html
     assert "deliberate privacy choice, not missing data" in html
+
+
+def test_violation_html_multi_epoch_is_disclosed_per_row():
+    """A window spanning calibration epochs discloses per-row offsets and never claims a
+    single uniform calibration state (honest-report invariant on the export surface)."""
+    events = [_ev(23), _ev(2)]
+    report = compute_violations(
+        events, quiet_hours=QuietHours(22, 8), tz=timezone.utc, offsets_db=[0.0, 12.0]
+    )
+    assert [r.calibration_offset_db for r in report.rows] == [0.0, 12.0]
+    html = build_violation_report_html(
+        report,
+        threshold_dbfs=-35.0,
+        min_duration_s=0.4,
+        generated_at="2026-01-01 UTC",
+        calibrated=False,
+        multi_epoch=True,
+    )
+    assert "more than one calibration epoch" in html
+    assert "+0.0" in html and "+12.0" in html  # per-row offsets visible in the table
+    assert "Calibration offset (dB)" in html
+    # Neither uniform claim is made for a mixed window.
+    assert "No calibration offset is applied" not in html
+    assert "A calibration offset is applied" not in html
 
 
 def test_violation_html_empty_log():

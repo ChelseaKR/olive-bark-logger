@@ -14,6 +14,7 @@ same CSV bytes and the same HTML.
 from __future__ import annotations
 
 import csv
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone, tzinfo
 from html import escape
@@ -46,6 +47,10 @@ class ViolationRow:
     avg_dbfs: float
     within_quiet_hours: bool
     coarse_tag: str | None
+    # The calibration offset already included in peak_dbfs/avg_dbfs for this row, in dB
+    # (0.0 = raw, uncalibrated dBFS). Recorded so the export is self-describing:
+    # raw = value - calibration_offset_db.
+    calibration_offset_db: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -72,13 +77,22 @@ def compute_violations(
     quiet_hours: QuietHours,
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
+    offsets_db: Sequence[float] | None = None,
 ) -> ViolationReport:
-    """Classify every event as within / outside the quiet-hours window by its start time."""
+    """Classify every event as within / outside the quiet-hours window by its start time.
+
+    `offsets_db`, when given, must parallel `events` and record the calibration offset
+    already applied (at render time) to each event's levels, so every row is
+    self-describing about its calibration state. Omitted means the levels are raw (0.0).
+    """
+    offs = list(offsets_db) if offsets_db is not None else [0.0] * len(events)
+    if len(offs) != len(events):
+        raise ValueError("offsets_db must have one entry per event")
     rows: list[ViolationRow] = []
     within = 0
     within_secs = 0.0
     outside_secs = 0.0
-    for ev in events:
+    for ev, off in zip(events, offs):
         dt = datetime.fromtimestamp(ev.start, tz=tz)
         is_within = quiet_hours.contains(dt)
         if is_within:
@@ -97,6 +111,7 @@ def compute_violations(
                 avg_dbfs=ev.avg_level,
                 within_quiet_hours=is_within,
                 coarse_tag=ev.coarse_tag,
+                calibration_offset_db=off,
             )
         )
     return ViolationReport(
@@ -119,6 +134,7 @@ _CSV_HEADER = [
     "duration_s",
     "peak_dbfs",
     "avg_dbfs",
+    "calibration_offset_db",
     "within_quiet_hours",
     "quiet_window",
     "coarse_tag",
@@ -132,15 +148,19 @@ def violations_to_csv(
     quiet_hours: QuietHours,
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
+    offsets_db: Sequence[float] | None = None,
 ) -> int:
     """Write every event with a within/outside-quiet-hours flag. Returns rows written.
 
     The export is honest by construction: it lists *all* events, not only the flagged
-    ones, so a reader can see the full picture rather than a cherry-picked subset. The
+    ones, so a reader can see the full picture rather than a cherry-picked subset; each
+    row records the calibration offset included in its levels (0.0 = raw dBFS); and the
     "what this can and cannot prove" cover block (R1) is written as a leading ``#`` comment
     preamble so the caveat travels with the file; data rows below it are unchanged.
     """
-    report = compute_violations(events, quiet_hours=quiet_hours, tz=tz, tz_name=tz_name)
+    report = compute_violations(
+        events, quiet_hours=quiet_hours, tz=tz, tz_name=tz_name, offsets_db=offsets_db
+    )
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
         for line in cover_text_lines():
             fh.write(f"# {line}\n" if line else "#\n")
@@ -156,6 +176,7 @@ def violations_to_csv(
                     f"{r.duration_s:.3f}",
                     f"{r.peak_dbfs:.1f}",
                     f"{r.avg_dbfs:.1f}",
+                    f"{r.calibration_offset_db:+.1f}",
                     "yes" if r.within_quiet_hours else "no",
                     report.window,
                     r.coarse_tag or "",
@@ -179,12 +200,16 @@ def build_violation_report_html(
     min_duration_s: float,
     generated_at: str,
     calibrated: bool,
+    multi_epoch: bool = False,
     title: str = "Olive's Bark Logger — Quiet-Hours Report",
 ) -> str:
     """Render a standalone, accessible HTML quiet-hours violation report.
 
     Honest posture is mandatory and unconditional: the no-source and relative-dBFS
     limitations and the scope note are always present, mirroring the main report.
+    `calibrated` must reflect the calibration actually applied to the rows (the store's
+    history, not a config field); `multi_epoch` discloses that more than one offset is
+    in play across the window, in which case each row's own offset column governs.
     """
     if report.rows:
         body_rows = "".join(
@@ -192,6 +217,7 @@ def build_violation_report_html(
             f"<td>{escape('yes' if r.within_quiet_hours else 'no')}</td>"
             f"<td>{_fmt_seconds(r.duration_s)}</td>"
             f"<td>{r.peak_dbfs:.1f}</td><td>{r.avg_dbfs:.1f}</td>"
+            f"<td>{r.calibration_offset_db:+.1f}</td>"
             f"<td>{escape(r.coarse_tag or '')}</td></tr>"
             for r in report.rows
         )
@@ -203,17 +229,27 @@ def build_violation_report_html(
             '<th scope="col">Duration</th>'
             '<th scope="col">Peak (dBFS)</th>'
             '<th scope="col">Avg (dBFS)</th>'
+            '<th scope="col">Calibration offset (dB)</th>'
             '<th scope="col">Coarse tag</th>'
             f"</tr></thead><tbody>{body_rows}</tbody></table>"
         )
     else:
         table = "<p>No events have been logged, so there is nothing to flag.</p>"
 
-    calib_line = (
-        "A calibration offset is applied, so levels approximate SPL but remain estimates."
-        if calibrated
-        else "No calibration offset is applied; levels are relative dBFS, not absolute SPL."
-    )
+    if multi_epoch:
+        calib_line = (
+            "This window spans more than one calibration epoch: each event's level is "
+            "adjusted by the calibration offset in force when it was measured (shown per "
+            "row above, and per epoch in the main report). Calibrated readings "
+            "approximate SPL but remain estimates; events measured under a zero offset "
+            "remain relative dBFS."
+        )
+    else:
+        calib_line = (
+            "A calibration offset is applied, so levels approximate SPL but remain estimates."
+            if calibrated
+            else "No calibration offset is applied; levels are relative dBFS, not absolute SPL."
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
