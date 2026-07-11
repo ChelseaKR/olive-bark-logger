@@ -114,10 +114,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # PRs get a representative fast leg; main keeps the full compatibility
-        # sweep across supported Python versions and OSes.
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest"]') }}
-        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.12"]') || fromJSON('["3.9", "3.10", "3.11", "3.12", "3.13"]') }}
+        # Full sweep on PRs and main alike. The 2026-07-08 minutes optimization
+        # trimmed PRs to one leg, but the applied branch ruleset requires all
+        # eleven matrix contexts — with the trim, required checks could never
+        # report on a PR and every PR was permanently unmergeable. If a leaner
+        # PR matrix is wanted, the ruleset's required checks must be changed in
+        # the same motion (repo-settings change: human action).
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
       # 0. egress monitoring (SEC-04), audit mode — see the `verify` job's identical
