@@ -459,8 +459,7 @@ def build_report(
             "no calendar to show.</p>"
         )
 
-    qh = config.quiet_hours
-    quiet_window = f"{qh.start_hour:02d}:00–{qh.end_hour:02d}:00"  # noqa: RUF001 - intentional en dash
+    quiet_window = config.quiet_hours.label()
 
     stats = {
         "Total events": str(summary.event_count),

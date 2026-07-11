@@ -21,7 +21,7 @@ from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from monitor.config import QuietHours
+from monitor.config import QuietSchedule
 from monitor.detector import Event
 
 if TYPE_CHECKING:
@@ -72,14 +72,10 @@ class ViolationReport:
     rows: list[ViolationRow]
 
 
-def _window_label(quiet_hours: QuietHours) -> str:
-    return f"{quiet_hours.start_hour % 24:02d}:00–{quiet_hours.end_hour % 24:02d}:00"  # noqa: RUF001 - intentional en dash
-
-
 def compute_violations(
     events: list[Event],
     *,
-    quiet_hours: QuietHours,
+    quiet_hours: QuietSchedule,
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
@@ -128,7 +124,7 @@ def compute_violations(
             )
         )
     return ViolationReport(
-        window=_window_label(quiet_hours),
+        window=quiet_hours.label(),
         tz_name=tz_name,
         total_events=len(events),
         within_count=within,
@@ -159,7 +155,7 @@ def violations_to_csv(
     events: list[Event],
     path: str | Path,
     *,
-    quiet_hours: QuietHours,
+    quiet_hours: QuietSchedule,
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,

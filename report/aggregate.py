@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
 from typing import TYPE_CHECKING
 
-from monitor.config import QuietHours
+from monitor.config import QuietSchedule
 from monitor.detector import Event
 
 if TYPE_CHECKING:
@@ -63,7 +63,7 @@ def describe_clock_anomalies(
 def summarize(
     events: list[Event],
     *,
-    quiet_hours: QuietHours,
+    quiet_hours: QuietSchedule,
     tz: tzinfo = timezone.utc,
 ) -> Summary:
     """Reduce events to distributions and quiet-hours compliance figures."""

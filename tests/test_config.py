@@ -12,7 +12,8 @@ from monitor.config import Config, ConfigError, QuietHours
 def test_defaults_load_without_file():
     c = Config.load(None)
     assert c.threshold_dbfs == -35.0
-    assert c.quiet_hours.start_hour == 22
+    # The default quiet schedule is the legacy daily 22:00 -> 08:00 window.
+    assert c.quiet_hours.label() == "22:00–08:00"  # noqa: RUF001 - intentional en dash
 
 
 def test_load_from_json(tmp_path):
@@ -22,8 +23,8 @@ def test_load_from_json(tmp_path):
     )
     c = Config.load(p)
     assert c.threshold_dbfs == -40
-    assert c.quiet_hours.start_hour == 21
-    assert c.quiet_hours.end_hour == 7
+    # The legacy hour form auto-upgrades to a single-window schedule.
+    assert c.quiet_hours.label() == "21:00–07:00"  # noqa: RUF001 - intentional en dash
 
 
 def test_missing_file_falls_back_to_defaults(tmp_path):

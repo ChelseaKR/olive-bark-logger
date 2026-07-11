@@ -243,4 +243,7 @@ def test_bar_chart_handles_all_zero_values():
 
 def test_config_to_dict_roundtrips_quiet_hours():
     d = Config().to_dict()
-    assert d["quiet_hours"]["start_hour"] == 22
+    # to_dict emits the JSON-friendly windows form (the default is daily 22:00 -> 08:00).
+    assert d["quiet_hours"]["windows"] == [
+        {"days": [0, 1, 2, 3, 4, 5, 6], "start": "22:00", "end": "08:00"}
+    ]
