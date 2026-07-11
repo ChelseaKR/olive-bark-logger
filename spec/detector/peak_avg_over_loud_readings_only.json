@@ -1,0 +1,36 @@
+{
+  "name": "peak_avg_over_loud_readings_only",
+  "description": "Peak and average use only the loud readings within the event.",
+  "params": {
+    "threshold_dbfs": -30,
+    "min_duration_s": 0.1,
+    "debounce_s": 1.0
+  },
+  "readings": [
+    [
+      0.0,
+      -20
+    ],
+    [
+      0.5,
+      -10
+    ],
+    [
+      1.0,
+      -25
+    ],
+    [
+      3.0,
+      -60
+    ]
+  ],
+  "expected_events": [
+    {
+      "start": 0.0,
+      "end": 1.0,
+      "duration": 1.0,
+      "peak_level": -10,
+      "avg_level": -18.333333333333332
+    }
+  ]
+}

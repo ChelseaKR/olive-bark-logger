@@ -1,0 +1,28 @@
+{
+  "name": "zero_min_duration_keeps_single_frame",
+  "description": "With min_duration 0, a single loud frame (duration 0) is a real event.",
+  "params": {
+    "threshold_dbfs": -30,
+    "min_duration_s": 0.0,
+    "debounce_s": 0.2
+  },
+  "readings": [
+    [
+      0.0,
+      -10
+    ],
+    [
+      0.3,
+      -60
+    ]
+  ],
+  "expected_events": [
+    {
+      "start": 0.0,
+      "end": 0.0,
+      "duration": 0.0,
+      "peak_level": -10,
+      "avg_level": -10.0
+    }
+  ]
+}
