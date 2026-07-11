@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from store import EventStore
@@ -81,6 +81,32 @@ def run_pipeline(
     final = detector.flush()
     if final is not None:
         yield finish(final)
+
+
+def checkpointed(
+    source: Iterable[tuple[float, list[float]]],
+    interval_s: float,
+    checkpoint: Callable[[], None],
+    *,
+    clock: Callable[[], float] = time.monotonic,
+) -> Iterator[tuple[float, list[float]]]:
+    """Pass frames straight through, invoking ``checkpoint`` on a wall-clock cadence.
+
+    The heartbeat and session frame counters were previously written only on events
+    and in the finally block, so a silent night or a power cut lost ops/coverage data.
+    This wrapper piggybacks a periodic write on frame arrival (~10 Hz): once at least
+    ``interval_s`` seconds of elapsed clock time have passed, the next frame triggers a
+    checkpoint. No timer thread and no sockets — the heartbeat stays a file (see
+    write_health), so the egress gate (tests/test_no_egress.py) keeps passing. ``clock``
+    is injectable so tests can drive the cadence with a fake monotonic clock, and frames
+    are never inspected or retained here, preserving the no-audio guarantee.
+    """
+    last = clock()
+    for item in source:
+        yield item
+        if clock() - last >= interval_s:
+            checkpoint()
+            last = clock()
 
 
 def _attach_tag(event: Event, feats: list[tuple[float, float]]) -> Event:
@@ -169,6 +195,18 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
                 ),
             )
 
+    def checkpoint() -> None:
+        # Time-driven flush: refresh the heartbeat and persist the running frame
+        # counters so a silent night or a power cut can't lose ops/coverage data.
+        # ended_at is left unset (None) so a checkpoint never marks the session ended;
+        # only the finally block records the real end time.
+        heartbeat()
+        store.update_session(
+            session_id,
+            frames_seen=stats.frames_seen,
+            frames_dropped=stats.frames_dropped,
+        )
+
     print(
         f"Monitoring (threshold {config.threshold_dbfs} dBFS). "
         f"Logging events to {config.db_path}. Audio is never recorded. Ctrl-C to stop."
@@ -176,7 +214,11 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
     heartbeat()
     try:
         for event in run_pipeline(
-            resilient_source(make_source),
+            checkpointed(
+                resilient_source(make_source),
+                config.checkpoint_interval_s,
+                checkpoint,
+            ),
             config,
             store,
             stats=stats,
