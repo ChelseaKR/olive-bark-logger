@@ -11,7 +11,7 @@ import json
 import logging
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone, tzinfo
+from datetime import datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,23 @@ class QuietWindow:
         }
 
 
+def _merged_seconds(intervals: list[tuple[datetime, datetime]]) -> float:
+    """Total seconds covered by the union of the intervals (overlaps counted once)."""
+    total = 0.0
+    merged_lo: datetime | None = None
+    merged_hi: datetime | None = None
+    for lo, hi in sorted(intervals):
+        if merged_hi is None or lo > merged_hi:
+            if merged_hi is not None and merged_lo is not None:
+                total += (merged_hi - merged_lo).total_seconds()
+            merged_lo, merged_hi = lo, hi
+        elif hi > merged_hi:
+            merged_hi = hi
+    if merged_hi is not None and merged_lo is not None:
+        total += (merged_hi - merged_lo).total_seconds()
+    return total
+
+
 @dataclass(frozen=True)
 class QuietSchedule:
     """An ordered set of quiet-hours windows evaluated as a union."""
@@ -153,6 +170,50 @@ class QuietSchedule:
     def label(self) -> str:
         """Report-facing label joining every window, e.g. "22:30-07:00; 23:00-08:00"."""
         return "; ".join(w.label() for w in self.windows)
+
+    def overlap_seconds(self, start_dt: datetime, end_dt: datetime) -> float:
+        """Seconds of the half-open interval [start_dt, end_dt) inside the quiet schedule.
+
+        Where ``contains`` classifies a single instant (used for event *counts*, which
+        cannot be fractional), this pro-rates an event's *duration* across window
+        boundaries: an event that begins before a window opens, or runs past its close,
+        contributes only the portion that actually falls inside quiet hours.
+
+        Each window is reconstructed concretely, day by day, in the local zone of the
+        input datetimes, so day boundaries and DST are handled by real datetime
+        arithmetic rather than wall-clock comparisons. Day membership follows
+        ``contains_local``: a wrapping window's after-midnight tail belongs to the day it
+        STARTED on. Because the schedule is a *union* of windows, the per-day intervals
+        are merged before summing so overlapping windows are never double-counted.
+        Adding minutes onto local midnight keeps ``end_minute == 1440`` exact and is
+        fold-agnostic (deterministic across a DST transition, if imprecise by an hour at
+        the exact fold — acceptable and documented).
+        """
+        if end_dt <= start_dt:
+            return 0.0
+        tz = start_dt.tzinfo
+        intervals: list[tuple[datetime, datetime]] = []
+        # Start a day early so a wrapping window's after-midnight tail from the prior
+        # date is considered; iterate through end_dt's date inclusive.
+        day = start_dt.date() - timedelta(days=1)
+        last_day = end_dt.date()
+        while day <= last_day:
+            midnight = datetime.combine(day, time(0), tzinfo=tz)
+            weekday = day.weekday()
+            for w in self.windows:
+                if weekday not in w.days:
+                    continue
+                lo = midnight + timedelta(minutes=w.start_minute)
+                hi = (
+                    midnight + timedelta(days=1, minutes=w.end_minute)
+                    if w.wraps
+                    else midnight + timedelta(minutes=w.end_minute)
+                )
+                lo, hi = max(lo, start_dt), min(hi, end_dt)
+                if hi > lo:
+                    intervals.append((lo, hi))
+            day += timedelta(days=1)
+        return _merged_seconds(intervals)
 
     @classmethod
     def from_legacy(cls, start_hour: int = 22, end_hour: int = 8) -> QuietSchedule:

@@ -54,7 +54,7 @@ transmitted to produce it.</p>
 </aside>
 
 <h2>Summary</h2>
-<dl class="stats"><dt>Total events</dt><dd>4</dd><dt>Total loud time</dt><dd>22 s</dd><dt>Longest event</dt><dd>9 s</dd><dt>Loudest peak</dt><dd>-5.0 dBFS</dd><dt>Mean peak</dt><dd>-11.2 dBFS</dd><dt>Events during quiet hours (22:00–08:00)</dt><dd>3</dd><dt>Loud time during quiet hours</dt><dd>19 s</dd></dl>
+<dl class="stats"><dt>Total events</dt><dd>4</dd><dt>Total loud time</dt><dd>22 s</dd><dt>Longest event</dt><dd>9 s</dd><dt>Loudest peak</dt><dd>-5.0 dBFS</dd><dt>Mean peak</dt><dd>-11.2 dBFS</dd><dt>Events during quiet hours (22:00–08:00)</dt><dd>3</dd><dt>Loud time during quiet hours (pro-rated)</dt><dd>19 s</dd><dt>Loud time during quiet hours (start-attributed)</dt><dd>19 s</dd></dl>
 
 <h2>Measurement conditions</h2>
 <p>Measurement conditions for this report were not recorded (events predate session tracking).</p>
@@ -72,8 +72,13 @@ transmitted to produce it.</p>
 <h2>Quiet hours</h2>
 <p>Quiet-hours window: <strong>22:00–08:00</strong> in time zone
 <strong>UTC</strong> (daylight-saving aware). Of 4
-total events, <strong>3</strong> fell within quiet hours,
-totaling 19 s of loud time.</p>
+total events, <strong>3</strong> started within quiet hours,
+and <strong>19 s</strong> of loud time fell
+inside the window
+(vs. 19 s if counted whole by
+start time). Event counts are attributed by start time, since a count cannot be split; loud
+seconds are pro-rated across the quiet-window boundary, so an event that begins before the
+window and ends inside it contributes only the seconds actually within quiet hours.</p>
 
 <h2>Quiet-hours duration rollup</h2>
 <p>Detected loud time within the quiet-hours window, totaled per day and attributed by each event's start time. Some ordinances and CC&amp;Rs key on accumulated duration in a day — figures of around <strong>30 minutes continuous</strong> or <strong>60 minutes intermittent</strong> are sometimes cited — but the threshold, the unit, and the definition vary by jurisdiction.</p>

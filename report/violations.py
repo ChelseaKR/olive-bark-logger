@@ -49,7 +49,8 @@ class ViolationRow:
     duration_s: float
     peak_dbfs: float
     avg_dbfs: float
-    within_quiet_hours: bool
+    within_quiet_hours: bool  # start-attributed: did the event *start* in quiet hours?
+    seconds_within_quiet_hours: float  # pro-rated portion of the duration inside the window
     monitored: bool  # False if the event overlaps a recorded monitoring gap
     coarse_tag: str | None
     # The calibration offset already included in peak_dbfs/avg_dbfs for this row, in dB
@@ -101,7 +102,9 @@ def compute_violations(
     outside_secs = 0.0
     for ev, off in zip(events, offs):
         dt = datetime.fromtimestamp(ev.start, tz=tz)
+        end_dt = datetime.fromtimestamp(ev.start + ev.duration, tz=tz)
         is_within = quiet_hours.contains(dt)
+        quiet_secs = quiet_hours.overlap_seconds(dt, end_dt)
         if is_within:
             within += 1
             within_secs += ev.duration
@@ -118,6 +121,7 @@ def compute_violations(
                 peak_dbfs=ev.peak_level,
                 avg_dbfs=ev.avg_level,
                 within_quiet_hours=is_within,
+                seconds_within_quiet_hours=quiet_secs,
                 monitored=monitored,
                 coarse_tag=ev.coarse_tag,
                 calibration_offset_db=off,
@@ -145,6 +149,7 @@ _CSV_HEADER = [
     "avg_dbfs",
     "calibration_offset_db",
     "within_quiet_hours",
+    "seconds_within_quiet_hours",
     "quiet_window",
     "monitored",
     "coarse_tag",
@@ -190,6 +195,7 @@ def violations_to_csv(
                     f"{r.avg_dbfs:.1f}",
                     f"{r.calibration_offset_db:+.1f}",
                     "yes" if r.within_quiet_hours else "no",
+                    f"{r.seconds_within_quiet_hours:.1f}",
                     report.window,
                     "yes" if r.monitored else "no",
                     r.coarse_tag or "",
@@ -201,8 +207,11 @@ def violations_to_csv(
 HONEST_SCOPE_NOTE = (
     "A row marked “within quiet hours” means only that this device measured a sound level "
     "above the detection threshold, starting during the quiet-hours window. It is not proof "
-    "of the source of the sound or of who caused it. Events are attributed by their start "
-    "time."
+    "of the source of the sound or of who caused it. Event *counts* are attributed by their "
+    "start time (a count cannot be fractional); the “seconds within quiet hours” column "
+    "instead pro-rates each event's duration across the quiet-window boundary, so an event "
+    "that begins before the window and ends inside it contributes only the seconds that "
+    "actually fell in quiet hours."
 )
 
 

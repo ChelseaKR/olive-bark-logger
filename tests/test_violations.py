@@ -30,6 +30,45 @@ def _ev(hour: int, day: int = 1, duration: float = 2.0, tag: str | None = None) 
     )
 
 
+def _ev_at(dt: datetime, duration: float) -> Event:
+    start = dt.timestamp()
+    return Event(
+        start=start,
+        end=start + duration,
+        duration=duration,
+        peak_level=-8.0,
+        avg_level=-12.0,
+    )
+
+
+def test_seconds_within_quiet_hours_prorates_boundary():
+    # 120 s event straddling the 22:00 quiet-hours start: begins at 21:59:00, so exactly
+    # 60 s fall inside the window and 60 s fall outside.
+    qh = QuietHours(22, 8)
+    ev = _ev_at(datetime(2026, 1, 1, 21, 59, 0, tzinfo=timezone.utc), 120.0)
+    report = compute_violations([ev], quiet_hours=qh, tz=timezone.utc)
+    row = report.rows[0]
+    assert row.within_quiet_hours is False  # start (21:59) is outside quiet hours
+    assert row.seconds_within_quiet_hours == 60.0
+
+
+def test_seconds_within_quiet_hours_fully_inside_and_outside():
+    qh = QuietHours(22, 8)
+    inside = _ev_at(datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc), 30.0)
+    outside = _ev_at(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 3600.0)
+    report = compute_violations([inside, outside], quiet_hours=qh, tz=timezone.utc)
+    assert report.rows[0].seconds_within_quiet_hours == 30.0  # full duration
+    assert report.rows[1].seconds_within_quiet_hours == 0.0  # long, but wholly outside
+
+
+def test_seconds_within_quiet_hours_midnight_wrap():
+    # Window 22->8 wraps midnight; an event from 23:59:30 to 00:00:30 is entirely inside.
+    qh = QuietHours(22, 8)
+    ev = _ev_at(datetime(2026, 1, 1, 23, 59, 30, tzinfo=timezone.utc), 60.0)
+    report = compute_violations([ev], quiet_hours=qh, tz=timezone.utc)
+    assert report.rows[0].seconds_within_quiet_hours == 60.0
+
+
 def test_compute_violations_counts_within_and_outside():
     events = [_ev(23), _ev(2), _ev(12)]  # two inside 22-08, one outside
     report = compute_violations(events, quiet_hours=QuietHours(22, 8), tz=timezone.utc)
@@ -71,6 +110,7 @@ def test_violations_csv_lists_all_events_flagged(tmp_path):
         "avg_dbfs",
         "calibration_offset_db",
         "within_quiet_hours",
+        "seconds_within_quiet_hours",
         "quiet_window",
         "monitored",
         "coarse_tag",
@@ -78,9 +118,12 @@ def test_violations_csv_lists_all_events_flagged(tmp_path):
     assert len(rows) == 3  # header + 2 events
     assert rows[1][8] == "yes" and rows[1][-1] == "bark-like"  # 23:00 violates
     assert rows[2][8] == "no"  # 12:00 does not
-    assert rows[1][9] == "22:00–08:00"
+    # The pro-rated seconds column sits between the flag and the window label.
+    assert rows[1][9] == "2.0"  # 2 s event fully inside quiet hours
+    assert rows[2][9] == "0.0"  # noon event contributes no quiet seconds
+    assert rows[1][10] == "22:00–08:00"
     assert rows[1][7] == "+0.0"  # no offsets given -> rows declare themselves raw
-    assert rows[1][10] == "yes" and rows[2][10] == "yes"  # no gaps -> all monitored
+    assert rows[1][11] == "yes" and rows[2][11] == "yes"  # no gaps -> all monitored
 
 
 def test_violations_csv_flags_unmonitored_events(tmp_path):
