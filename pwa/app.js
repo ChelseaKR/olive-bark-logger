@@ -2,6 +2,7 @@
 // AUDIO IS NEVER STORED. We read time-domain samples from an AnalyserNode into a reused
 // buffer, reduce each frame to a dBFS number, and drop it. Only event metadata persists.
 
+import { computeAnchor, toEpochSeconds } from "./clock.js";
 import { Detector } from "./detector.js";
 import { dbfs } from "./level.js";
 import { buildReportHtml, eventsToCsv, summarize, violationsToCsv } from "./report.js";
@@ -52,28 +53,62 @@ async function clearEvents() {
   });
 }
 
+const STATUS_LISTENING =
+  "Listening. Audio is processed in memory and never stored. Keep this tab open and " +
+  "in the foreground: a backgrounded or locked tab cannot monitor reliably, and any " +
+  "such interruptions are recorded as monitoring gaps.";
+const SAMPLE_INTERVAL_MS = 100; // steady clock, not tied to rAF (which throttles in the background)
+const GAP_THRESHOLD_S = 2; // background interruptions longer than this are logged as gaps
+
 let audioCtx = null;
 let stream = null;
-let raf = 0;
+let sampler = 0; // setInterval id; rAF throttles to ~0 in a backgrounded tab
+let detector = null;
+let anchor = 0; // epoch-seconds value that audioCtx.currentTime 0 maps to
+let gapStart = 0; // epoch-seconds when the tab was last hidden, 0 when visible/idle
+
+// Persist a coverage hole so the report can be honest about time we could not monitor.
+async function recordGap(start, end) {
+  if (end - start < GAP_THRESHOLD_S) return;
+  await addEvent({ kind: "gap", start, end });
+  await refresh();
+}
+
+async function onVisibilityChange() {
+  if (!audioCtx) return;
+  if (document.visibilityState === "hidden") {
+    gapStart = toEpochSeconds(audioCtx.currentTime, anchor);
+  } else if (gapStart) {
+    const end = toEpochSeconds(audioCtx.currentTime, anchor);
+    const start = gapStart;
+    gapStart = 0;
+    await recordGap(start, end);
+  }
+}
 
 async function start() {
   const c = cfg();
   stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   audioCtx = new AudioContext();
+  // Anchor context-time to wall-clock once, so stored events carry unix-epoch seconds
+  // (report.js/CSV do new Date(ev.start * 1000)), not seconds-since-context-created.
+  anchor = computeAnchor(Date.now(), audioCtx.currentTime);
+  gapStart = 0;
   const src = audioCtx.createMediaStreamSource(stream);
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 2048;
   src.connect(analyser);
   const buf = new Float32Array(analyser.fftSize); // reused buffer; audio never kept
-  const detector = new Detector(c.threshold, c.minDuration, c.debounce);
+  detector = new Detector(c.threshold, c.minDuration, c.debounce);
 
   $("start").disabled = true;
   $("stop").disabled = false;
-  $("status").textContent = "Listening. Audio is processed in memory and never stored.";
+  $("status").textContent = STATUS_LISTENING;
+  document.addEventListener("visibilitychange", onVisibilityChange);
 
   const tick = async () => {
     analyser.getFloatTimeDomainData(buf);
-    const t = audioCtx.currentTime;
+    const t = toEpochSeconds(audioCtx.currentTime, anchor);
     const level = dbfs(buf);
     $("meter").value = Math.max(0, Math.min(100, ((level + 60) / 60) * 100));
     $("level").textContent = `${level.toFixed(1)} dBFS`;
@@ -82,15 +117,32 @@ async function start() {
       await addEvent(ev);
       await refresh();
     }
-    raf = requestAnimationFrame(tick);
   };
-  raf = requestAnimationFrame(tick);
+  sampler = setInterval(tick, SAMPLE_INTERVAL_MS);
 }
 
-function stop() {
-  cancelAnimationFrame(raf);
+async function stop() {
+  clearInterval(sampler);
+  sampler = 0;
+  document.removeEventListener("visibilitychange", onVisibilityChange);
+  if (gapStart && audioCtx) {
+    const end = toEpochSeconds(audioCtx.currentTime, anchor);
+    const start = gapStart;
+    gapStart = 0;
+    await recordGap(start, end);
+  }
+  // Finalize any in-progress event so a trailing bark is not lost on stop.
+  if (detector) {
+    const ev = detector.flush();
+    detector = null;
+    if (ev) {
+      await addEvent(ev);
+      await refresh();
+    }
+  }
   if (stream) stream.getTracks().forEach((tr) => tr.stop());
   if (audioCtx) audioCtx.close();
+  audioCtx = null;
   $("start").disabled = false;
   $("stop").disabled = true;
   $("status").textContent = "Stopped.";
