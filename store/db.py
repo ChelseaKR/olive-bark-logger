@@ -28,7 +28,7 @@ from pathlib import Path
 
 from monitor.detector import Event
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Ordered migrations. Each entry upgrades the database from version i to i+1. A fresh
 # database (user_version 0) runs them all; an existing one runs only the new ones.
@@ -113,6 +113,24 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX IF NOT EXISTS idx_gaps_start ON gaps(start);
     """,
+    # 5 -> 6: clock-integrity anomalies (FIX-10). On RTC-less hosts (e.g. a Raspberry
+    # Pi) the wall clock can jump when NTP finally syncs or after suspend/resume. We
+    # track wall vs monotonic time during capture and persist any divergence here so the
+    # report can disclose it. Metadata only (five numbers + a kind string) — never
+    # audio. (Originally drafted as 2 -> 3; renumbered after the calibration-history,
+    # parameter-provenance, and gap-ledger migrations landed first.)
+    """
+    CREATE TABLE clock_anomalies (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id   INTEGER,
+        kind         TEXT NOT NULL,   -- 'forward-jump' or 'backward-jump'
+        wall_before  REAL NOT NULL,   -- wall time expected from monotonic progression
+        wall_after   REAL NOT NULL,   -- wall time actually observed
+        delta        REAL NOT NULL,   -- wall_after - wall_before (signed drift, seconds)
+        detected_at  REAL NOT NULL    -- wall time the divergence was noticed
+    );
+    CREATE INDEX idx_clock_anomalies_detected ON clock_anomalies(detected_at);
+    """,
 ]
 
 
@@ -159,6 +177,19 @@ class Session:
 
 
 @dataclass(frozen=True)
+class ClockAnomaly:
+    """A detected wall-clock vs monotonic-clock divergence during capture. Numbers only."""
+
+    id: int
+    session_id: int | None
+    kind: str
+    wall_before: float
+    wall_after: float
+    delta: float
+    detected_at: float
+
+
+@dataclass(frozen=True)
 class Gap:
     """One interval when the device was not listening. Metadata only — no audio.
 
@@ -178,7 +209,7 @@ class Gap:
 
 
 class EventStore:
-    """Event log, calibration record, capture-session lineage, and monitoring gaps."""
+    """Event log, calibration record, session lineage, monitoring gaps, clock anomalies."""
 
     def __init__(self, path: str | Path = "olive.db") -> None:
         self.path = str(path)
@@ -489,6 +520,63 @@ class EventStore:
         uses to describe each event under the settings in force when it was logged."""
         rows = self._conn.execute("SELECT * FROM sessions ORDER BY started_at ASC, id ASC")
         return [self._row_to_session(r) for r in rows]
+
+    # -- clock anomalies -----------------------------------------------------
+    def add_clock_anomaly(
+        self,
+        *,
+        session_id: int | None,
+        kind: str,
+        wall_before: float,
+        wall_after: float,
+        delta: float,
+        detected_at: float,
+    ) -> int:
+        """Persist one clock-jump anomaly. Metadata only — never audio."""
+        cur = self._conn.execute(
+            "INSERT INTO clock_anomalies (session_id, kind, wall_before, wall_after, delta, "
+            "detected_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, kind, wall_before, wall_after, delta, detected_at),
+        )
+        self._conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def clock_anomalies(
+        self, start: float | None = None, end: float | None = None
+    ) -> list[ClockAnomaly]:
+        """Anomalies whose detected_at falls in [start, end), ordered by detection time.
+
+        Both bounds are optional so the report can ask for everything; the window form
+        keeps this compatible with FIX-03's later gap-table queries.
+        """
+        sql = (
+            "SELECT id, session_id, kind, wall_before, wall_after, delta, detected_at "
+            "FROM clock_anomalies"
+        )
+        clauses: list[str] = []
+        params: list[float] = []
+        if start is not None:
+            clauses.append("detected_at >= ?")
+            params.append(start)
+        if end is not None:
+            clauses.append("detected_at < ?")
+            params.append(end)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY detected_at ASC, id ASC"
+        rows: Iterable[sqlite3.Row] = self._conn.execute(sql, params)
+        return [
+            ClockAnomaly(
+                id=r["id"],
+                session_id=r["session_id"],
+                kind=r["kind"],
+                wall_before=r["wall_before"],
+                wall_after=r["wall_after"],
+                delta=r["delta"],
+                detected_at=r["detected_at"],
+            )
+            for r in rows
+        ]
 
     # -- integrity -----------------------------------------------------------
     def integrity_ok(self) -> bool:

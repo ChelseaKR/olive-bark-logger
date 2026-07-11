@@ -54,6 +54,50 @@ def test_monitor_main_runs_with_a_fake_source(tmp_path, monkeypatch, capsys):
     assert payload["frames_seen"] == session.frames_seen
 
 
+def test_monitor_main_records_and_announces_clock_anomaly(tmp_path, monkeypatch, capsys):
+    from monitor.clock import ClockAnomalyRecord
+
+    db = tmp_path / "olive.db"
+    health = tmp_path / "health.json"
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(json.dumps({"db_path": str(db), "health_path": str(health)}))
+
+    def fake_live_source(sample_rate=16000, frame_size=1600, stats=None):
+        yield from synthetic_session(8.0, [LoudRegion(1.0, 4.0, 0.4)], frame_size=frame_size)
+
+    # Force one clock jump on the first per-event check, none afterward.
+    calls = {"n": 0}
+
+    def fake_check(self, now_wall, now_mono):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ClockAnomalyRecord(
+                kind="forward-jump",
+                wall_before=1000.0,
+                wall_after=8200.0,
+                delta=7200.0,
+                detected_at=8200.0,
+            )
+        return None
+
+    monkeypatch.setattr(capture_live, "live_source", fake_live_source)
+    monkeypatch.setattr("monitor.clock.ClockGuard.check", fake_check)
+    rc = monitor_main(["--config", str(cfg)], now=1000.0)
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "clock forward-jump" in out
+
+    with EventStore(db) as store:
+        anomalies = store.clock_anomalies()
+    assert len(anomalies) == 1
+    assert anomalies[0].kind == "forward-jump"
+    assert anomalies[0].delta == 7200.0
+
+    payload = json.loads(health.read_text())
+    assert payload["clock_anomalies"] == 1
+
+
 def test_monitor_main_prunes_per_retention(tmp_path, monkeypatch, capsys):
     db = tmp_path / "olive.db"
     cfg = tmp_path / "cfg.json"

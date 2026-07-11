@@ -10,6 +10,7 @@ from report.aggregate import summarize
 from report.render import (
     LIMITATIONS_HEADING,
     METHODOLOGY_HEADING,
+    NO_CLOCK_ANOMALY_NOTE,
     NO_SOURCE_NOTE,
     PARAM_CHANGE_NOTE,
     RELATIVE_DBFS_NOTE,
@@ -114,6 +115,29 @@ def test_event_types_section_absent_without_tags():
     base = datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp()
     html = _report([Event(base, base + 2, 2.0, -8, -12)])
     assert "Event types" not in html
+
+
+def test_no_clock_anomalies_disclosed_by_default():
+    html = _report()
+    assert NO_CLOCK_ANOMALY_NOTE in html
+
+
+def test_clock_anomaly_disclosure_line_appears_from_db(tmp_path):
+    from store import EventStore
+
+    db = tmp_path / "olive.db"
+    with EventStore(db) as store:
+        store.add_clock_anomaly(
+            session_id=None,
+            kind="forward-jump",
+            wall_before=1010.0,
+            wall_after=8210.0,
+            delta=7200.0,
+            detected_at=8210.0,
+        )
+    html = generate_report_from_db(str(db), Config(tz="UTC"), generated_at="2026-01-01 00:00 UTC")
+    assert "Clock jumped forward by 7200.0 s" in html
+    assert NO_CLOCK_ANOMALY_NOTE not in html
 
 
 def _session(sid, started_at, **params):

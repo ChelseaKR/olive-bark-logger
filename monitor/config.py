@@ -85,6 +85,9 @@ class Config:
     # and in the finally block. Kept small enough that a watchdog sees a fresh heartbeat.
     checkpoint_interval_s: float = 30.0
     tagging: bool = False  # compute a coarse bark-like/ambient hint per event (no audio)
+    # Clock-integrity guard: flag a wall-vs-monotonic divergence larger than this many
+    # seconds as a clock jump (important on RTC-less Pis where NTP sync lurches the clock).
+    clock_jump_tolerance_s: float = 2.0
 
     # Device/site metadata for data lineage and the bias audit.
     device_label: str = "olive-monitor"
@@ -102,6 +105,8 @@ class Config:
             raise ConfigError("threshold_dbfs must be within [-200, 0] dBFS")
         if self.retention_days < 0:
             raise ConfigError("retention_days must be non-negative")
+        if self.clock_jump_tolerance_s <= 0:
+            raise ConfigError("clock_jump_tolerance_s must be positive")
         if self.checkpoint_interval_s <= 0:
             raise ConfigError("checkpoint_interval_s must be positive")
 

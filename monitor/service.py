@@ -22,6 +22,7 @@ from store import EventStore
 
 from monitor import __version__
 from monitor.capture import resilient_source
+from monitor.clock import ClockGuard
 from monitor.config import Config
 from monitor.detector import Detector, Event
 from monitor.features import classify, zero_crossing_rate
@@ -118,7 +119,13 @@ def _attach_tag(event: Event, feats: list[tuple[float, float]]) -> Event:
 
 
 def _health_payload(
-    config: Config, stats: CaptureStats, *, started_at: float, now: float, session_id: int
+    config: Config,
+    stats: CaptureStats,
+    *,
+    started_at: float,
+    now: float,
+    session_id: int,
+    clock_anomalies: int = 0,
 ) -> dict[str, object]:
     return {
         "status": "ok",
@@ -129,25 +136,19 @@ def _health_payload(
         "frames_seen": stats.frames_seen,
         "frames_dropped": stats.frames_dropped,
         "frame_coverage": round(stats.coverage, 4),
+        "clock_anomalies": clock_anomalies,
         "db_path": config.db_path,
         "version": __version__,
     }
 
 
-def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
-    parser = argparse.ArgumentParser(
-        prog="olive-monitor",
-        description="On-device noise monitor: logs sound-level events, never audio.",
-    )
-    parser.add_argument("--config", type=Path, default=None, help="path to JSON config")
-    args = parser.parse_args(argv)
+def _bootstrap_session(store: EventStore, config: Config, started_at: float) -> int:
+    """Prune per retention policy and open this run's session-lineage record.
 
-    config = Config.load(args.config)
-    started_at = now or time.time()
-    store = EventStore(config.db_path)
-    # Calibration is a single source of truth owned by `olive-calibrate`. The monitor
-    # never writes it; it only reads the offset in force for this session's lineage
-    # record, falling back to the config's bootstrap value if no calibration exists yet.
+    Calibration is a single source of truth owned by `olive-calibrate`. The monitor
+    never writes it; it only reads the offset in force for this session's lineage
+    record, falling back to the config's bootstrap value if no calibration exists yet.
+    """
     stored_calibration = store.get_calibration()
     calibration_offset, calibration_note = (
         stored_calibration
@@ -158,7 +159,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
         removed = store.prune(before=started_at - config.retention_days * 86400)
         if removed:
             print(f"Retention: pruned {removed} event(s) older than {config.retention_days} days.")
-    session_id = store.start_session(
+    return store.start_session(
         started_at=started_at,
         device_label=config.device_label,
         mic_model=config.mic_model,
@@ -173,7 +174,24 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
         sample_rate=config.sample_rate,
         frame_size=config.frame_size,
     )
+
+
+def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
+    parser = argparse.ArgumentParser(
+        prog="olive-monitor",
+        description="On-device noise monitor: logs sound-level events, never audio.",
+    )
+    parser.add_argument("--config", type=Path, default=None, help="path to JSON config")
+    args = parser.parse_args(argv)
+
+    config = Config.load(args.config)
+    started_at = now or time.time()
+    store = EventStore(config.db_path)
+    session_id = _bootstrap_session(store, config, started_at)
     stats = CaptureStats()
+    # Clock-integrity guard: watch for wall-vs-monotonic divergence (RTC-less Pi hazard).
+    guard = ClockGuard(tolerance_s=config.clock_jump_tolerance_s)
+    anomaly_count = 0
 
     from monitor.capture_live import live_source  # lazy: optional audio dependency
 
@@ -192,14 +210,38 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
                     started_at=started_at,
                     now=now or time.time(),
                     session_id=session_id,
+                    clock_anomalies=anomaly_count,
                 ),
             )
+
+    def check_clock() -> None:
+        """Sample both clocks; persist and announce any divergence beyond tolerance."""
+        nonlocal anomaly_count
+        anomaly = guard.check(time.time(), time.monotonic())
+        if anomaly is None:
+            return
+        anomaly_count += 1
+        store.add_clock_anomaly(
+            session_id=session_id,
+            kind=anomaly.kind,
+            wall_before=anomaly.wall_before,
+            wall_after=anomaly.wall_after,
+            delta=anomaly.delta,
+            detected_at=anomaly.detected_at,
+        )
+        print(
+            f"clock {anomaly.kind}: wall time moved {anomaly.delta:+.1f}s relative to "
+            f"the monotonic clock (expected {anomaly.wall_before:.0f}, saw "
+            f"{anomaly.wall_after:.0f}). Event timestamps around this point may be off."
+        )
 
     def checkpoint() -> None:
         # Time-driven flush: refresh the heartbeat and persist the running frame
         # counters so a silent night or a power cut can't lose ops/coverage data.
         # ended_at is left unset (None) so a checkpoint never marks the session ended;
-        # only the finally block records the real end time.
+        # only the finally block records the real end time. The clock guard rides the
+        # same cadence so anomalies are caught on quiet nights too, not only on events.
+        check_clock()
         heartbeat()
         store.update_session(
             session_id,
@@ -229,6 +271,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             stats=stats,
             session_id=session_id,
         ):
+            check_clock()
             print(
                 f"event @ {event.start:.0f}  dur {event.duration:.1f}s  "
                 f"peak {event.peak_level:.1f} dBFS"

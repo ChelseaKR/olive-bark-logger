@@ -18,13 +18,13 @@ from typing import TYPE_CHECKING
 from monitor.config import Config
 from monitor.detector import Event
 
-from report.aggregate import Summary, summarize
+from report.aggregate import Summary, describe_clock_anomalies, summarize
 from report.charts import bar_chart, heatmap
 
 if TYPE_CHECKING:
     from datetime import tzinfo
 
-    from store import CalibrationEpoch, Gap, Session
+    from store import CalibrationEpoch, ClockAnomaly, Gap, Session
 
 # Phrases the report-content gate checks for. Keeping them as constants makes the
 # contract between the renderer and the test explicit.
@@ -39,6 +39,7 @@ NO_SOURCE_NOTE = (
     "This tool measures sound levels only. It cannot prove what made a sound or "
     "where it came from; it does not record or identify any voice or source."
 )
+NO_CLOCK_ANOMALY_NOTE = "No clock anomalies detected during the measurement window."
 
 # R5 — reader-facing "why there is deliberately no audio" note. The rationale already
 # lives in docs/audits/recording-law-notes.md; this surfaces it to the neighbor / PM /
@@ -167,6 +168,19 @@ def _conditions_html(session: Session | None) -> str:
     return (
         f"<p>Captured by device <strong>{escape(session.device_label)}</strong>{mic}."
         f"{placement}{coverage}</p>"
+    )
+
+
+def _clock_anomalies_html(lines: list[str]) -> str:
+    """Disclose clock jumps within the report window (or state that there were none)."""
+    if not lines:
+        return f'<p class="note">{escape(NO_CLOCK_ANOMALY_NOTE)}</p>'
+    items = "".join(f"<li>{escape(line)}</li>" for line in lines)
+    return (
+        '<p class="note">The system clock diverged from the monotonic clock during '
+        "capture, so some event timestamps near these points may be off. On hardware "
+        "without a real-time clock this typically happens when the network time syncs "
+        f"after boot.</p>\n<ul>{items}</ul>"
     )
 
 
@@ -382,6 +396,7 @@ def build_report(
     unmonitored: set[tuple[str, int]] | None = None,
     monitored_hours: float | None = None,
     wall_clock_hours: float | None = None,
+    clock_anomaly_lines: list[str] | None = None,
     title: str = "Olive's Bark Logger — Noise Report",
 ) -> str:
     """Render the full report as a single self-contained HTML string.
@@ -396,6 +411,7 @@ def build_report(
     multi_epoch = len(epochs) > 1
     calibrated = offset != 0.0
     conditions_html = _conditions_html(session)
+    clock_html = _clock_anomalies_html(clock_anomaly_lines or [])
 
     hour_chart = bar_chart(
         chart_id="by-hour",
@@ -578,6 +594,7 @@ transmitted to produce it.</p>
 
 <h2>Measurement conditions</h2>
 {conditions_html}
+{clock_html}
 
 <h2>Distributions</h2>
 {hour_chart}
@@ -679,10 +696,12 @@ def generate_report_from_db(
     """Read events from the store and render the report. Deterministic given inputs."""
     from store import EventStore
 
+    anomalies: list[ClockAnomaly]
     with EventStore(db_path) as store:
         events = store.events()  # raw dBFS levels; calibration is applied here, at render
         history = store.calibration_history()
         session = store.latest_session()
+        anomalies = store.clock_anomalies()
         gaps = store.gaps()
         sessions = store.sessions()
 
@@ -715,6 +734,7 @@ def generate_report_from_db(
             unmonitored=unmonitored,
             monitored_hours=monitored_hours,
             wall_clock_hours=wall_clock_hours,
+            clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
         )
 
     # Single-offset path: the whole window is under one calibration (or none -> config).
@@ -736,6 +756,7 @@ def generate_report_from_db(
         unmonitored=unmonitored,
         monitored_hours=monitored_hours,
         wall_clock_hours=wall_clock_hours,
+        clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
     )
 
 

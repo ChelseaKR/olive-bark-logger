@@ -10,9 +10,13 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
+from typing import TYPE_CHECKING
 
 from monitor.config import QuietHours
 from monitor.detector import Event
+
+if TYPE_CHECKING:
+    from store import ClockAnomaly
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,25 @@ class Summary:
     # (attributed by each event's start time). Feeds the ordinance/CC&R duration rollup;
     # it reports accumulated duration, never a violation verdict.
     quiet_hours_loud_seconds_by_day: dict[str, float] = field(default_factory=dict)
+
+
+def describe_clock_anomalies(
+    anomalies: list[ClockAnomaly], *, tz: tzinfo = timezone.utc
+) -> list[str]:
+    """Plain-language disclosure lines for detected clock jumps, wall times in `tz`.
+
+    Empty input yields an empty list; the renderer turns that into an explicit
+    "no anomalies" reassurance so the absence of jumps is stated, not merely implied.
+    """
+    lines: list[str] = []
+    for a in anomalies:
+        before = datetime.fromtimestamp(a.wall_before, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
+        after = datetime.fromtimestamp(a.wall_after, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
+        direction = "forward" if a.delta > 0 else "backward"
+        lines.append(
+            f"Clock jumped {direction} by {abs(a.delta):.1f} s (wall time {before} → {after})."
+        )
+    return lines
 
 
 def summarize(

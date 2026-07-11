@@ -46,6 +46,32 @@ def test_old_v1_database_upgrades_in_place(tmp_path):
         store._conn.execute("SELECT session_id FROM events")  # column now present
 
 
+def test_old_v2_database_upgrades_and_gains_clock_anomalies(tmp_path):
+    db = tmp_path / "olive.db"
+    # Hand-build a v2 database (events + calibration + sessions, user_version=2).
+    conn = sqlite3.connect(db)
+    conn.executescript(_MIGRATIONS[0])
+    conn.executescript(_MIGRATIONS[1])
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+
+    with EventStore(db) as store:
+        assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        # The new table exists and is queryable, empty to start.
+        assert store.clock_anomalies() == []
+        store.add_clock_anomaly(
+            session_id=None,
+            kind="forward-jump",
+            wall_before=1000.0,
+            wall_after=8200.0,
+            delta=7200.0,
+            detected_at=8200.0,
+        )
+        assert len(store.clock_anomalies()) == 1
+        assert store.integrity_ok()
+
+
 def test_migrations_record_applied_timestamps(tmp_path):
     """`schema_migrations` records when each migration ran. The v3 timestamp is the
     forensic era boundary between rows that may carry a baked-in calibration offset
