@@ -18,12 +18,17 @@ table { border-collapse: collapse; margin-top: .75rem; width: 100%; }
 caption { text-align: left; font-style: italic; margin-bottom: .25rem; }
 th, td { border: 1px solid #bbb; padding: .25rem .5rem; text-align: left; }
 .note { background: #f3f3f3; border-left: 4px solid #3b6ea5; padding: .75rem 1rem; }
+section.cover { border: 1px solid #bbb; padding: .5rem 1.25rem 1rem; margin: 1rem 0; background: #fafafa; }
+section.cover ul { margin: .25rem 0; }
+.banner { padding: .75rem 1rem; margin: 1rem 0; border: 2px solid #b35900; background: #fff4e5; }
+.banner.banner-ok { border-color: #2f6f3e; background: #eef7ef; }
 :focus-visible { outline: 3px solid #3b6ea5; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media print {
   body { color: #000; background: #fff; }
   .skip { display: none; }
-  figure.chart, table { break-inside: avoid; page-break-inside: avoid; }
+  .banner { border: 2px solid #000; }
+  section.cover, figure.chart, table { break-inside: avoid; page-break-inside: avoid; }
   main { max-width: none; }
 }</style>
 </head>
@@ -34,6 +39,19 @@ th, td { border: 1px solid #bbb; padding: .25rem .5rem; text-align: left; }
 <p>Generated 2026-01-01 12:00 UTC. This report summarizes sound-level <em>events</em> —
 when sound crossed a threshold and for how long. No audio was recorded, stored, or
 transmitted to produce it.</p>
+
+<section class="cover" aria-label="What this report can and cannot prove">
+<h2>What this can and cannot prove</h2>
+<p><strong>What it can show:</strong></p>
+<ul><li>When sound at this device crossed a set loudness threshold, and for how long, with timestamps — an honest, time-stamped record of the pattern.</li><li>How that pattern lines up with a quiet-hours window you configure.</li></ul>
+<p><strong>What it cannot prove:</strong></p>
+<ul><li>What made a sound, or who caused it — no audio is recorded, so there is no source attribution.</li><li>Absolute loudness in dB SPL or dB(A): uncalibrated readings are relative dBFS, not the units an ordinance, lease, or HOA rule is written in.</li><li>That any law, lease, or rule was broken — only the relevant authority decides that, and being within quiet hours is not the same as a violation.</li><li>Anything about a place this device was not in — readings are specific to this microphone in this spot, and change if it moves.</li></ul>
+<p class="note">By design no audio is ever recorded, stored, or transmitted, so there is nothing to leak, subpoena, or misuse. This is general information, not legal advice; verify your local rule before relying on these numbers.</p>
+</section>
+
+<aside class="banner" role="note" aria-label="Calibration status">
+<strong>Uncalibrated — these readings are relative, not dB(A).</strong> Levels are relative dBFS, not absolute sound level in dB(A) or dB SPL. Do not read them as the decibel numbers an ordinance or lease specifies; only their pattern relative to each other on this device is meaningful. Run <code>olive-calibrate</code> against a reference meter to estimate SPL (still an estimate, not a Class 1/2 sound-level-meter reading).
+</aside>
 
 <h2>Summary</h2>
 <dl class="stats"><dt>Total events</dt><dd>4</dd><dt>Total loud time</dt><dd>22 s</dd><dt>Longest event</dt><dd>9 s</dd><dt>Loudest peak</dt><dd>-5.0 dBFS</dd><dt>Mean peak</dt><dd>-11.2 dBFS</dd><dt>Events during quiet hours (22:00–08:00)</dt><dd>3</dd><dt>Loud time during quiet hours</dt><dd>19 s</dd></dl>
@@ -55,6 +73,14 @@ transmitted to produce it.</p>
 <strong>UTC</strong> (daylight-saving aware). Of 4
 total events, <strong>3</strong> fell within quiet hours,
 totaling 19 s of loud time.</p>
+
+<h2>Quiet-hours duration rollup</h2>
+<p>Detected loud time within the quiet-hours window, totaled per day and attributed by each event's start time. Some ordinances and CC&amp;Rs key on accumulated duration in a day — figures of around <strong>30 minutes continuous</strong> or <strong>60 minutes intermittent</strong> are sometimes cited — but the threshold, the unit, and the definition vary by jurisdiction.</p>
+<div class="note"><p>This is a measurement, not a determination. Being within quiet hours is not the same as a violation, and only the relevant authority can decide whether a rule was broken. Compare these durations against your own local ordinance, lease, or HOA rule.</p></div>
+<table><caption>Loud time within quiet hours, per day</caption><thead><tr><th scope="col">Day</th><th scope="col">Loud time within quiet hours</th></tr></thead><tbody><tr><th scope="row">2026-01-01</th><td>19 s</td></tr></tbody></table>
+
+<h2>Why there is deliberately no audio</h2>
+<div class="note"><p>This device measures sound levels only — it never records, stores, or transmits any audio. That is a deliberate privacy choice, not missing data: each level reading is computed in memory and immediately discarded, so no speech and nothing intelligible is ever kept. There is no recording of anyone in this home or next door that could be leaked, subpoenaed, or misused. Recording a household or a neighbor can also raise consent and eavesdropping concerns under some recording laws; measuring levels only sidesteps that by never capturing content. (General information, not legal advice — check the rules where you live.)</p></div>
 
 <h2>Methodology</h2>
 <p>Each ~100 ms frame of audio is read

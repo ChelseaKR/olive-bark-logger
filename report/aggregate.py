@@ -31,6 +31,10 @@ class Summary:
     by_day_hour: dict[str, dict[int, int]] = field(default_factory=dict)
     quiet_hours_event_count: int = 0
     quiet_hours_loud_seconds: float = 0.0
+    # ISO date -> seconds of detected loud time within the quiet-hours window on that day
+    # (attributed by each event's start time). Feeds the ordinance/CC&R duration rollup;
+    # it reports accumulated duration, never a violation verdict.
+    quiet_hours_loud_seconds_by_day: dict[str, float] = field(default_factory=dict)
 
 
 def summarize(
@@ -57,6 +61,7 @@ def summarize(
     by_day_hour: dict[str, Counter[int]] = {}
     quiet_count = 0
     quiet_seconds = 0.0
+    quiet_seconds_by_day: dict[str, float] = {}
     total_seconds = 0.0
     peaks: list[float] = []
 
@@ -73,6 +78,7 @@ def summarize(
         if quiet_hours.contains(dt):
             quiet_count += 1
             quiet_seconds += ev.duration
+            quiet_seconds_by_day[day] = quiet_seconds_by_day.get(day, 0.0) + ev.duration
 
     return Summary(
         event_count=len(events),
@@ -89,4 +95,5 @@ def summarize(
         },
         quiet_hours_event_count=quiet_count,
         quiet_hours_loud_seconds=quiet_seconds,
+        quiet_hours_loud_seconds_by_day=dict(sorted(quiet_seconds_by_day.items())),
     )
