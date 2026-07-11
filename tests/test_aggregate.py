@@ -40,6 +40,26 @@ def test_quiet_hours_breakdown():
     assert s.quiet_hours_loud_seconds == 4.0
 
 
+def test_quiet_hours_duration_rollup_per_day():
+    # R3: accumulated loud time within the quiet-hours window, totaled per day. Events
+    # outside the window (12:00) never contribute; attribution is by event start day.
+    events = [
+        _ev(23, day=1, duration=5.0),  # day 1, within window
+        _ev(2, day=1, duration=3.0),  # day 1, within window (early morning of the 1st)
+        _ev(12, day=1, duration=9.0),  # outside window -> excluded
+        _ev(23, day=2, duration=4.0),  # day 2, within window
+    ]
+    s = summarize(events, quiet_hours=QuietHours(22, 8))
+    assert s.quiet_hours_loud_seconds_by_day == {"2026-01-01": 8.0, "2026-01-02": 4.0}
+    # The rollup never exceeds the total quiet-hours loud time.
+    assert sum(s.quiet_hours_loud_seconds_by_day.values()) == s.quiet_hours_loud_seconds
+
+
+def test_quiet_hours_duration_rollup_empty_when_none_in_window():
+    s = summarize([_ev(12), _ev(14)], quiet_hours=QuietHours(22, 8))
+    assert s.quiet_hours_loud_seconds_by_day == {}
+
+
 def test_peak_stats():
     events = [_ev(1, peak=-20), _ev(2, peak=-5), _ev(3, peak=-15)]
     s = summarize(events, quiet_hours=QuietHours())
