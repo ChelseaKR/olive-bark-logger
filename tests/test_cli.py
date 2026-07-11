@@ -157,8 +157,9 @@ def test_report_exports_apply_render_time_calibration(tmp_path, capsys):
     assert rows[1][rows[0].index("peak_dbfs")] == "-1.5"
     assert rows[1][rows[0].index("calibration_offset_db")] == "+6.5"
 
-    # The violations CSV agrees too.
-    vrows = list(csv_mod.reader(vcsv.read_text().splitlines()))
+    # The violations CSV agrees too (data rows live below the R1 cover preamble).
+    vdata = [ln for ln in vcsv.read_text().splitlines() if not ln.startswith("#")]
+    vrows = list(csv_mod.reader(vdata))
     assert vrows[1][vrows[0].index("peak_dbfs")] == "-1.5"
     assert vrows[1][vrows[0].index("calibration_offset_db")] == "+6.5"
 
