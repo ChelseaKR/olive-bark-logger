@@ -9,18 +9,22 @@ written here unconditionally, and a merge-blocking test asserts their presence.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 from datetime import datetime
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from monitor.config import Config
+from monitor.detector import Event
 
 from report.aggregate import Summary, summarize
 from report.charts import bar_chart, heatmap
 
 if TYPE_CHECKING:
-    from store import Session
+    from datetime import tzinfo
+
+    from store import CalibrationEpoch, Session
 
 # Phrases the report-content gate checks for. Keeping them as constants makes the
 # contract between the renderer and the test explicit.
@@ -35,6 +39,73 @@ NO_SOURCE_NOTE = (
     "This tool measures sound levels only. It cannot prove what made a sound or "
     "where it came from; it does not record or identify any voice or source."
 )
+
+# R5 — reader-facing "why there is deliberately no audio" note. The rationale already
+# lives in docs/audits/recording-law-notes.md; this surfaces it to the neighbor / PM /
+# board who reads the report, so the absence of audio reads as a privacy choice, not as
+# missing data. General information, not jurisdiction-specific legal advice.
+NO_AUDIO_RATIONALE = (
+    "This device measures sound levels only — it never records, stores, or transmits any "
+    "audio. That is a deliberate privacy choice, not missing data: each level reading is "
+    "computed in memory and immediately discarded, so no speech and nothing intelligible "
+    "is ever kept. There is no recording of anyone in this home or next door that could be "
+    "leaked, subpoenaed, or misused. Recording a household or a neighbor can also raise "
+    "consent and eavesdropping concerns under some recording laws; measuring levels only "
+    "sidesteps that by never capturing content. (General information, not legal advice — "
+    "check the rules where you live.)"
+)
+
+# R1 — a single, reusable plain-language "What this can and cannot prove" cover block.
+# It restates limitations that already hold elsewhere in the report; it adds prominence,
+# never a new claim. The same block is prepended to the report and to every exported
+# artifact (the violations HTML and CSV) so the caveat travels with the file.
+COVER_CAN = (
+    "When sound at this device crossed a set loudness threshold, and for how long, with "
+    "timestamps — an honest, time-stamped record of the pattern.",
+    "How that pattern lines up with a quiet-hours window you configure.",
+)
+COVER_CANNOT = (
+    "What made a sound, or who caused it — no audio is recorded, so there is no source "
+    "attribution.",
+    "Absolute loudness in dB SPL or dB(A): uncalibrated readings are relative dBFS, not "
+    "the units an ordinance, lease, or HOA rule is written in.",
+    "That any law, lease, or rule was broken — only the relevant authority decides that, "
+    "and being within quiet hours is not the same as a violation.",
+    "Anything about a place this device was not in — readings are specific to this "
+    "microphone in this spot, and change if it moves.",
+)
+COVER_PRIVACY = (
+    "By design no audio is ever recorded, stored, or transmitted, so there is nothing to "
+    "leak, subpoena, or misuse. This is general information, not legal advice; verify your "
+    "local rule before relying on these numbers."
+)
+
+
+def cover_text_lines() -> list[str]:
+    """The cover block as plain-text lines, for the comment preamble of CSV exports."""
+    lines = ["What this can and cannot prove", "", "What it can show:"]
+    lines += [f"  - {x}" for x in COVER_CAN]
+    lines += ["", "What it cannot prove:"]
+    lines += [f"  - {x}" for x in COVER_CANNOT]
+    lines += ["", COVER_PRIVACY]
+    return lines
+
+
+def cover_html() -> str:
+    """The R1 cover block as an accessible HTML <section>. Deterministic; no new claims."""
+    can = "".join(f"<li>{escape(x)}</li>" for x in COVER_CAN)
+    cannot = "".join(f"<li>{escape(x)}</li>" for x in COVER_CANNOT)
+    return (
+        '<section class="cover" aria-label="What this report can and cannot prove">\n'
+        "<h2>What this can and cannot prove</h2>\n"
+        "<p><strong>What it can show:</strong></p>\n"
+        f"<ul>{can}</ul>\n"
+        "<p><strong>What it cannot prove:</strong></p>\n"
+        f"<ul>{cannot}</ul>\n"
+        f'<p class="note">{escape(COVER_PRIVACY)}</p>\n'
+        "</section>"
+    )
+
 
 _STYLE = """
 :root { color-scheme: light dark; }
@@ -51,12 +122,17 @@ table { border-collapse: collapse; margin-top: .75rem; width: 100%; }
 caption { text-align: left; font-style: italic; margin-bottom: .25rem; }
 th, td { border: 1px solid #bbb; padding: .25rem .5rem; text-align: left; }
 .note { background: #f3f3f3; border-left: 4px solid #3b6ea5; padding: .75rem 1rem; }
+section.cover { border: 1px solid #bbb; padding: .5rem 1.25rem 1rem; margin: 1rem 0; background: #fafafa; }
+section.cover ul { margin: .25rem 0; }
+.banner { padding: .75rem 1rem; margin: 1rem 0; border: 2px solid #b35900; background: #fff4e5; }
+.banner.banner-ok { border-color: #2f6f3e; background: #eef7ef; }
 :focus-visible { outline: 3px solid #3b6ea5; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media print {
   body { color: #000; background: #fff; }
   .skip { display: none; }
-  figure.chart, table { break-inside: avoid; page-break-inside: avoid; }
+  .banner { border: 2px solid #000; }
+  section.cover, figure.chart, table { break-inside: avoid; page-break-inside: avoid; }
   main { max-width: none; }
 }
 """.strip()
@@ -201,6 +277,98 @@ def _fmt_sampling(sample_rate: int | None, frame_size: int | None) -> str:
     return f"{sample_rate} Hz / {frame_size}-sample frames"
 
 
+def _epoch_index_at(history: list[CalibrationEpoch], ts: float) -> int | None:
+    """Index into `history` (ascending by effective_from) of the epoch in force at `ts`.
+
+    A timestamp before the first epoch resolves to that first epoch (epoch 0 covers all
+    historical rows); None only when the history is empty.
+    """
+    if not history:
+        return None
+    chosen = 0
+    for i, epoch in enumerate(history):
+        if epoch.effective_from <= ts:
+            chosen = i
+        else:
+            break
+    return chosen
+
+
+def _offset_at(history: list[CalibrationEpoch], ts: float) -> float:
+    """The calibration offset in force at `ts`, or 0.0 when no calibration exists."""
+    idx = _epoch_index_at(history, ts)
+    return 0.0 if idx is None else history[idx].offset
+
+
+def _epochs_covering(
+    history: list[CalibrationEpoch], events: list[Event]
+) -> list[CalibrationEpoch]:
+    """The subset of epochs that are in force for at least one of `events`, in order."""
+    if not history or not events:
+        return []
+    used = {idx for ev in events if (idx := _epoch_index_at(history, ev.start)) is not None}
+    return [history[i] for i in sorted(used)]
+
+
+def _apply_offset(event: Event, offset: float) -> Event:
+    """Return the event with its stored raw levels shifted by a calibration offset."""
+    if offset == 0.0:
+        return event
+    return dataclasses.replace(
+        event, peak_level=event.peak_level + offset, avg_level=event.avg_level + offset
+    )
+
+
+def _per_event_offsets(
+    events: list[Event], history: list[CalibrationEpoch], config: Config
+) -> list[float]:
+    """The calibration offset applied to each event at render time (parallel list).
+
+    This is the single resolver every rendered artifact must go through — the HTML
+    report and the CSV/violations exports all adjust levels with exactly these values,
+    so no two artifacts generated from the same log can disagree numerically.
+    Attribution is by event *start*: an event that straddles a recalibration uses the
+    epoch in force when it began. With no calibration history at all, the config's
+    bootstrap offset applies uniformly (the deprecated-but-supported fallback).
+    """
+    if history:
+        return [_offset_at(history, ev.start) for ev in events]
+    return [config.calibration_offset] * len(events)
+
+
+def _fmt_effective_from(effective_from: float, tz: tzinfo) -> str:
+    """Human label for an epoch boundary; epoch 0 is the start of the record."""
+    if effective_from <= 0.0:
+        return "start of record"
+    return datetime.fromtimestamp(effective_from, tz=tz).strftime("%Y-%m-%d %H:%M %Z")
+
+
+def _calibration_epochs_html(epochs: list[CalibrationEpoch], *, tz: tzinfo) -> str:
+    """A per-epoch offsets table plus a disclosure line, for a multi-epoch window."""
+    rows = "".join(
+        f'<tr><th scope="row">{escape(_fmt_effective_from(e.effective_from, tz))}</th>'
+        f"<td>{e.offset:+.1f} dB</td>"
+        f"<td>{escape(e.reference_instrument) if e.reference_instrument else '—'}</td>"
+        f"<td>{escape(e.note) if e.note else '—'}</td></tr>"
+        for e in epochs
+    )
+    return (
+        "\n<p>This reporting window spans <strong>more than one calibration epoch</strong>. "
+        "Each event's level is adjusted by the offset that was in force when it began, "
+        "so recalibrating does not rewrite stored numbers. One caveat: events stored by "
+        "versions of this tool from before the calibration history existed had any "
+        "then-configured offset already included in their stored levels; if that offset "
+        "was nonzero, those older rows render over-adjusted here. The database records "
+        "when that upgrade happened, so affected rows are identifiable. "
+        "The offsets applied are:"
+        "</p>\n"
+        "<table><caption>Calibration offsets by epoch</caption>"
+        '<thead><tr><th scope="col">Effective from</th><th scope="col">Offset</th>'
+        '<th scope="col">Reference instrument</th><th scope="col">Note</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
 def build_report(
     summary: Summary,
     *,
@@ -208,13 +376,21 @@ def build_report(
     generated_at: str,
     calibration_offset: float | None = None,
     calibration_note: str | None = None,
+    calibration_epochs: list[CalibrationEpoch] | None = None,
     session: Session | None = None,
     sessions: list[Session] | None = None,
     title: str = "Olive's Bark Logger — Noise Report",
 ) -> str:
-    """Render the full report as a single self-contained HTML string."""
+    """Render the full report as a single self-contained HTML string.
+
+    When `calibration_epochs` holds more than one epoch, a per-epoch offsets table and a
+    recalibration disclosure are rendered; otherwise the single-offset path is used and
+    `calibration_offset`/`calibration_note` describe the one offset in force.
+    """
     offset = config.calibration_offset if calibration_offset is None else calibration_offset
     note = config.calibration_note if calibration_note is None else calibration_note
+    epochs = calibration_epochs or []
+    multi_epoch = len(epochs) > 1
     calibrated = offset != 0.0
     conditions_html = _conditions_html(session)
 
@@ -270,12 +446,75 @@ def build_report(
     }
     stats_html = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in stats.items())
 
-    calib_line = (
-        f"A calibration offset of {offset:+.1f} dB is applied "
-        f"({escape(note)}). Readings approximate SPL but remain estimates."
-        if calibrated
-        else f"No calibration offset is applied ({escape(note)})."
-    )
+    if multi_epoch:
+        calib_line = (
+            "Levels are adjusted for calibration at render time from an append-only "
+            "history; because this window spans more than one calibration epoch, each "
+            "event uses the offset in force when it was measured (see the table below)."
+        )
+        calib_epochs_section = _calibration_epochs_html(epochs, tz=config.tzinfo())
+    else:
+        calib_line = (
+            f"A calibration offset of {offset:+.1f} dB is applied "
+            f"({escape(note)}). Readings approximate SPL but remain estimates."
+            if calibrated
+            else f"No calibration offset is applied ({escape(note)})."
+        )
+        calib_epochs_section = ""
+
+    # R2 — unmissable calibration-honesty banner. Uncalibrated readings must never get to
+    # look like dB(A)/SPL; when calibrated, the reference-instrument provenance (carried in
+    # the calibration note) is surfaced prominently rather than buried in methodology.
+    if calibrated:
+        banner_html = (
+            '<aside class="banner banner-ok" role="note" aria-label="Calibration status">\n'
+            f"<strong>Calibrated.</strong> An offset of {offset:+.1f} dB is applied "
+            f"({escape(note)}). Readings approximate sound level (SPL) but remain estimates "
+            "affected by microphone, placement, and room acoustics.\n"
+            "</aside>"
+        )
+    else:
+        banner_html = (
+            '<aside class="banner" role="note" aria-label="Calibration status">\n'
+            "<strong>Uncalibrated — these readings are relative, not dB(A).</strong> "
+            "Levels are relative dBFS, not absolute sound level in dB(A) or dB SPL. Do not "
+            "read them as the decibel numbers an ordinance or lease specifies; only their "
+            "pattern relative to each other on this device is meaningful. Run "
+            "<code>olive-calibrate</code> against a reference meter to estimate SPL (still "
+            "an estimate, not a Class 1/2 sound-level-meter reading).\n"
+            "</aside>"
+        )
+
+    # R3 — quiet-hours duration rollup. Ordinances/CC&Rs commonly key on accumulated
+    # duration in a day; this totals detected loud time within the configured window, per
+    # day, WITHOUT rendering a verdict. The no-verdict framing is mandatory.
+    if summary.quiet_hours_loud_seconds_by_day:
+        rollup_rows = "".join(
+            f'<tr><th scope="row">{escape(day)}</th><td>{_fmt_seconds(secs)}</td></tr>'
+            for day, secs in summary.quiet_hours_loud_seconds_by_day.items()
+        )
+        rollup_section = (
+            "\n<h2>Quiet-hours duration rollup</h2>\n"
+            "<p>Detected loud time within the quiet-hours window, totaled per day and "
+            "attributed by each event's start time. Some ordinances and CC&amp;Rs key on "
+            "accumulated duration in a day — figures of around <strong>30 minutes "
+            "continuous</strong> or <strong>60 minutes intermittent</strong> are sometimes "
+            "cited — but the threshold, the unit, and the definition vary by jurisdiction.</p>\n"
+            '<div class="note"><p>This is a measurement, not a determination. Being within '
+            "quiet hours is not the same as a violation, and only the relevant authority can "
+            "decide whether a rule was broken. Compare these durations against your own local "
+            "ordinance, lease, or HOA rule.</p></div>\n"
+            "<table><caption>Loud time within quiet hours, per day</caption>"
+            '<thead><tr><th scope="col">Day</th>'
+            '<th scope="col">Loud time within quiet hours</th></tr></thead>'
+            f"<tbody>{rollup_rows}</tbody></table>"
+        )
+    else:
+        rollup_section = (
+            "\n<h2>Quiet-hours duration rollup</h2>\n"
+            "<p>No events fell within the quiet-hours window, so there is nothing to roll "
+            "up. Being within quiet hours is not the same as a violation in any case.</p>"
+        )
 
     methodology_html = _methodology_html(config, calib_line, sessions)
 
@@ -311,6 +550,10 @@ def build_report(
 when sound crossed a threshold and for how long. No audio was recorded, stored, or
 transmitted to produce it.</p>
 
+{cover_html()}
+
+{banner_html}
+
 <h2>Summary</h2>
 <dl class="stats">{stats_html}</dl>
 
@@ -328,10 +571,14 @@ transmitted to produce it.</p>
 <strong>{escape(config.tz)}</strong> (daylight-saving aware). Of {summary.event_count}
 total events, <strong>{summary.quiet_hours_event_count}</strong> fell within quiet hours,
 totaling {_fmt_seconds(summary.quiet_hours_loud_seconds)} of loud time.</p>
+{rollup_section}
+
+<h2>Why there is deliberately no audio</h2>
+<div class="note"><p>{escape(NO_AUDIO_RATIONALE)}</p></div>
 
 <h2>{METHODOLOGY_HEADING}</h2>
 {methodology_html}
-
+{calib_epochs_section}
 <h2>{LIMITATIONS_HEADING}</h2>
 <div class="note">
 <p>{escape(RELATIVE_DBFS_NOTE)}</p>
@@ -356,16 +603,40 @@ def generate_report_from_db(
     from store import EventStore
 
     with EventStore(db_path) as store:
-        events = store.events()
-        calib = store.get_calibration()
+        events = store.events()  # raw dBFS levels; calibration is applied here, at render
+        history = store.calibration_history()
         session = store.latest_session()
         sessions = store.sessions()
-    summary = summarize(
-        events,
-        quiet_hours=config.quiet_hours,
-        tz=config.tzinfo(),
-    )
-    offset, note = calib if calib else (config.calibration_offset, config.calibration_note)
+
+    # Which epochs actually cover the events in this window? Only those drive the choice
+    # between the single-offset path and the multi-epoch disclosure. Levels are always
+    # adjusted through the shared per-event resolver, the same one the exports use.
+    epochs_in_window = _epochs_covering(history, events)
+    offsets = _per_event_offsets(events, history, config)
+    adjusted = [_apply_offset(ev, off) for ev, off in zip(events, offsets)]
+    summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=config.tzinfo())
+
+    if len(epochs_in_window) > 1:
+        latest = epochs_in_window[-1]
+        return build_report(
+            summary,
+            config=config,
+            generated_at=generated_at,
+            calibration_offset=latest.offset,
+            calibration_note=latest.note or config.calibration_note,
+            calibration_epochs=epochs_in_window,
+            session=session,
+            sessions=sessions,
+        )
+
+    # Single-offset path: the whole window is under one calibration (or none -> config).
+    if epochs_in_window:
+        epoch = epochs_in_window[0]
+        offset, note = epoch.offset, epoch.note or config.calibration_note
+    elif history:
+        offset, note = history[-1].offset, history[-1].note or config.calibration_note
+    else:
+        offset, note = config.calibration_offset, config.calibration_note
     return build_report(
         summary,
         config=config,
@@ -416,48 +687,65 @@ def main(argv: list[str] | None = None) -> int:
     args.out.write_text(html, encoding="utf-8")
     print(f"Wrote {args.out} ({len(html)} bytes).")
 
-    if args.csv is not None:
+    if args.csv is not None or args.violations_csv is not None or args.violations_html is not None:
         from store import EventStore
 
-        from report.export import events_to_csv
-
         with EventStore(db_path) as store:
-            rows = events_to_csv(store.events(), args.csv, tz=config.tzinfo())
-        print(f"Wrote {args.csv} ({rows} rows).")
+            raw_events = store.events()  # raw dBFS; calibration is applied below, at render
+            history = store.calibration_history()
+        # Exports must agree numerically with the main report: the same render-time,
+        # per-epoch calibration is applied to every exported artifact, and each CSV row
+        # records the offset it received (raw = value - offset). The calibrated flag is
+        # derived from the store's history, never from the deprecated config field.
+        offsets = _per_event_offsets(raw_events, history, config)
+        events = [_apply_offset(ev, off) for ev, off in zip(raw_events, offsets)]
+        multi_epoch = len(set(offsets)) > 1
+        if events:
+            calibrated = all(off != 0.0 for off in offsets)
+        else:  # nothing to adjust; disclose the calibration in force (store, then config)
+            calibrated = (history[-1].offset if history else config.calibration_offset) != 0.0
 
-    if args.violations_csv is not None or args.violations_html is not None:
-        from store import EventStore
+        if args.csv is not None:
+            from report.export import events_to_csv
 
-        from report.violations import (
-            build_violation_report_html,
-            compute_violations,
-            violations_to_csv,
-        )
+            rows = events_to_csv(events, args.csv, tz=config.tzinfo(), offsets_db=offsets)
+            print(f"Wrote {args.csv} ({rows} rows).")
 
-        with EventStore(db_path) as store:
-            events = store.events()
-        if args.violations_csv is not None:
-            rows = violations_to_csv(
-                events,
-                args.violations_csv,
-                quiet_hours=config.quiet_hours,
-                tz=config.tzinfo(),
-                tz_name=config.tz,
+        if args.violations_csv is not None or args.violations_html is not None:
+            from report.violations import (
+                build_violation_report_html,
+                compute_violations,
+                violations_to_csv,
             )
-            print(f"Wrote {args.violations_csv} ({rows} rows).")
-        if args.violations_html is not None:
-            report = compute_violations(
-                events, quiet_hours=config.quiet_hours, tz=config.tzinfo(), tz_name=config.tz
-            )
-            vhtml = build_violation_report_html(
-                report,
-                threshold_dbfs=config.threshold_dbfs,
-                min_duration_s=config.min_duration_s,
-                generated_at=generated_at,
-                calibrated=config.calibration_offset != 0.0,
-            )
-            args.violations_html.write_text(vhtml, encoding="utf-8")
-            print(f"Wrote {args.violations_html} ({len(vhtml)} bytes).")
+
+            if args.violations_csv is not None:
+                rows = violations_to_csv(
+                    events,
+                    args.violations_csv,
+                    quiet_hours=config.quiet_hours,
+                    tz=config.tzinfo(),
+                    tz_name=config.tz,
+                    offsets_db=offsets,
+                )
+                print(f"Wrote {args.violations_csv} ({rows} rows).")
+            if args.violations_html is not None:
+                report = compute_violations(
+                    events,
+                    quiet_hours=config.quiet_hours,
+                    tz=config.tzinfo(),
+                    tz_name=config.tz,
+                    offsets_db=offsets,
+                )
+                vhtml = build_violation_report_html(
+                    report,
+                    threshold_dbfs=config.threshold_dbfs,
+                    min_duration_s=config.min_duration_s,
+                    generated_at=generated_at,
+                    calibrated=calibrated,
+                    multi_epoch=multi_epoch,
+                )
+                args.violations_html.write_text(vhtml, encoding="utf-8")
+                print(f"Wrote {args.violations_html} ({len(vhtml)} bytes).")
     return 0
 
 

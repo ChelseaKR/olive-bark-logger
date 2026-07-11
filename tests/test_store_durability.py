@@ -46,6 +46,89 @@ def test_old_v1_database_upgrades_in_place(tmp_path):
         store._conn.execute("SELECT session_id FROM events")  # column now present
 
 
+def test_migrations_record_applied_timestamps(tmp_path):
+    """`schema_migrations` records when each migration ran. The v3 timestamp is the
+    forensic era boundary between rows that may carry a baked-in calibration offset
+    (pre-v3 binaries) and raw-level rows (ADR-0003)."""
+    import time
+
+    # Fresh DB: every migration ran now, so every version has a timestamp.
+    before = time.time()
+    with EventStore(tmp_path / "fresh.db") as store:
+        for v in range(1, SCHEMA_VERSION + 1):
+            at = store.migration_applied_at(v)
+            assert at is not None
+            assert before <= at <= time.time()
+        assert store.migration_applied_at(99) is None  # never applied
+
+    # A v2-era DB upgraded in place: v1/v2 predate the bookkeeping (honestly unknown),
+    # v3 records the upgrade moment — the baked-era/raw-era boundary for this database.
+    legacy = tmp_path / "legacy.db"
+    conn = sqlite3.connect(legacy)
+    conn.executescript(_MIGRATIONS[0])
+    conn.executescript(_MIGRATIONS[1])
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+    upgrade_start = time.time()
+    with EventStore(legacy) as store:
+        assert store.migration_applied_at(1) is None
+        assert store.migration_applied_at(2) is None
+        at3 = store.migration_applied_at(3)
+        assert at3 is not None
+        assert upgrade_start <= at3 <= time.time()
+
+
+def test_old_v2_database_upgrades_to_v3_preserving_offset_as_epoch_zero(tmp_path):
+    db = tmp_path / "olive.db"
+    # Hand-build a v2 database (events + calibration + sessions) with a single legacy
+    # calibration row, user_version=2.
+    conn = sqlite3.connect(db)
+    conn.executescript(_MIGRATIONS[0])
+    conn.executescript(_MIGRATIONS[1])
+    conn.execute("PRAGMA user_version = 2")
+    conn.execute("INSERT INTO calibration (id, offset, note) VALUES (1, 7.5, 'bench cal')")
+    conn.commit()
+    conn.close()
+
+    # Opening it migrates to v3 and preserves the old offset as the first epoch (from 0).
+    with EventStore(db) as store:
+        assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        history = store.calibration_history()
+        assert len(history) == 1
+        epoch = history[0]
+        assert epoch.effective_from == 0.0
+        assert epoch.offset == 7.5
+        assert epoch.note == "bench cal"
+        assert epoch.reference_instrument is None
+        # Backward-compat accessor still returns the latest (offset, note).
+        assert store.get_calibration() == (7.5, "bench cal")
+        # The offset is in force for any timestamp at/after the record start.
+        assert store.calibration_at(0.0) == 7.5
+        assert store.calibration_at(10_000.0) == 7.5
+
+
+def test_add_calibration_is_append_only_and_time_addressable(tmp_path):
+    with EventStore(tmp_path / "olive.db") as store:
+        assert store.calibration_history() == []
+        assert store.calibration_at(100.0) is None  # empty -> caller falls back to config
+
+        store.add_calibration(3.0, "first", effective_from=100.0)
+        store.add_calibration(9.0, "second", reference_instrument="B&K 2250", effective_from=500.0)
+
+        history = store.calibration_history()
+        assert [e.offset for e in history] == [3.0, 9.0]  # append-only, oldest first
+        assert history[1].reference_instrument == "B&K 2250"
+        # get_calibration returns the latest epoch for backward compat.
+        assert store.get_calibration() == (9.0, "second")
+        # calibration_at resolves the epoch in force at each instant.
+        assert store.calibration_at(50.0) == 3.0  # before first epoch -> earliest offset
+        assert store.calibration_at(100.0) == 3.0
+        assert store.calibration_at(300.0) == 3.0
+        assert store.calibration_at(500.0) == 9.0
+        assert store.calibration_at(9_999.0) == 9.0
+
+
 def test_crash_recovery_second_connection_reads_committed_events(tmp_path):
     db = tmp_path / "olive.db"
     store1 = EventStore(db)

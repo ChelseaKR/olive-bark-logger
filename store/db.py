@@ -3,24 +3,32 @@
 The schema is the privacy guarantee made concrete: there is no column anywhere that
 could hold audio. An event row is six numbers and an optional short tag string; a
 session row is metadata about *where and how* a run measured (for data lineage and the
-bias audit) plus frame-coverage counters. The calibration row records the offset and a
-human note. That is the entire data model.
+bias audit) plus frame-coverage counters. Calibration is an append-only history of
+(effective_from, offset, note, reference_instrument) rows — the offset in force at any
+instant is the latest row whose effective_from is at or before it, and offsets are
+applied at *render* time so persisted event levels stay raw. That is the entire data
+model.
 
 Durability: WAL journaling with synchronous=NORMAL survives process and OS crashes
 without corruption. Schema changes are applied as ordered migrations keyed on
-PRAGMA user_version, so an existing database upgrades in place.
+PRAGMA user_version, so an existing database upgrades in place. A `schema_migrations`
+side table records *when* each migration ran: those timestamps are forensic era
+boundaries — in particular, the v3 timestamp separates rows whose levels may carry a
+baked-in calibration offset (written by pre-v3 binaries) from rows stored raw
+(see docs/adr/0003).
 """
 
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from monitor.detector import Event
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Ordered migrations. Each entry upgrades the database from version i to i+1. A fresh
 # database (user_version 0) runs them all; an existing one runs only the new ones.
@@ -61,9 +69,27 @@ _MIGRATIONS: list[str] = [
     );
     ALTER TABLE events ADD COLUMN session_id INTEGER;
     """,
-    # 2 -> 3: detection-parameter provenance per session. Recording the detection knobs
-    # and audio framing in force for a run lets a report describe each event under the
-    # parameters that were active when it was logged, even after the config later changes.
+    # 2 -> 3: calibration becomes an append-only history keyed by effective_from.
+    # Offsets are no longer baked into stored levels; they are applied at render time.
+    # The single legacy `calibration` row (if any) is preserved as the first history
+    # epoch with effective_from=0 so every previously stored event keeps its offset.
+    """
+    CREATE TABLE calibration_history (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        effective_from       REAL NOT NULL,   -- unix seconds; offset applies from here on
+        offset               REAL NOT NULL,   -- dB added to raw dBFS to approximate SPL
+        note                 TEXT,
+        reference_instrument TEXT             -- provenance of the reference meter, if any
+    );
+    CREATE INDEX idx_calibration_effective ON calibration_history(effective_from);
+    INSERT INTO calibration_history (effective_from, offset, note)
+        SELECT 0, offset, note FROM calibration WHERE id = 1;
+    """,
+    # 3 -> 4: detection-parameter provenance per session (FIX-02). Recording the
+    # detection knobs and audio framing in force for a run lets a report describe each
+    # event under the parameters that were active when it was logged, even after the
+    # config later changes. (Originally drafted as 2 -> 3; renumbered to follow the
+    # calibration-history migration that landed first.)
     """
     ALTER TABLE sessions ADD COLUMN threshold_dbfs REAL;
     ALTER TABLE sessions ADD COLUMN min_duration_s REAL;
@@ -72,6 +98,17 @@ _MIGRATIONS: list[str] = [
     ALTER TABLE sessions ADD COLUMN frame_size INTEGER;
     """,
 ]
+
+
+@dataclass(frozen=True)
+class CalibrationEpoch:
+    """One entry in the append-only calibration history. Metadata only — never audio."""
+
+    id: int
+    effective_from: float  # unix seconds; this offset is in force from here forward
+    offset: float  # dB added to raw dBFS to approximate SPL
+    note: str | None
+    reference_instrument: str | None
 
 
 @dataclass(frozen=True)
@@ -120,11 +157,36 @@ class EventStore:
         self._migrate()
 
     def _migrate(self) -> None:
+        # Bookkeeping first (idempotent): record when each migration runs. A migration's
+        # timestamp is an era boundary for interpreting old rows — e.g. events stored
+        # before v3 ran may carry a baked-in calibration offset, while later rows are
+        # raw (ADR-0003). Migrations applied by binaries that predate this table simply
+        # have no row, which is itself honest ("time of application unknown").
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at REAL NOT NULL)"
+        )
         version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
         for target in range(version, len(_MIGRATIONS)):
             self._conn.executescript(_MIGRATIONS[target])
             self._conn.execute(f"PRAGMA user_version = {target + 1}")
+            self._conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                (target + 1, time.time()),
+            )
         self._conn.commit()
+
+    def migration_applied_at(self, version: int) -> float | None:
+        """When schema migration `version` ran on this database (unix seconds), or None.
+
+        None means the migration was applied by an older binary from before this
+        bookkeeping existed, so the time is unknown. The v3 timestamp is the boundary
+        between baked-offset-era event rows and raw-level rows (ADR-0003).
+        """
+        row = self._conn.execute(
+            "SELECT applied_at FROM schema_migrations WHERE version = ?", (version,)
+        ).fetchone()
+        return float(row["applied_at"]) if row else None
 
     # -- events --------------------------------------------------------------
     def add_event(self, event: Event, *, session_id: int | None = None) -> int:
@@ -178,17 +240,73 @@ class EventStore:
         return cur.rowcount
 
     # -- calibration ---------------------------------------------------------
-    def set_calibration(self, offset: float, note: str) -> None:
-        self._conn.execute(
-            "INSERT INTO calibration (id, offset, note) VALUES (1, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET offset = excluded.offset, note = excluded.note",
-            (offset, note),
+    def add_calibration(
+        self,
+        offset: float,
+        note: str,
+        *,
+        reference_instrument: str | None = None,
+        effective_from: float | None = None,
+    ) -> int:
+        """Append a new calibration epoch. Never updates an existing row.
+
+        Calibration is an append-only ledger so the meaning of a historical event never
+        changes: `olive-calibrate` is the only writer. `effective_from` defaults to now,
+        so the new offset applies to events measured from this point forward; passing an
+        explicit value (e.g. 0 for a bootstrap epoch) is supported for tests and imports.
+        """
+        when = time.time() if effective_from is None else effective_from
+        cur = self._conn.execute(
+            "INSERT INTO calibration_history (effective_from, offset, note, "
+            "reference_instrument) VALUES (?, ?, ?, ?)",
+            (when, offset, note, reference_instrument),
         )
         self._conn.commit()
+        return int(cur.lastrowid or 0)
 
     def get_calibration(self) -> tuple[float, str] | None:
-        row = self._conn.execute("SELECT offset, note FROM calibration WHERE id = 1").fetchone()
+        """The latest calibration (offset, note) for backward compatibility, or None."""
+        row = self._conn.execute(
+            "SELECT offset, note FROM calibration_history "
+            "ORDER BY effective_from DESC, id DESC LIMIT 1"
+        ).fetchone()
         return (row["offset"], row["note"]) if row else None
+
+    def calibration_history(self) -> list[CalibrationEpoch]:
+        """All calibration epochs, oldest first (by effective_from, then insertion)."""
+        rows = self._conn.execute(
+            "SELECT id, effective_from, offset, note, reference_instrument "
+            "FROM calibration_history ORDER BY effective_from ASC, id ASC"
+        )
+        return [
+            CalibrationEpoch(
+                id=r["id"],
+                effective_from=r["effective_from"],
+                offset=r["offset"],
+                note=r["note"],
+                reference_instrument=r["reference_instrument"],
+            )
+            for r in rows
+        ]
+
+    def calibration_at(self, ts: float) -> float | None:
+        """The offset in force at time `ts`: the latest epoch effective at or before it.
+
+        Returns None only when no calibration has ever been recorded (empty history), so
+        a caller can fall back to a bootstrap default. A timestamp earlier than the first
+        epoch resolves to that first epoch's offset (epoch 0 covers all historical rows).
+        """
+        row = self._conn.execute(
+            "SELECT offset FROM calibration_history WHERE effective_from <= ? "
+            "ORDER BY effective_from DESC, id DESC LIMIT 1",
+            (ts,),
+        ).fetchone()
+        if row is not None:
+            return float(row["offset"])
+        earliest = self._conn.execute(
+            "SELECT offset FROM calibration_history ORDER BY effective_from ASC, id ASC LIMIT 1"
+        ).fetchone()
+        return float(earliest["offset"]) if earliest is not None else None
 
     # -- sessions (lineage) --------------------------------------------------
     def start_session(
