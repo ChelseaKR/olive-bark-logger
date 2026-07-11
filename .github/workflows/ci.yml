@@ -70,15 +70,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
-      # 5. accessibility: structural gate is in pytest; add axe via pa11y on the report
+      # 5. accessibility: structural gate is in pytest; add axe + htmlcs via pa11y on
+      #    the report. axe's color-contrast rule is excluded here because axe cannot
+      #    resolve the background of SVG <text> and returns every chart label as
+      #    "needs further review", which pa11y hard-fails (51 false positives on this
+      #    report). SVG text contrast is NOT unchecked: tests/test_svg_contrast.py
+      #    computes the exact WCAG ratios for every renderer color pair and is
+      #    merge-blocking; htmlcs below keeps computed HTML color-contrast blocking.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: "20"
-      - name: Render report & run pa11y (axe)
+      - name: Render report & run pa11y (htmlcs + axe)
         run: |
           python scripts/demo_report.py
           printf '%s\n' '{"chromeLaunchConfig":{"args":["--no-sandbox"]}}' > /tmp/pa11y-ci.json
-          npx --yes pa11y --runner axe --config /tmp/pa11y-ci.json ./report.html
+          npx --yes pa11y --runner htmlcs --runner axe --ignore color-contrast \
+            --config /tmp/pa11y-ci.json ./report.html
 
       # 6b. PWA variant: detector/report ports tested with Node's test runner
       - name: PWA tests
