@@ -50,8 +50,12 @@ data table repeats every number. It is a pattern view, not new evidence.
 
 ## Quiet-hours violation report
 
-Quiet hours are configurable (`quiet_hours.start_hour` / `end_hour`, local time, wraps
-midnight — default **22:00–08:00**; set them to your local ordinance, lease, or HOA rule).
+Quiet hours are configurable as a minute-granular, day-of-week schedule of one or more
+windows (`quiet_hours.windows`, each `{"days": [0=Mon..6=Sun], "start": "HH:MM", "end":
+"HH:MM"}`, local time, wraps midnight when start is later than end — default a single daily
+**22:00–08:00** window; set them to your local ordinance, lease, or HOA rule). The older
+`quiet_hours.start_hour` / `end_hour` hour-only form is still accepted and auto-upgraded
+(with a deprecation warning).
 `olive-report --violations-csv` / `--violations-html` (and the PWA's "Download quiet-hours
 CSV") export an honest record for a neighbor, landlord, or HOA submission. Honesty rules
 baked into the export:

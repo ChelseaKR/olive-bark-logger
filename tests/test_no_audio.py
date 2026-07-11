@@ -11,7 +11,6 @@ If someone adds a way to write audio, one of these fails before merge.
 
 from __future__ import annotations
 
-import ast
 import sqlite3
 import tempfile
 from dataclasses import fields
@@ -21,18 +20,7 @@ from monitor.detector import Event
 from store import EventStore
 
 from conftest import source_files
-
-# APIs that would let raw audio reach disk or a wire. The point of the gate is that
-# none of these appear in the codebase at all.
-FORBIDDEN_AUDIO_APIS = (
-    "wave",  # stdlib WAV writer
-    "soundfile",
-    "scipy.io.wavfile",
-    "aifc",
-    "sunau",
-    ".tobytes(",
-    "audioop",
-)
+from gates import scan_audio_write_apis, scan_binary_write
 
 ALLOWED_EVENT_FIELDS = {
     "start",
@@ -78,24 +66,22 @@ def test_db_schema_has_no_audio_column():
 def test_no_source_file_uses_audio_write_api():
     offenders: dict[str, list[str]] = {}
     for path in source_files():
-        text = path.read_text(encoding="utf-8")
-        hits = [api for api in FORBIDDEN_AUDIO_APIS if api in text]
+        hits = scan_audio_write_apis(path.read_text(encoding="utf-8"))
         if hits:
             offenders[path.name] = hits
     assert not offenders, f"forbidden audio APIs present: {offenders}"
 
 
 def test_no_file_open_in_write_binary_mode():
-    """No source opens a file in binary-write mode (the obvious way to dump frames)."""
-    offenders: list[str] = []
+    """No source dumps bytes to disk. Covers the obvious `open('x','wb')` plus the
+    bypasses: `io.open('x','wb')`, `Path(...).write_bytes(...)`, and a low-level
+    `os.open(..., O_WRONLY/O_RDWR/O_CREAT)` writable descriptor."""
+    offenders: dict[str, list[str]] = {}
     for path in source_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "open":
-                for arg in node.args[1:]:
-                    if isinstance(arg, ast.Constant) and "b" in str(arg.value):
-                        offenders.append(path.name)
-    assert not offenders, f"binary-write open() found in: {offenders}"
+        hits = scan_binary_write(path.read_text(encoding="utf-8"))
+        if hits:
+            offenders[path.name] = hits
+    assert not offenders, f"binary-write sinks found in: {offenders}"
 
 
 def test_capture_live_only_sinks_frames_to_memory():

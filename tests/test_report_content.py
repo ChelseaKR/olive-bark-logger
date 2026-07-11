@@ -10,9 +10,12 @@ from report.aggregate import summarize
 from report.render import (
     LIMITATIONS_HEADING,
     METHODOLOGY_HEADING,
+    NO_CLOCK_ANOMALY_NOTE,
     NO_SOURCE_NOTE,
+    PARAM_CHANGE_NOTE,
     RELATIVE_DBFS_NOTE,
     build_report,
+    generate_report_from_db,
 )
 
 
@@ -114,9 +117,164 @@ def test_event_types_section_absent_without_tags():
     assert "Event types" not in html
 
 
+def test_no_clock_anomalies_disclosed_by_default():
+    html = _report()
+    assert NO_CLOCK_ANOMALY_NOTE in html
+
+
+def test_clock_anomaly_disclosure_line_appears_from_db(tmp_path):
+    from store import EventStore
+
+    db = tmp_path / "olive.db"
+    with EventStore(db) as store:
+        store.add_clock_anomaly(
+            session_id=None,
+            kind="forward-jump",
+            wall_before=1010.0,
+            wall_after=8210.0,
+            delta=7200.0,
+            detected_at=8210.0,
+        )
+    html = generate_report_from_db(str(db), Config(tz="UTC"), generated_at="2026-01-01 00:00 UTC")
+    assert "Clock jumped forward by 7200.0 s" in html
+    assert NO_CLOCK_ANOMALY_NOTE not in html
+
+
+def _session(sid, started_at, **params):
+    from store import Session
+
+    return Session(
+        id=sid,
+        started_at=started_at,
+        ended_at=started_at + 100,
+        device_label="pi-1",
+        mic_model="USB mic",
+        placement_note="by the wall",
+        tz="UTC",
+        calibration_offset=0.0,
+        calibration_note="x",
+        frames_seen=100,
+        frames_dropped=0,
+        app_version="0.1.0",
+        **params,
+    )
+
+
+def test_single_session_shows_no_parameter_epochs_table():
+    session = _session(1, 0.0, threshold_dbfs=-35.0, min_duration_s=0.4, debounce_s=1.0)
+    config = Config()
+    summary = summarize([], quiet_hours=config.quiet_hours, tz=config.tzinfo())
+    html = build_report(
+        summary,
+        config=config,
+        generated_at="2026-01-01 00:00 UTC",
+        session=session,
+        sessions=[session],
+    )
+    assert "Detection-parameter epochs" not in html
+    assert PARAM_CHANGE_NOTE not in html
+
+
+def test_two_sessions_with_different_thresholds_render_epochs(tmp_path):
+    from monitor.detector import Event
+    from store import EventStore
+
+    db = tmp_path / "olive.db"
+    with EventStore(db) as store:
+        common = dict(
+            device_label="pi-1",
+            mic_model="USB mic",
+            placement_note="by the wall",
+            tz="UTC",
+            calibration_offset=0.0,
+            calibration_note="x",
+            app_version="0.1.0",
+            min_duration_s=0.4,
+            debounce_s=1.0,
+            sample_rate=16000,
+            frame_size=1600,
+        )
+        base = datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp()
+        s1 = store.start_session(started_at=base, threshold_dbfs=-35.0, **common)
+        store.add_event(Event(base + 1, base + 3, 2.0, -8, -12), session_id=s1)
+        later = datetime(2026, 1, 5, 12, tzinfo=timezone.utc).timestamp()
+        s2 = store.start_session(started_at=later, threshold_dbfs=-42.0, **common)
+        store.add_event(Event(later + 1, later + 3, 2.0, -20, -24), session_id=s2)
+
+    html = generate_report_from_db(str(db), Config(tz="UTC"), generated_at="2026-01-06 00:00 UTC")
+    assert "Detection-parameter epochs" in html
+    assert PARAM_CHANGE_NOTE in html
+    # Both thresholds in force during the record are named.
+    assert "-35 dBFS" in html
+    assert "-42 dBFS" in html
+    # Each epoch is dated by its first session's start.
+    assert "2026-01-01" in html and "2026-01-05" in html
+
+
 def test_fmt_seconds_minutes_and_hours():
     # Exercise the minute/hour formatting branches via long durations.
     base = datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp()
     long_event = Event(start=base, end=base + 4000, duration=4000.0, peak_level=-5, avg_level=-9)
     html = _report([long_event])
     assert " h" in html  # 4000 s renders in hours
+
+
+# --- R1: "what this can and cannot prove" cover page -------------------------
+def test_cover_page_present_and_states_limits():
+    html = _report()
+    assert "<h2>What this can and cannot prove</h2>" in html
+    assert 'class="cover"' in html
+    assert "What it can show" in html and "What it cannot prove" in html
+    # The cover restates the headline limitations in lay terms.
+    assert "no source attribution" in html
+    assert "not the units an ordinance" in html
+    assert "is not the same as a violation" in html
+    assert "not legal advice" in html
+
+
+# --- R2: calibration-honesty banner + provenance ----------------------------
+def test_uncalibrated_banner_is_prominent():
+    html = _report(calibration_offset=0.0)
+    assert 'class="banner"' in html
+    assert "Uncalibrated — these readings are relative, not dB(A)." in html
+    assert 'role="note"' in html
+
+
+def test_calibrated_banner_shows_provenance():
+    html = _report(
+        calibration_offset=12.5,
+        calibration_note="Ref: Brand X, IEC 61672 Class 2",
+    )
+    assert "banner-ok" in html
+    assert "+12.5 dB" in html
+    assert "Brand X, IEC 61672 Class 2" in html
+
+
+# --- R3: quiet-hours duration rollup (no verdict) ---------------------------
+def test_duration_rollup_reports_minutes_without_a_verdict():
+    base = datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp()
+    ev = Event(start=base, end=base + 120, duration=120.0, peak_level=-8.0, avg_level=-12.0)
+    html = _report([ev])  # 23:00 is within the default 22:00-08:00 window
+    assert "<h2>Quiet-hours duration rollup</h2>" in html
+    assert "Loud time within quiet hours, per day" in html
+    # The no-verdict line is mandatory and must be present verbatim in spirit.
+    assert "This is a measurement, not a determination" in html
+    assert "is not the same as a violation" in html
+    # Ordinance reference framing is hedged as jurisdiction-dependent.
+    assert "vary by jurisdiction" in html
+
+
+def test_duration_rollup_empty_when_no_quiet_hours_events():
+    base = datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp()
+    ev = Event(start=base, end=base + 5, duration=5.0, peak_level=-8.0, avg_level=-12.0)
+    html = _report([ev])  # noon -> outside the quiet window
+    assert "<h2>Quiet-hours duration rollup</h2>" in html
+    assert "nothing to roll up" in html
+
+
+# --- R5: reader-facing no-audio rationale -----------------------------------
+def test_reader_facing_no_audio_rationale_present():
+    html = _report()
+    assert "<h2>Why there is deliberately no audio</h2>" in html
+    assert "deliberate privacy choice, not missing data" in html
+    assert "leaked, subpoenaed, or misused" in html

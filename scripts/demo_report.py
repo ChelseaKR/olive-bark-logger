@@ -37,7 +37,7 @@ labels = [
     LoudRegion(40.0, 41.0, 0.20),
 ]
 with EventStore(DB) as store:
-    store.set_calibration(config.calibration_offset, config.calibration_note)
+    store.add_calibration(config.calibration_offset, config.calibration_note, effective_from=0.0)
     sid = store.start_session(
         started_at=0.0,
         device_label=config.device_label,

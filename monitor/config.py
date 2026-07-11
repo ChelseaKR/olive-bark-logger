@@ -8,9 +8,13 @@ every field is validated on construction so a bad config fails loudly, not silen
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 try:  # zoneinfo is stdlib from 3.9; tzdata may be absent on some hosts.
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -25,67 +29,242 @@ class ConfigError(ValueError):
     """Raised when a configuration value is invalid."""
 
 
-@dataclass(frozen=True)
-class QuietHours:
-    """A daily quiet-hours window, local time, e.g. 22:00 -> 08:00 (wraps midnight)."""
+_DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+_ALL_DAYS = frozenset(range(7))
+_MINUTES_PER_DAY = 24 * 60  # 1440
 
-    start_hour: int = 22
-    end_hour: int = 8
+
+def _fmt_minute(m: int) -> str:
+    """Format a minute-of-day (0..1440) as HH:MM; 1440 renders as 00:00 (midnight)."""
+    m %= _MINUTES_PER_DAY
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+def _parse_hhmm(s: str) -> int:
+    """Parse an "HH:MM" wall-clock string (00:00..23:59) into a minute-of-day."""
+    parts = s.split(":") if isinstance(s, str) else []
+    if len(parts) != 2:
+        raise ConfigError(f"invalid HH:MM time: {s!r}")
+    try:
+        h, m = int(parts[0]), int(parts[1])
+    except ValueError as exc:
+        raise ConfigError(f"invalid HH:MM time: {s!r}") from exc
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        raise ConfigError(f"time out of range: {s!r}")
+    return h * 60 + m
+
+
+def _fmt_days(days: frozenset[int]) -> str:
+    """Render a day set compactly, e.g. {0,1,2,3,4} -> "Mon-Fri", {5,6} -> "Sat-Sun"."""
+    ordered = sorted(days)
+    groups: list[str] = []
+    i = 0
+    while i < len(ordered):
+        j = i
+        while j + 1 < len(ordered) and ordered[j + 1] == ordered[j] + 1:
+            j += 1
+        if j > i:
+            groups.append(f"{_DAY_NAMES[ordered[i]]}-{_DAY_NAMES[ordered[j]]}")
+        else:
+            groups.append(_DAY_NAMES[ordered[i]])
+        i = j + 1
+    return ",".join(groups)
+
+
+@dataclass(frozen=True)
+class QuietWindow:
+    """One quiet-hours window: a minute-granular time span active on given weekdays.
+
+    ``days`` uses 0=Mon .. 6=Sun and defaults to every day. ``start_minute`` and
+    ``end_minute`` are minutes-of-day in [0, 1440]. If ``start_minute > end_minute`` the
+    window wraps past midnight into the NEXT day; day membership is always decided by the
+    weekday the window STARTS on. A Fri 23:00 -> 07:00 window (days={Fri}) therefore covers
+    Saturday 03:00 only because it *started* on Friday, not because Saturday is a member.
+    """
+
+    start_minute: int
+    end_minute: int
+    days: frozenset[int] = _ALL_DAYS
 
     def __post_init__(self) -> None:
-        for h in (self.start_hour, self.end_hour):
-            if not 0 <= h <= 24:
-                raise ConfigError(f"quiet hour out of range: {h}")
+        object.__setattr__(self, "days", frozenset(self.days))
+        for m in (self.start_minute, self.end_minute):
+            if not 0 <= m <= _MINUTES_PER_DAY:
+                raise ConfigError(f"quiet window minute out of range: {m}")
+        if self.start_minute == self.end_minute:
+            raise ConfigError("quiet window is empty (start_minute == end_minute)")
+        if not self.days:
+            raise ConfigError("quiet window has no active days")
+        if any(not 0 <= d <= 6 for d in self.days):
+            raise ConfigError(f"quiet window weekday out of range: {sorted(self.days)}")
+
+    @property
+    def wraps(self) -> bool:
+        """True when the window crosses midnight (start later than end)."""
+        return self.start_minute > self.end_minute
+
+    def contains_local(self, weekday: int, minute: int) -> bool:
+        """True if (weekday, minute-of-day) falls in this window.
+
+        Start is inclusive, end is exclusive. For wrapping windows the early-morning tail
+        belongs to the window that STARTED the previous day.
+        """
+        if not self.wraps:
+            return weekday in self.days and self.start_minute <= minute < self.end_minute
+        # Wrapping window: evening portion sits on the start day...
+        if weekday in self.days and minute >= self.start_minute:
+            return True
+        # ...and the after-midnight portion belongs to the previous day's window.
+        yesterday = (weekday - 1) % 7
+        return yesterday in self.days and minute < self.end_minute
+
+    def label(self) -> str:
+        """Human label like "22:30-07:00" or, for a day subset, "22:30-07:00 (Mon-Fri)"."""
+        span = f"{_fmt_minute(self.start_minute)}–{_fmt_minute(self.end_minute)}"  # noqa: RUF001 - intentional en dash
+        if self.days != _ALL_DAYS:
+            span += f" ({_fmt_days(self.days)})"
+        return span
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "days": sorted(self.days),
+            "start": _fmt_minute(self.start_minute),
+            "end": _fmt_minute(self.end_minute),
+        }
+
+
+def _merged_seconds(intervals: list[tuple[datetime, datetime]]) -> float:
+    """Total seconds covered by the union of the intervals (overlaps counted once)."""
+    total = 0.0
+    merged_lo: datetime | None = None
+    merged_hi: datetime | None = None
+    for lo, hi in sorted(intervals):
+        if merged_hi is None or lo > merged_hi:
+            if merged_hi is not None and merged_lo is not None:
+                total += (merged_hi - merged_lo).total_seconds()
+            merged_lo, merged_hi = lo, hi
+        elif hi > merged_hi:
+            merged_hi = hi
+    if merged_hi is not None and merged_lo is not None:
+        total += (merged_hi - merged_lo).total_seconds()
+    return total
+
+
+@dataclass(frozen=True)
+class QuietSchedule:
+    """An ordered set of quiet-hours windows evaluated as a union."""
+
+    windows: tuple[QuietWindow, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "windows", tuple(self.windows))
+        if not self.windows:
+            raise ConfigError("quiet schedule has no windows")
 
     def contains(self, dt: datetime) -> bool:
-        """True if the local time of dt falls within the quiet-hours window."""
-        t = dt.time()
-        start = time(hour=self.start_hour % 24)
-        end = time(hour=self.end_hour % 24)
-        if start <= end:
-            return start <= t < end
-        # Wraps midnight (e.g. 22:00 -> 08:00).
-        return t >= start or t < end
+        """True if the local wall-clock time of ``dt`` falls inside any quiet window."""
+        weekday = dt.weekday()
+        minute = dt.hour * 60 + dt.minute
+        return any(w.contains_local(weekday, minute) for w in self.windows)
+
+    def label(self) -> str:
+        """Report-facing label joining every window, e.g. "22:30-07:00; 23:00-08:00"."""
+        return "; ".join(w.label() for w in self.windows)
 
     def overlap_seconds(self, start_dt: datetime, end_dt: datetime) -> float:
-        """Seconds of the half-open interval [start_dt, end_dt) inside the quiet window.
+        """Seconds of the half-open interval [start_dt, end_dt) inside the quiet schedule.
 
         Where ``contains`` classifies a single instant (used for event *counts*, which
-        cannot be fractional), this pro-rates an event's *duration* across the quiet-hours
-        boundary: an event that begins before 22:00 and ends after it contributes only the
-        portion that actually falls inside quiet hours.
+        cannot be fractional), this pro-rates an event's *duration* across window
+        boundaries: an event that begins before a window opens, or runs past its close,
+        contributes only the portion that actually falls inside quiet hours.
 
-        The window is reconstructed concretely, day by day, in the local zone of the input
-        datetimes so hour/day boundaries and DST are handled by real datetime arithmetic
-        rather than wall-clock comparisons. We build each day's quiet interval(s) — a single
-        ``[start, end)`` span for a non-wrapping window, or ``[start, 24h) + [0, end)`` for a
-        window that wraps midnight — intersect each with ``[start_dt, end_dt]``, and sum.
-        Adding whole hours onto local midnight keeps ``end_hour == 24`` exact and is
-        fold-agnostic (deterministic across a DST transition, if imprecise by an hour at the
-        exact fold — acceptable and documented).
+        Each window is reconstructed concretely, day by day, in the local zone of the
+        input datetimes, so day boundaries and DST are handled by real datetime
+        arithmetic rather than wall-clock comparisons. Day membership follows
+        ``contains_local``: a wrapping window's after-midnight tail belongs to the day it
+        STARTED on. Because the schedule is a *union* of windows, the per-day intervals
+        are merged before summing so overlapping windows are never double-counted.
+        Adding minutes onto local midnight keeps ``end_minute == 1440`` exact and is
+        fold-agnostic (deterministic across a DST transition, if imprecise by an hour at
+        the exact fold — acceptable and documented).
         """
         if end_dt <= start_dt:
             return 0.0
         tz = start_dt.tzinfo
-        s = self.start_hour % 24
-        e = self.end_hour % 24
-        # A non-wrapping window is a single [s, e) slice per day; one that wraps midnight
-        # splits into a late-evening [s, 24h) and an early-morning [0, e) slice.
-        day_intervals = [(s, e)] if s <= e else [(s, 24), (0, e)]
-        total = 0.0
-        # Start a day early so a wrap window's late-evening slice from the prior date is
-        # considered; iterate through end_dt's date inclusive.
+        intervals: list[tuple[datetime, datetime]] = []
+        # Start a day early so a wrapping window's after-midnight tail from the prior
+        # date is considered; iterate through end_dt's date inclusive.
         day = start_dt.date() - timedelta(days=1)
         last_day = end_dt.date()
         while day <= last_day:
             midnight = datetime.combine(day, time(0), tzinfo=tz)
-            for h0, h1 in day_intervals:
-                lo = max(midnight + timedelta(hours=h0), start_dt)
-                hi = min(midnight + timedelta(hours=h1), end_dt)
+            weekday = day.weekday()
+            for w in self.windows:
+                if weekday not in w.days:
+                    continue
+                lo = midnight + timedelta(minutes=w.start_minute)
+                hi = (
+                    midnight + timedelta(days=1, minutes=w.end_minute)
+                    if w.wraps
+                    else midnight + timedelta(minutes=w.end_minute)
+                )
+                lo, hi = max(lo, start_dt), min(hi, end_dt)
                 if hi > lo:
-                    total += (hi - lo).total_seconds()
+                    intervals.append((lo, hi))
             day += timedelta(days=1)
-        return total
+        return _merged_seconds(intervals)
+
+    @classmethod
+    def from_legacy(cls, start_hour: int = 22, end_hour: int = 8) -> QuietSchedule:
+        """Upgrade the old hour-only daily window into an equivalent QuietSchedule."""
+        for h in (start_hour, end_hour):
+            if not 0 <= h <= 24:
+                raise ConfigError(f"quiet hour out of range: {h}")
+        return cls((QuietWindow(start_minute=start_hour * 60, end_minute=end_hour * 60),))
+
+    @classmethod
+    def from_json(cls, data: dict[str, object]) -> QuietSchedule:
+        """Build from JSON, accepting both the new windows form and the legacy hour form."""
+        if "windows" in data:
+            raw = data["windows"]
+            if not isinstance(raw, Iterable) or isinstance(raw, (str, bytes)):
+                raise ConfigError("quiet_hours.windows must be a list")
+            windows: list[QuietWindow] = []
+            for w in raw:
+                if not isinstance(w, dict) or "start" not in w or "end" not in w:
+                    raise ConfigError(f"invalid quiet window entry: {w!r}")
+                days = w.get("days")
+                day_set = _ALL_DAYS if days is None else frozenset(int(d) for d in days)
+                windows.append(
+                    QuietWindow(
+                        start_minute=_parse_hhmm(w["start"]),
+                        end_minute=_parse_hhmm(w["end"]),
+                        days=day_set,
+                    )
+                )
+            return cls(tuple(windows))
+        # Legacy {"start_hour": .., "end_hour": ..} form.
+        logger.warning(
+            "quiet_hours {start_hour, end_hour} form is deprecated; "
+            'use {"windows": [{"days": [...], "start": "HH:MM", "end": "HH:MM"}]}'
+        )
+        try:
+            return cls.from_legacy(**data)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise ConfigError(f"invalid quiet_hours: {exc}") from exc
+
+    def to_dict(self) -> dict[str, object]:
+        return {"windows": [w.to_dict() for w in self.windows]}
+
+
+def QuietHours(start_hour: int = 22, end_hour: int = 8) -> QuietSchedule:
+    """Deprecated legacy constructor kept for back-compat.
+
+    Returns a :class:`QuietSchedule` equivalent to the old daily hour-only window (which
+    wraps midnight when ``start_hour > end_hour``). New code should use ``QuietSchedule``.
+    """
+    return QuietSchedule.from_legacy(start_hour, end_hour)
 
 
 @dataclass(frozen=True)
@@ -94,16 +273,23 @@ class Config:
     sample_rate: int = 16000
     frame_size: int = 1600  # 100 ms frames -> one reading every 100 ms
 
-    # Detection.
+    # Detection. threshold_dbfs is defined against the RAW dBFS scale as stored —
+    # calibration offsets are applied at render time only (see ADR-0003) — so
+    # recalibrating never changes detection sensitivity. If you tuned a threshold on a
+    # pre-v3 build with a nonzero calibration_offset baked in, re-tune with olive-tune.
     threshold_dbfs: float = -35.0
     min_duration_s: float = 0.4
     debounce_s: float = 1.0
 
-    # Calibration: dB to add to relative dBFS to approximate SPL. 0.0 = uncalibrated.
+    # Calibration (BOOTSTRAP-ONLY / DEPRECATED for steady state): dB to add to relative
+    # dBFS to approximate SPL. The authoritative calibration now lives in the store as an
+    # append-only history written solely by `olive-calibrate` and applied at render time.
+    # These fields are only a fallback for a database that has never been calibrated; once
+    # `olive-calibrate` has run they are ignored. 0.0 = uncalibrated.
     calibration_offset: float = 0.0
     calibration_note: str = "Uncalibrated: levels are relative dBFS, not absolute SPL."
 
-    quiet_hours: QuietHours = field(default_factory=QuietHours)
+    quiet_hours: QuietSchedule = field(default_factory=lambda: QuietSchedule.from_legacy(22, 8))
     # IANA time zone (e.g. "America/Los_Angeles"). Timestamps are bucketed in this
     # zone, so daily/hourly distributions and quiet hours stay correct across DST.
     tz: str = "UTC"
@@ -112,7 +298,15 @@ class Config:
     db_path: str = "olive.db"
     retention_days: int = 0  # 0 = keep everything; >0 prunes events older than N days
     health_path: str = ""  # where the monitor writes its heartbeat JSON ("" = disabled)
+    # How often (seconds) to refresh the heartbeat and persist session frame counters on
+    # a wall-clock cadence, piggybacking on frame arrival. Without this, a silent night or
+    # a power cut would lose ops/coverage data because counters were only written on events
+    # and in the finally block. Kept small enough that a watchdog sees a fresh heartbeat.
+    checkpoint_interval_s: float = 30.0
     tagging: bool = False  # compute a coarse bark-like/ambient hint per event (no audio)
+    # Clock-integrity guard: flag a wall-vs-monotonic divergence larger than this many
+    # seconds as a clock jump (important on RTC-less Pis where NTP sync lurches the clock).
+    clock_jump_tolerance_s: float = 2.0
 
     # Device/site metadata for data lineage and the bias audit.
     device_label: str = "olive-monitor"
@@ -130,6 +324,10 @@ class Config:
             raise ConfigError("threshold_dbfs must be within [-200, 0] dBFS")
         if self.retention_days < 0:
             raise ConfigError("retention_days must be non-negative")
+        if self.clock_jump_tolerance_s <= 0:
+            raise ConfigError("clock_jump_tolerance_s must be positive")
+        if self.checkpoint_interval_s <= 0:
+            raise ConfigError("checkpoint_interval_s must be positive")
 
     def tzinfo(self) -> tzinfo:
         """Resolve the configured zone, falling back to UTC if tzdata is unavailable."""
@@ -149,11 +347,14 @@ class Config:
         qh = data.pop("quiet_hours", None)
         kwargs = dict(data)
         if qh is not None:
-            kwargs["quiet_hours"] = QuietHours(**qh)
+            kwargs["quiet_hours"] = QuietSchedule.from_json(qh)
         try:
             return cls(**kwargs)
         except TypeError as exc:  # unknown key in the JSON
             raise ConfigError(f"invalid config in {path}: {exc}") from exc
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        d = asdict(self)
+        # Emit the JSON-friendly windows form (asdict would leave a frozenset behind).
+        d["quiet_hours"] = self.quiet_hours.to_dict()
+        return d

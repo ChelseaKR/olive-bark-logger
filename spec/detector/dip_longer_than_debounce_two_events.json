@@ -1,0 +1,51 @@
+{
+  "name": "dip_longer_than_debounce_two_events",
+  "description": "A quiet gap longer than debounce splits into two events.",
+  "params": {
+    "threshold_dbfs": -30,
+    "min_duration_s": 0.3,
+    "debounce_s": 0.5
+  },
+  "readings": [
+    [
+      0.0,
+      -10
+    ],
+    [
+      0.5,
+      -10
+    ],
+    [
+      2.0,
+      -60
+    ],
+    [
+      3.0,
+      -10
+    ],
+    [
+      3.5,
+      -10
+    ],
+    [
+      6.0,
+      -60
+    ]
+  ],
+  "expected_events": [
+    {
+      "start": 0.0,
+      "end": 0.5,
+      "duration": 0.5,
+      "peak_level": -10,
+      "avg_level": -10.0
+    },
+    {
+      "start": 3.0,
+      "end": 3.5,
+      "duration": 0.5,
+      "peak_level": -10,
+      "avg_level": -10.0
+    }
+  ]
+}

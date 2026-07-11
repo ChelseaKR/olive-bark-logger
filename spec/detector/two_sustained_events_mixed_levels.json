@@ -1,0 +1,59 @@
+{
+  "name": "two_sustained_events_mixed_levels",
+  "description": "Two separated bursts each with varying loud levels.",
+  "params": {
+    "threshold_dbfs": -35,
+    "min_duration_s": 0.2,
+    "debounce_s": 0.5
+  },
+  "readings": [
+    [
+      0.0,
+      -15
+    ],
+    [
+      0.3,
+      -12
+    ],
+    [
+      0.6,
+      -18
+    ],
+    [
+      2.0,
+      -60
+    ],
+    [
+      4.0,
+      -30
+    ],
+    [
+      4.4,
+      -22
+    ],
+    [
+      4.8,
+      -34
+    ],
+    [
+      7.0,
+      -60
+    ]
+  ],
+  "expected_events": [
+    {
+      "start": 0.0,
+      "end": 0.6,
+      "duration": 0.6,
+      "peak_level": -12,
+      "avg_level": -15.0
+    },
+    {
+      "start": 4.0,
+      "end": 4.8,
+      "duration": 0.7999999999999998,
+      "peak_level": -22,
+      "avg_level": -28.666666666666668
+    }
+  ]
+}
