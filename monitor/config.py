@@ -54,12 +54,19 @@ class Config:
     sample_rate: int = 16000
     frame_size: int = 1600  # 100 ms frames -> one reading every 100 ms
 
-    # Detection.
+    # Detection. threshold_dbfs is defined against the RAW dBFS scale as stored —
+    # calibration offsets are applied at render time only (see ADR-0003) — so
+    # recalibrating never changes detection sensitivity. If you tuned a threshold on a
+    # pre-v3 build with a nonzero calibration_offset baked in, re-tune with olive-tune.
     threshold_dbfs: float = -35.0
     min_duration_s: float = 0.4
     debounce_s: float = 1.0
 
-    # Calibration: dB to add to relative dBFS to approximate SPL. 0.0 = uncalibrated.
+    # Calibration (BOOTSTRAP-ONLY / DEPRECATED for steady state): dB to add to relative
+    # dBFS to approximate SPL. The authoritative calibration now lives in the store as an
+    # append-only history written solely by `olive-calibrate` and applied at render time.
+    # These fields are only a fallback for a database that has never been calibrated; once
+    # `olive-calibrate` has run they are ignored. 0.0 = uncalibrated.
     calibration_offset: float = 0.0
     calibration_note: str = "Uncalibrated: levels are relative dBFS, not absolute SPL."
 
@@ -72,6 +79,11 @@ class Config:
     db_path: str = "olive.db"
     retention_days: int = 0  # 0 = keep everything; >0 prunes events older than N days
     health_path: str = ""  # where the monitor writes its heartbeat JSON ("" = disabled)
+    # How often (seconds) to refresh the heartbeat and persist session frame counters on
+    # a wall-clock cadence, piggybacking on frame arrival. Without this, a silent night or
+    # a power cut would lose ops/coverage data because counters were only written on events
+    # and in the finally block. Kept small enough that a watchdog sees a fresh heartbeat.
+    checkpoint_interval_s: float = 30.0
     tagging: bool = False  # compute a coarse bark-like/ambient hint per event (no audio)
 
     # Device/site metadata for data lineage and the bias audit.
@@ -90,6 +102,8 @@ class Config:
             raise ConfigError("threshold_dbfs must be within [-200, 0] dBFS")
         if self.retention_days < 0:
             raise ConfigError("retention_days must be non-negative")
+        if self.checkpoint_interval_s <= 0:
+            raise ConfigError("checkpoint_interval_s must be positive")
 
     def tzinfo(self) -> tzinfo:
         """Resolve the configured zone, falling back to UTC if tzdata is unavailable."""

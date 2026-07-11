@@ -6,7 +6,16 @@ Effort tiers: S ≈ a day · M ≈ 2–4 days · L ≈ 1–2 weeks · XL ≈ mul
 
 ---
 
-## FIX-01 · Calibration single source of truth + raw-level storage
+## FIX-01 · Calibration single source of truth + raw-level storage — ✅ DONE (2026-07-02)
+**Status:** Implemented. Schema migration v3 adds an append-only `calibration_history`
+table (preserving any legacy `calibration` row as the epoch-0 offset); `olive-calibrate`
+is the only writer (`add_calibration`, carrying `--reference-instrument` provenance);
+`olive-monitor` no longer writes calibration and stores **raw** dBFS, reading the
+effective offset from the store for session lineage; the report applies offsets at render
+time via `calibration_at`, rendering a per-epoch offsets table and a recalibration
+disclosure when a window spans multiple epochs; `config.calibration_offset` is documented
+as bootstrap-only/deprecated. Covered by migration, no-clobber, round-trip, and
+multi-epoch render tests.
 **Pitch:** Stop the monitor from clobbering stored calibration, and stop baking the
 offset into persisted levels.
 **Why it matters:** Today `monitor/service.py:115` overwrites the DB calibration row
@@ -53,11 +62,6 @@ a two-session DB with different thresholds and asserts both parameter sets appea
 no report can ever describe an event with parameters it wasn't detected under.
 
 ## FIX-03 · Monitoring-gap ledger: make "no data" first-class
-**Status:** ✅ Done (Python core) — `gaps` table + migration v3, `resilient_source`
-`on_gap` callback, heatmap third state ("not monitored", hatched + labeled in the data
-table), a `monitored` column in the event and violations CSV exports, and a methodology
-line stating monitored vs wall-clock hours. PWA parity (FIX-06) and crash-time gap
-closure (FIX-04) remain separate items.
 **Pitch:** Persist the intervals when the device was *not* listening and render them
 distinctly from silence.
 **Why it matters:** Absence of events currently reads as quiet. `resilient_source`

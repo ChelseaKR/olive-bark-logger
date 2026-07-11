@@ -1,0 +1,44 @@
+{
+  "name": "debounce_bridges_dip",
+  "description": "A dip shorter than debounce stays inside one event.",
+  "params": {
+    "threshold_dbfs": -30,
+    "min_duration_s": 0.3,
+    "debounce_s": 1.0
+  },
+  "readings": [
+    [
+      0.0,
+      -10
+    ],
+    [
+      0.5,
+      -10
+    ],
+    [
+      1.0,
+      -60
+    ],
+    [
+      1.5,
+      -10
+    ],
+    [
+      2.0,
+      -10
+    ],
+    [
+      4.0,
+      -60
+    ]
+  ],
+  "expected_events": [
+    {
+      "start": 0.0,
+      "end": 2.0,
+      "duration": 2.0,
+      "peak_level": -10,
+      "avg_level": -10.0
+    }
+  ]
+}

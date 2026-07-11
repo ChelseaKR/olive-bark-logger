@@ -17,6 +17,8 @@ _BAR_COLOR = "#3b6ea5"
 _AXIS_COLOR = "#444"
 _HEAT_BASE = (59, 110, 165)  # #3b6ea5 as RGB; cell shade mixes this over white by intensity
 _HEAT_EMPTY = "#f5f5f5"  # zero-count cell: a light, neutral fill (kept distinct from shaded)
+_LABEL_FILL = "#111"  # in-cell count glyph color
+_LABEL_HALO = "#fff"  # halo painted beneath the glyph; WCAG 1.4.3 is met against the halo
 
 
 def bar_chart(
@@ -135,11 +137,16 @@ def _heat_cell(
     if value and not is_unmon:
         if value == max_v:
             busiest = f"{label} {hour:02d}:00 with {value} {value_caption}"
-        # White text on the darkest cells, dark text on the lighter ones.
-        text_fill = "#fff" if ratio >= 0.55 else "#111"
+        # Dark glyph over a white halo (paint-order draws the stroke beneath the fill),
+        # so the count meets WCAG 1.4.3 against its halo at every cell shade. The
+        # previous white-text-on-darker-cells switch (ratio >= 0.55) genuinely failed
+        # 4.5:1 on mid-intensity cells; exact computed ratios are merge-blocking in
+        # tests/test_svg_contrast.py.
         parts.append(
             f'<text x="{x + cell_w / 2:.0f}" y="{y + cell_h - 5}" font-size="9" '
-            f'text-anchor="middle" fill="{text_fill}">{value}</text>'
+            f'text-anchor="middle" fill="{_LABEL_FILL}" stroke="{_LABEL_HALO}" '
+            f'stroke-width="2" stroke-linejoin="round" '
+            f'paint-order="stroke">{value}</text>'
         )
     return parts, busiest
 
