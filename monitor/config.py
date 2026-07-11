@@ -54,12 +54,19 @@ class Config:
     sample_rate: int = 16000
     frame_size: int = 1600  # 100 ms frames -> one reading every 100 ms
 
-    # Detection.
+    # Detection. threshold_dbfs is defined against the RAW dBFS scale as stored —
+    # calibration offsets are applied at render time only (see ADR-0003) — so
+    # recalibrating never changes detection sensitivity. If you tuned a threshold on a
+    # pre-v3 build with a nonzero calibration_offset baked in, re-tune with olive-tune.
     threshold_dbfs: float = -35.0
     min_duration_s: float = 0.4
     debounce_s: float = 1.0
 
-    # Calibration: dB to add to relative dBFS to approximate SPL. 0.0 = uncalibrated.
+    # Calibration (BOOTSTRAP-ONLY / DEPRECATED for steady state): dB to add to relative
+    # dBFS to approximate SPL. The authoritative calibration now lives in the store as an
+    # append-only history written solely by `olive-calibrate` and applied at render time.
+    # These fields are only a fallback for a database that has never been calibrated; once
+    # `olive-calibrate` has run they are ignored. 0.0 = uncalibrated.
     calibration_offset: float = 0.0
     calibration_note: str = "Uncalibrated: levels are relative dBFS, not absolute SPL."
 

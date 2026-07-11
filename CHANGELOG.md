@@ -16,6 +16,16 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Added
+- **Append-only calibration history (schema v3, FIX-01 / ADR-0003):**
+  `calibration_history` table (`effective_from`, `offset`, `note`,
+  `reference_instrument`); `olive-calibrate` is the only production writer and gains
+  `--reference-instrument` provenance; the v2→v3 migration preserves a legacy
+  calibration row as epoch 0. Reports spanning a recalibration disclose a per-epoch
+  offsets table. A `schema_migrations` table records when each migration ran — the v3
+  timestamp is the boundary between rows that may carry a baked-in offset and raw rows.
+- CSV exports (`--csv`, `--violations-csv`) gain a per-row `calibration_offset_db`
+  column recording the offset included in that row's levels (raw = value − offset); the
+  violations HTML gains the same column and an honest multi-epoch calibration statement.
 - Calendar heatmap and quiet-hours violation CSV/HTML export in the report (day×hour
   grid, `--violations-csv` / `--violations-html`).
 - MIT `LICENSE` and `CITATION.cff`.
@@ -31,6 +41,17 @@ release" defect this file's absence let stand.
   scan (Trivy) and `harden-runner` (audit mode) in CI.
 
 ### Fixed
+- **Calibration clobber (critical, data integrity; FIX-01 / ADR-0003):**
+  `olive-monitor` no longer overwrites the stored calibration with the config value on
+  every start (`olive-calibrate` → `olive-monitor` with a default config used to
+  silently revert the device to uncalibrated). Event levels are now stored as **raw**
+  dBFS and calibration is applied at render time from the append-only history —
+  identically for the HTML report and the `--csv` / `--violations-csv` /
+  `--violations-html` exports (exports previously emitted unadjusted levels, and the
+  violations report's calibrated/uncalibrated statement came from the deprecated config
+  field instead of the store). `config.calibration_offset` / `calibration_note` are
+  bootstrap-only (deprecated); `threshold_dbfs` is defined against the raw stored
+  scale. Legacy-data impact and recovery arithmetic: ADR-0003.
 - `on-device only, no cloud, no telemetry` guarantees unchanged and still merge-blocking
   (`tests/test_no_audio.py`, `tests/test_no_egress.py`) — this remediation pass
   deliberately did not touch those tests' assertions.
