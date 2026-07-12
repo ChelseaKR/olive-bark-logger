@@ -98,6 +98,44 @@ def test_monitor_main_records_and_announces_clock_anomaly(tmp_path, monkeypatch,
     assert payload["clock_anomalies"] == 1
 
 
+def test_monitor_main_emits_over_ipc_socket(monkeypatch, capsys):
+    """The opt-in feed emits heartbeat and event dicts to a local listener."""
+    import socket
+    import tempfile
+    from pathlib import Path
+
+    def fake_live_source(sample_rate=16000, frame_size=1600, stats=None):
+        yield from synthetic_session(8.0, [LoudRegion(1.0, 4.0, 0.4)], frame_size=frame_size)
+
+    monkeypatch.setattr(capture_live, "live_source", fake_live_source)
+
+    with tempfile.TemporaryDirectory(dir="/tmp") as d:
+        sock_path = str(Path(d) / "ipc.sock")
+        cfg = Path(d) / "cfg.json"
+        cfg.write_text(json.dumps({"db_path": str(Path(d) / "olive.db"), "min_duration_s": 0.4}))
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        listener.bind(sock_path)
+        listener.settimeout(2.0)
+        try:
+            rc = monitor_main(["--config", str(cfg), "--ipc-socket", sock_path], now=1000.0)
+            assert rc == 0
+            received = []
+            while True:
+                try:
+                    received.append(json.loads(listener.recv(4096)))
+                except socket.timeout:
+                    break
+        finally:
+            listener.close()
+
+    types = [m.get("type") for m in received]
+    assert "event" in types  # at least one event notification was emitted
+    event = next(m for m in received if m.get("type") == "event")
+    assert {"start", "duration", "peak_level", "session_id"} <= event.keys()
+    # Heartbeat payloads (the health dict) were emitted too.
+    assert any("frame_coverage" in m for m in received)
+
+
 def test_monitor_main_prunes_per_retention(tmp_path, monkeypatch, capsys):
     db = tmp_path / "olive.db"
     cfg = tmp_path / "cfg.json"

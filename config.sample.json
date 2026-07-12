@@ -12,6 +12,7 @@
   "retention_days": 0,
   "health_path": "olive-health.json",
   "checkpoint_interval_s": 30.0,
+  "ipc_socket": "",
   "device_label": "olive-monitor",
   "mic_model": "",
   "placement_note": "Living room, 1.5 m from the shared wall, mic facing inward."
