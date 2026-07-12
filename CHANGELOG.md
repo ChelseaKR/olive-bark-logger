@@ -16,6 +16,13 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Added
+- Tag-triggered release workflow (`.github/workflows/release.yml`, REL-14, STANDARDS
+  conformance remediation 2026-07-10): re-runs `make verify` at the tagged commit, then
+  builds sdist + wheel, generates a CycloneDX SBOM, attests build provenance (keyless
+  OIDC, no stored signing key), and publishes a GitHub Release with the matching
+  `CHANGELOG.md` section as notes. Prepared ahead of the first tag — see the workflow
+  file's header for what's deliberately still out of scope (PyPI, GHCR, cosign) and
+  `docs/GAP-LEDGER.md#gap-rel-1` for the remaining release-pipeline gap.
 - **Append-only calibration history (schema v3, FIX-01 / ADR-0003):**
   `calibration_history` table (`effective_from`, `offset`, `note`,
   `reference_instrument`); `olive-calibrate` is the only production writer and gains
