@@ -55,6 +55,18 @@ on any Python 3.9+ with no installs; only live microphone capture needs the `liv
 | `olive-calibrate` | Measure mean level against a reference SPL reading and append a calibration offset (with optional `--reference-instrument` provenance). This is the **only** writer of calibration; it is an append-only history applied at report time, so recalibrating never rewrites earlier events. |
 | `olive-report` | Render the accessible HTML report (distributions + day×hour calendar heatmap + quiet-hours summary). Optional `--csv` event export, and `--violations-csv` / `--violations-html` for an honest quiet-hours report suitable for a neighbor/landlord/HOA submission. |
 
+## Local status page
+When `health_path` is configured, the monitor writes a static **`status.html`** next to
+the heartbeat file on every check-in. You can instead enable only the page by setting
+`status_path` explicitly. No server or network is involved. Open it straight from disk
+(double-click, or `open status.html`) for an at-a-glance
+ops view: heartbeat freshness (with a stale-heartbeat warning if the monitor has gone
+quiet), the most recent level, frame coverage, recorded monitoring gaps, and a recent
+summary (event count, minutes with events, busiest hour, quiet-hours totals). The page
+is atomically rewritten, so you never catch it half-written, and it auto-refreshes every
+60s if left open in a browser. It inherits the report's accessibility (keyboard-complete,
+scoped table headers, reduced-motion) and the same no-audio guarantee.
+
 ## Deployment & variants
 - **Raspberry Pi service:** `scripts/setup-pi.sh` installs PortAudio + a venv and the
   `deploy/olive-monitor.service` systemd unit (auto-restart, network-isolated, sandboxed).

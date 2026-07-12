@@ -126,8 +126,9 @@ def _health_payload(
     now: float,
     session_id: int,
     clock_anomalies: int = 0,
+    last_level: float | None = None,
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "status": "ok",
         "session_id": session_id,
         "started_at": started_at,
@@ -140,6 +141,36 @@ def _health_payload(
         "db_path": config.db_path,
         "version": __version__,
     }
+    if last_level is not None:
+        payload["last_level_dbfs"] = round(last_level, 1)
+    return payload
+
+
+def _write_status_page(config: Config, store: EventStore, payload: dict[str, object]) -> None:
+    """Render the static local status page next to the heartbeat, best-effort.
+
+    Guarded so a rendering failure never kills the monitor loop — a broken status page
+    must not take down capture. Lazily imports report.status to avoid a hard monitor->
+    report dependency at module load and any import cycle.
+    """
+    status_path = config.status_html_path()
+    if not status_path:
+        return
+    try:
+        from report.status import collect_status_aggregates, render_status, write_status
+
+        updated_at = payload.get("updated_at")
+        now = float(updated_at) if isinstance(updated_at, (int, float)) else time.time()
+        aggregates = collect_status_aggregates(store, config, now=now)
+        html = render_status(
+            payload,
+            aggregates,
+            now=now,
+            heartbeat_interval_s=config.checkpoint_interval_s,
+        )
+        write_status(status_path, html)
+    except Exception as exc:
+        print(f"status page not written ({exc}).")
 
 
 def _bootstrap_session(store: EventStore, config: Config, started_at: float) -> int:
@@ -200,19 +231,21 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             sample_rate=config.sample_rate, frame_size=config.frame_size, stats=stats
         )
 
+    latest_level: float | None = None
+
     def heartbeat() -> None:
+        payload = _health_payload(
+            config,
+            stats,
+            started_at=started_at,
+            now=now or time.time(),
+            session_id=session_id,
+            clock_anomalies=anomaly_count,
+            last_level=latest_level,
+        )
         if config.health_path:
-            write_health(
-                config.health_path,
-                _health_payload(
-                    config,
-                    stats,
-                    started_at=started_at,
-                    now=now or time.time(),
-                    session_id=session_id,
-                    clock_anomalies=anomaly_count,
-                ),
-            )
+            write_health(config.health_path, payload)
+        _write_status_page(config, store, payload)
 
     def check_clock() -> None:
         """Sample both clocks; persist and announce any divergence beyond tolerance."""
@@ -271,6 +304,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             stats=stats,
             session_id=session_id,
         ):
+            latest_level = event.peak_level
             check_clock()
             print(
                 f"event @ {event.start:.0f}  dur {event.duration:.1f}s  "
