@@ -23,6 +23,14 @@ release" defect this file's absence let stand.
   `CHANGELOG.md` section as notes. Prepared ahead of the first tag — see the workflow
   file's header for what's deliberately still out of scope (PyPI, GHCR, cosign) and
   `docs/GAP-LEDGER.md#gap-rel-1` for the remaining release-pipeline gap.
+- **EXP-06: optional tagged PDF/A-3a export** (`report/pdf_export.py`,
+  `docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md`). New `pdf` extra
+  (`weasyprint>=67,<70`, needs Python >=3.10); new `--pdf` / `--violations-pdf` CLI
+  flags on `olive-report`; `tests/test_pdf_export.py` verifies structural
+  properties (tag tree, `/Lang`, heading order, table header association, chart
+  descriptive text). **Not** a PDF/UA conformance claim — no human
+  assistive-technology walkthrough has been performed yet (tracked:
+  `docs/GAP-LEDGER.md#gap-a11y-2`).
 - **Append-only calibration history (schema v3, FIX-01 / ADR-0003):**
   `calibration_history` table (`effective_from`, `offset`, `note`,
   `reference_instrument`); `olive-calibrate` is the only production writer and gains

@@ -98,7 +98,11 @@ gets its equivalent screen in-app).
 new surface. **Excellence bar:** an operator can answer "is it alive, is it covering,
 what happened last night" in under 10 seconds without a terminal.
 
-### EXP-06 · Accessible tagged PDF/A export
+### EXP-06 · Accessible tagged PDF/A export — ⚠️ IMPLEMENTED; HUMAN GATE OPEN
+**Status (2026-07-12):** The optional `pdf` extra generates PDF/A-3a with a structure
+tree from the existing semantic HTML, blocks external resource fetching, and has
+structural tag tests plus visual-render review. This is not a PDF/UA or fully-accessible
+claim: the required real assistive-technology walkthrough remains open in GAP-A11Y-2.
 **Pitch:** A first-class, archival, screen-reader-usable PDF of the report and the
 violations export, with the E1 bundle hash printed on it.
 **Impact:** README promises "PDF/HTML" but only HTML with print CSS exists

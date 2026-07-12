@@ -128,3 +128,21 @@ structlog JSON renderer; the monitor still only emits `print()` lines and one
 heartbeat JSON blob. Not implemented this pass (M effort, touches the CLI surface and
 needs its own tests) — tracked here rather than silently dropped.
 Plan: REMEDIATION.md P2-5.
+
+## GAP-A11Y-2 — Accessibility: tagged PDF/A export (EXP-06) has no human AT walkthrough or veraPDF CI gate
+**Status: Open (2026-07-09).** Controls: A11Y-11/12 (PDF surface).
+`report/pdf_export.py` (optional `pdf` extra, `docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md`)
+requests a tagged PDF/A-3a from WeasyPrint and `tests/test_pdf_export.py` verifies the
+structural properties a test suite can check (tag tree present, `/Lang`/`/MarkInfo`,
+heading order, table header association, chart-summary text survival). What is
+**not** done, same as `docs/ideation/04-impact-and-sequencing.md`'s human-gate table
+already named for this item:
+1. **No human assistive-technology walkthrough.** No PDF/UA or "fully accessible"
+   conformance claim is made anywhere in this repo, and none should be made until a
+   real screen-reader pass is performed and committed, the same way
+   `docs/audits/accessibility-2026-06-05.md` documents the HTML report's walkthrough.
+2. **No veraPDF CI gate.** `make pdf-a11y` runs veraPDF locally, best-effort, when
+   installed (a Java tool, not on PyPI); it is not wired into CI and is not
+   merge-blocking.
+Plan: none yet — first requires an available AT reviewer (human gate), not a backlog
+item to schedule unilaterally.

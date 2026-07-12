@@ -6,10 +6,10 @@ PIP ?= .venv/bin/pip
 RUFF ?= ruff
 MYPY ?= mypy
 
-.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pwa-test i18n verify clean
+.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n verify clean
 
 help:
-	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pwa-test verify clean"
+	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test verify clean"
 
 venv:
 	python3 -m venv .venv
@@ -83,6 +83,28 @@ snapshot:
 # Render a sample report from a demo event log so `make report` always produces output.
 report:
 	$(PY) scripts/demo_report.py
+
+# Render a sample tagged PDF/A-3a from the demo event log (EXP-06). Needs the
+# optional 'pdf' extra: `pip install -e '.[pdf]'` (weasyprint>=67, itself needs a
+# >=3.10 host interpreter — see docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md).
+# Not part of `verify`: like `live`, this extra is opt-in and diverges further from
+# the >=3.9 core floor, so it cannot be a default gate on every host.
+pdf:
+	$(PY) scripts/demo_pdf.py
+
+# Best-effort PDF/A-3a conformance check against the demo PDF, when veraPDF is
+# installed (a Java tool, not a PyPI package — same "install separately" situation as
+# gitleaks; see CONTRIBUTING.md#prerequisites and the ADR). Advisory, not
+# merge-blocking: tests/test_pdf_export.py's structural pytest gate is the enforced
+# floor; full veraPDF CI wiring plus the still-outstanding human assistive-technology
+# walkthrough are tracked as follow-up, not done in this pass.
+pdf-a11y:
+	@$(MAKE) pdf
+	@if command -v verapdf >/dev/null 2>&1; then \
+		verapdf --flavour 3a report.pdf; \
+	else \
+		echo "verapdf not installed — see docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md; tests/test_pdf_export.py's structural gate is the enforced floor"; \
+	fi
 
 # Browser (PWA) variant tests — needs Node.
 pwa-test:

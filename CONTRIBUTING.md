@@ -27,6 +27,21 @@ bandit, pip-audit, hypothesis — all pinned with floors in `pyproject.toml`'s
 - **Node.js 20+**: needed for `make pwa-test` and the pa11y/axe pass in `make a11y`.
 - **Docker**: only needed for `docker build .` / the container smoke test; not required
   for the Python test suite.
+- **veraPDF** (optional, PDF/A-3a conformance validation): a Java tool, not a
+  PyPI package — <https://verapdf.org/software/>. Only used by the best-effort,
+  non-merge-blocking `make pdf-a11y` target; `tests/test_pdf_export.py`'s structural
+  pytest gate is the enforced floor for the tagged-PDF export (EXP-06). See
+  `docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md`.
+
+### The optional `pdf` extra (tagged PDF/A export, EXP-06)
+`pip install -e '.[pdf]'` adds `weasyprint` (and `pypdf`, used only by
+`tests/test_pdf_export.py` to read the generated structure tree back out). This
+extra needs a **Python >=3.10** host interpreter — a further, deliberate, scoped
+divergence from the project's >=3.9 core floor (ADR-0002), documented in
+`pyproject.toml` and `docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md`. It is
+never installed by `make dev` / `make verify`, mirroring the `live` extra: nothing
+on the core monitoring/report path depends on it. `tests/test_pdf_export.py` skips
+itself cleanly (`pytest.importorskip`) when the extra isn't installed.
 
 ## Workflow
 ```bash

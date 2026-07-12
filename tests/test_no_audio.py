@@ -36,6 +36,11 @@ ALLOWED_EVENT_FIELDS = {
     "longest_run_s",
 }
 
+# The optional report exporter is the sole reviewed binary artifact sink. It writes
+# already-rendered PDF bytes supplied by WeasyPrint; no capture frame or audio value
+# reaches this module. Keep this allowlist exact so any second sink still blocks merge.
+ALLOWED_BINARY_WRITES = {"report/pdf_export.py": ["write_bytes"]}
+
 
 def test_event_has_no_audio_field():
     names = {f.name for f in fields(Event)}
@@ -78,15 +83,28 @@ def test_no_source_file_uses_audio_write_api():
 
 
 def test_no_file_open_in_write_binary_mode():
-    """No source dumps bytes to disk. Covers the obvious `open('x','wb')` plus the
-    bypasses: `io.open('x','wb')`, `Path(...).write_bytes(...)`, and a low-level
-    `os.open(..., O_WRONLY/O_RDWR/O_CREAT)` writable descriptor."""
+    """No source dumps bytes except the exact reviewed PDF artifact sink.
+
+    Covers the obvious `open('x','wb')` plus the bypasses: `io.open('x','wb')`,
+    `Path(...).write_bytes(...)`, and a low-level
+    `os.open(..., O_WRONLY/O_RDWR/O_CREAT)` writable descriptor.
+    """
     offenders: dict[str, list[str]] = {}
+    root = Path(__file__).resolve().parent.parent
     for path in source_files():
         hits = scan_binary_write(path.read_text(encoding="utf-8"))
-        if hits:
-            offenders[path.name] = hits
+        relative = path.relative_to(root).as_posix()
+        unexpected = [hit for hit in hits if hit not in ALLOWED_BINARY_WRITES.get(relative, [])]
+        if unexpected:
+            offenders[relative] = unexpected
     assert not offenders, f"binary-write sinks found in: {offenders}"
+
+    observed_allowlisted = {
+        path.relative_to(root).as_posix(): scan_binary_write(path.read_text(encoding="utf-8"))
+        for path in source_files()
+        if path.relative_to(root).as_posix() in ALLOWED_BINARY_WRITES
+    }
+    assert observed_allowlisted == ALLOWED_BINARY_WRITES
 
 
 def test_capture_live_only_sinks_frames_to_memory():

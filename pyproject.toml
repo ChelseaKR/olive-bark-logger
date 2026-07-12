@@ -19,6 +19,19 @@ dependencies = []
 # core pipeline and all tests run without it. Installing audio libs does NOT add
 # any path that writes or transmits audio — capture only yields in-memory frames.
 live = ["sounddevice>=0.4"]
+# Tagged, accessible PDF/A export (EXP-06). Optional for the same reason as `live`:
+# the zero-dependency core (monitor/store/report HTML) is unaffected; this only adds
+# a new export-side path. See docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md for
+# why WeasyPrint and why >=67 (PDF/A level-A — "pdf/a-3a", archival + tagged in one
+# ISO 19005 conformance claim — landed in 67.0, 2025-12-02). NOTE: WeasyPrint >=67
+# itself requires a >=3.10 host interpreter, so this extra cannot install on the
+# >=3.9 core floor (ADR-0002) — a documented, scoped divergence for this optional,
+# non-core extra only; nothing on the always-run monitoring/report path is affected.
+# pypdf reads the generated PDF's own structure tree back out again, for
+# tests/test_pdf_export.py's structural assertions (tag presence, reading order,
+# header association) — the only way to verify what actually got written, short of
+# a human assistive-technology pass (still deferred, see the ADR).
+pdf = ["weasyprint>=67,<70", "pypdf>=5,<7"]
 
 [dependency-groups]
 # PEP 735 dependency group (CQ-27): dev-only tooling, not a runtime extra.
@@ -97,4 +110,11 @@ ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = "sounddevice"
+ignore_missing_imports = true
+
+# weasyprint (the `pdf` extra, EXP-06) ships no py.typed marker / stubs either;
+# report/pdf_export.py imports it lazily inside a function and treats its return
+# values as opaque (see the `cast(bytes, ...)` there), same posture as sounddevice.
+[[tool.mypy.overrides]]
+module = "weasyprint"
 ignore_missing_imports = true
