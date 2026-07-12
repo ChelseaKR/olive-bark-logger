@@ -50,6 +50,8 @@ def test_seconds_within_quiet_hours_prorates_boundary():
     row = report.rows[0]
     assert row.within_quiet_hours is False  # start (21:59) is outside quiet hours
     assert row.seconds_within_quiet_hours == 60.0
+    assert report.within_loud_seconds == 60.0
+    assert report.outside_loud_seconds == 60.0
 
 
 def test_seconds_within_quiet_hours_fully_inside_and_outside():
@@ -89,6 +91,22 @@ def test_compute_violations_empty():
     assert report.rows == []
 
 
+def test_compute_violations_carries_event_anatomy():
+    event = Event(
+        start=datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp(),
+        end=datetime(2026, 1, 1, 23, 0, 2, tzinfo=timezone.utc).timestamp(),
+        duration=2.0,
+        peak_level=-8.0,
+        avg_level=-12.0,
+        rise_time_s=0.4,
+        loud6_s=1.6,
+        longest_run_s=1.9,
+    )
+    report = compute_violations([event], quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    row = report.rows[0]
+    assert (row.rise_time_s, row.loud6_s, row.longest_run_s) == (0.4, 1.6, 1.9)
+
+
 def test_violations_csv_lists_all_events_flagged(tmp_path):
     out = tmp_path / "violations.csv"
     events = [_ev(23, tag="bark-like"), _ev(12)]
@@ -109,6 +127,9 @@ def test_violations_csv_lists_all_events_flagged(tmp_path):
         "peak_dbfs",
         "avg_dbfs",
         "calibration_offset_db",
+        "rise_time_s",
+        "loud6_s",
+        "longest_run_s",
         "within_quiet_hours",
         "seconds_within_quiet_hours",
         "quiet_window",
@@ -116,14 +137,20 @@ def test_violations_csv_lists_all_events_flagged(tmp_path):
         "coarse_tag",
     ]
     assert len(rows) == 3  # header + 2 events
-    assert rows[1][8] == "yes" and rows[1][-1] == "bark-like"  # 23:00 violates
-    assert rows[2][8] == "no"  # 12:00 does not
+    header = rows[0]
+    within = header.index("within_quiet_hours")
+    seconds = header.index("seconds_within_quiet_hours")
+    window = header.index("quiet_window")
+    monitored = header.index("monitored")
+    offset = header.index("calibration_offset_db")
+    assert rows[1][within] == "yes" and rows[1][-1] == "bark-like"  # 23:00 violates
+    assert rows[2][within] == "no"  # 12:00 does not
     # The pro-rated seconds column sits between the flag and the window label.
-    assert rows[1][9] == "2.0"  # 2 s event fully inside quiet hours
-    assert rows[2][9] == "0.0"  # noon event contributes no quiet seconds
-    assert rows[1][10] == "22:00–08:00"
-    assert rows[1][7] == "+0.0"  # no offsets given -> rows declare themselves raw
-    assert rows[1][11] == "yes" and rows[2][11] == "yes"  # no gaps -> all monitored
+    assert rows[1][seconds] == "2.0"  # 2 s event fully inside quiet hours
+    assert rows[2][seconds] == "0.0"  # noon event contributes no quiet seconds
+    assert rows[1][window] == "22:00–08:00"
+    assert rows[1][offset] == "+0.0"  # no offsets given -> rows declare themselves raw
+    assert rows[1][monitored] == "yes" and rows[2][monitored] == "yes"
 
 
 def test_violations_csv_flags_unmonitored_events(tmp_path):

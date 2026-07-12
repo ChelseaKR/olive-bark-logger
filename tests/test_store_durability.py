@@ -155,6 +155,48 @@ def test_add_calibration_is_append_only_and_time_addressable(tmp_path):
         assert store.calibration_at(9_999.0) == 9.0
 
 
+def test_old_v6_database_gains_anatomy_columns_and_reads_none(tmp_path):
+    db = tmp_path / "olive.db"
+    conn = sqlite3.connect(db)
+    for migration in _MIGRATIONS[:6]:
+        conn.executescript(migration)
+    conn.execute("PRAGMA user_version = 6")
+    conn.execute(
+        "INSERT INTO events (start, end, duration, peak_level, avg_level) VALUES (5,7,2,-8,-11)"
+    )
+    conn.commit()
+    conn.close()
+
+    with EventStore(db) as store:
+        assert store._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        cols = {row[1] for row in store._conn.execute("PRAGMA table_info(events)")}
+        assert {"rise_time_s", "loud6_s", "longest_run_s"} <= cols
+        (event,) = store.events()
+        assert event.rise_time_s is None
+        assert event.loud6_s is None
+        assert event.longest_run_s is None
+
+
+def test_anatomy_round_trips_through_store(tmp_path):
+    with EventStore(tmp_path / "olive.db") as store:
+        store.add_event(
+            Event(
+                start=1.0,
+                end=3.0,
+                duration=2.0,
+                peak_level=-8.0,
+                avg_level=-12.0,
+                rise_time_s=0.4,
+                loud6_s=1.6,
+                longest_run_s=1.9,
+            )
+        )
+        (event,) = store.events()
+        assert event.rise_time_s == 0.4
+        assert event.loud6_s == 1.6
+        assert event.longest_run_s == 1.9
+
+
 def test_crash_recovery_second_connection_reads_committed_events(tmp_path):
     db = tmp_path / "olive.db"
     store1 = EventStore(db)

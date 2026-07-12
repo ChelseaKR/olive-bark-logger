@@ -29,6 +29,11 @@ ALLOWED_EVENT_FIELDS = {
     "peak_level",
     "avg_level",
     "coarse_tag",
+    # Envelope anatomy: bounded shape descriptors (seconds), never audio. Added
+    # deliberately here so the no-audio gate keeps pace with the data model.
+    "rise_time_s",
+    "loud6_s",
+    "longest_run_s",
 }
 
 

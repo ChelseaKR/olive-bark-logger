@@ -27,7 +27,11 @@ assumed); storage growth is trivial (~2 MB/year). **Excellence bar:** report sho
 ambient context for every event day; a written budget analysis; determinism preserved
 (snapshot-stable).
 
-### EXP-02 · Event anatomy (bounded per-event envelope stats)
+### EXP-02 · Event anatomy (bounded per-event envelope stats) — ✅ DONE (2026-07-12)
+**Status:** Implemented in the Python pipeline and exports. SQLite v7 adds nullable
+`rise_time_s`, `loud6_s`, and `longest_run_s` fields; the streaming detector computes
+them with O(1) counters, legacy rows remain readable, and CSV/quiet-hours HTML expose
+the values. The no-audio schema allowlist and data card were updated deliberately.
 **Pitch:** Store a few shape descriptors per event — rise time, seconds above
 threshold+6 dB, longest continuous loud run — so a report reader can distinguish "one
 90-minute drone" from "300 sharp barks."

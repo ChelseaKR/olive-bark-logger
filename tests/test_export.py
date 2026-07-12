@@ -32,6 +32,9 @@ def test_events_to_csv_writes_header_and_rows(tmp_path):
         "avg_dbfs",
         "calibration_offset_db",
         "monitored",
+        "rise_time_s",
+        "loud6_s",
+        "longest_run_s",
         "coarse_tag",
     ]
     assert len(rows) == 3  # header + 2
@@ -40,7 +43,24 @@ def test_events_to_csv_writes_header_and_rows(tmp_path):
     # Without offsets_db the levels are raw: the offset column says so explicitly.
     assert rows[1][6] == "+0.0" and rows[2][6] == "+0.0"
     # With no gaps supplied, every event is reported as monitored.
-    assert rows[1][-2] == "yes" and rows[2][-2] == "yes"
+    monitored = rows[0].index("monitored")
+    assert rows[1][monitored] == "yes" and rows[2][monitored] == "yes"
+
+
+def test_events_to_csv_writes_anatomy_and_blanks_legacy_values(tmp_path):
+    out = tmp_path / "events.csv"
+    events = [
+        Event(1.0, 3.0, 2.0, -8.0, -12.0, rise_time_s=0.4, loud6_s=1.6, longest_run_s=1.9),
+        Event(4.0, 5.0, 1.0, -9.0, -13.0),
+    ]
+    events_to_csv(events, out)
+    rows = list(csv.DictReader(out.read_text().splitlines()))
+    assert rows[0]["rise_time_s"] == "0.4"
+    assert rows[0]["loud6_s"] == "1.6"
+    assert rows[0]["longest_run_s"] == "1.9"
+    assert rows[1]["rise_time_s"] == ""
+    assert rows[1]["loud6_s"] == ""
+    assert rows[1]["longest_run_s"] == ""
 
 
 def test_events_to_csv_records_per_row_offsets(tmp_path):

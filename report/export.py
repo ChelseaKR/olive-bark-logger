@@ -28,6 +28,9 @@ _HEADER = [
     "avg_dbfs",
     "calibration_offset_db",
     "monitored",
+    "rise_time_s",
+    "loud6_s",
+    "longest_run_s",
     "coarse_tag",
 ]
 
@@ -35,6 +38,11 @@ _HEADER = [
 def _is_monitored(start: float, end: float, gaps: list[Gap]) -> bool:
     """True unless the interval [start, end) overlaps any recorded monitoring gap."""
     return not any(g.start < end and g.end > start for g in gaps)
+
+
+def _sec(value: float | None) -> str:
+    """One-decimal seconds, or blank for a missing (legacy) anatomy value."""
+    return "" if value is None else f"{value:.1f}"
 
 
 def events_to_csv(
@@ -73,6 +81,12 @@ def events_to_csv(
                     f"{ev.avg_level:.1f}",
                     f"{off:+.1f}",
                     "yes" if monitored else "no",
+                    # Envelope anatomy is independent of coarse_tag: it is emitted even
+                    # when the (opt-in) tag is suppressed, since it carries no hint about
+                    # the sound's source — only its shape.
+                    _sec(ev.rise_time_s),
+                    _sec(ev.loud6_s),
+                    _sec(ev.longest_run_s),
                     ev.coarse_tag or "",
                 ]
             )
