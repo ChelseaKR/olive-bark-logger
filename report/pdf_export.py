@@ -2,7 +2,7 @@
 
 Optional: needs the `pdf` extra (``pip install -e '.[pdf]'``; ``weasyprint>=67``,
 which itself requires a >=3.10 host interpreter -- see
-``docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md``). The core report pipeline
+``docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md``). The core report pipeline
 (``report/render.py``, ``report/violations.py``) is completely unaffected: this
 module is only imported when a PDF is actually requested, and nothing here runs on
 the always-on monitoring path or the zero-dependency core.
@@ -108,7 +108,7 @@ def _weasyprint() -> Any:
             "Tagged PDF/A export needs the optional 'pdf' extra: "
             "pip install -e '.[pdf]' (weasyprint>=67, which itself needs a Python "
             ">=3.10 host interpreter). See "
-            "docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md."
+            "docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md."
         ) from exc
     return weasyprint
 
@@ -193,7 +193,7 @@ def html_to_tagged_pdf_bytes(html: str) -> bytes:
             "WeasyPrint could not build a tagged structure tree for this report "
             f"({exc}). This is a known WeasyPrint limitation reproduced against "
             "this project's report HTML, not a defect in the report data -- see "
-            "docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md."
+            "docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md."
         ) from exc
 
 

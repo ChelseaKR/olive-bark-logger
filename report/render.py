@@ -784,7 +784,7 @@ def _write_tagged_pdf_cli(html: str, path: Path, *, violation: bool = False) -> 
         "structural tags only; not a verified PDF/UA conformance claim"
         if violation
         else "structural tags only; not a verified PDF/UA conformance claim, see "
-        "docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md"
+        "docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md"
     )
     print(f"Wrote {path} ({n} bytes, tagged PDF/A-3a -- {suffix}).")
     return True
@@ -826,7 +826,7 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "also export a tagged PDF/A-3a of the main report to this path (needs the "
             "'pdf' extra: pip install -e '.[pdf]'; see "
-            "docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md -- structural tags "
+            "docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md -- structural tags "
             "only, not a verified PDF/UA conformance claim)"
         ),
     )

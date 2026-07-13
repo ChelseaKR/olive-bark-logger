@@ -21,7 +21,7 @@ dependencies = []
 live = ["sounddevice>=0.4"]
 # Tagged, accessible PDF/A export (EXP-06). Optional for the same reason as `live`:
 # the zero-dependency core (monitor/store/report HTML) is unaffected; this only adds
-# a new export-side path. See docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md for
+# a new export-side path. See docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md for
 # why WeasyPrint and why >=67 (PDF/A level-A — "pdf/a-3a", archival + tagged in one
 # ISO 19005 conformance claim — landed in 67.0, 2025-12-02). NOTE: WeasyPrint >=67
 # itself requires a >=3.10 host interpreter, so this extra cannot install on the

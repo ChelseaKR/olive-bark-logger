@@ -86,7 +86,7 @@ report:
 
 # Render a sample tagged PDF/A-3a from the demo event log (EXP-06). Needs the
 # optional 'pdf' extra: `pip install -e '.[pdf]'` (weasyprint>=67, itself needs a
-# >=3.10 host interpreter — see docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md).
+# >=3.10 host interpreter — see docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md).
 # Not part of `verify`: like `live`, this extra is opt-in and diverges further from
 # the >=3.9 core floor, so it cannot be a default gate on every host.
 pdf:
@@ -103,7 +103,7 @@ pdf-a11y:
 	@if command -v verapdf >/dev/null 2>&1; then \
 		verapdf --flavour 3a report.pdf; \
 	else \
-		echo "verapdf not installed — see docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md; tests/test_pdf_export.py's structural gate is the enforced floor"; \
+		echo "verapdf not installed — see docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md; tests/test_pdf_export.py's structural gate is the enforced floor"; \
 	fi
 
 # Browser (PWA) variant tests — needs Node.
