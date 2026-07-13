@@ -1,4 +1,4 @@
-# 0003. WeasyPrint for tagged PDF/A export (EXP-06)
+# 0004. WeasyPrint for tagged PDF/A export (EXP-06)
 
 **Status:** Accepted · **Date:** 2026-07-09
 

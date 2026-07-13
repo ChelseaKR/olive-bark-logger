@@ -46,6 +46,28 @@ def test_backoff_is_capped():
     assert max(delays) == 5.0  # 1,2,4,5,5,5 -> capped at max_delay
 
 
+def test_recovered_failures_do_not_accumulate_toward_retry_limit():
+    """Progress between outages makes each later failure a new retry series."""
+    calls = {"n": 0}
+    delays: list[float] = []
+
+    def make_source():
+        calls["n"] += 1
+        yield (float(calls["n"]), [0.1])
+        if calls["n"] < 4:
+            raise OSError("intermittent disconnect")
+
+    out = list(resilient_source(make_source, retries=1, sleep=delays.append))
+
+    assert out == [
+        (1.0, [0.1]),
+        (2.0, [0.1]),
+        (3.0, [0.1]),
+        (4.0, [0.1]),
+    ]
+    assert delays == [1.0, 1.0, 1.0]
+
+
 class _FakeClock:
     """A monotonic fake wall clock so gap spans are asserted without real time."""
 

@@ -19,7 +19,7 @@ must never be read as, a PDF/UA conformance claim.
 
 Skipped entirely (module-level `importorskip`) unless the optional `pdf` extra is
 installed (`pip install -e '.[pdf]'`; needs Python >=3.10 -- see
-docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md). The core test suite and
+docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md). The core test suite and
 `make verify` do not depend on this file passing.
 """
 

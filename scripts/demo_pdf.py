@@ -2,7 +2,7 @@
 
 Needs the optional 'pdf' extra (`pip install -e '.[pdf]'`; weasyprint>=67, which
 itself needs a >=3.10 host interpreter -- see
-docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md). Reuses the same synthetic,
+docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md). Reuses the same synthetic,
 no-hardware, no-audio session as scripts/demo_report.py. Handy for eyeballing
 output and for `make pdf-a11y`.
 

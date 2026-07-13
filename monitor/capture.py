@@ -74,8 +74,10 @@ def resilient_source(
     """Wrap a source factory so a device error (e.g. a USB mic unplugged) is retried.
 
     On failure, re-invokes make_source() with exponential backoff rather than crashing
-    the unattended service. Gives up after `retries` consecutive failures so a truly dead
-    device surfaces an error instead of looping forever.
+    the unattended service. Gives up after `retries` *consecutive* failures so a truly
+    dead device surfaces an error instead of looping forever. Any successfully yielded
+    frame resets the retry counter, so recovered device hiccups do not accumulate over
+    the lifetime of an unattended service.
 
     When `on_gap` is given it is called once per outage with (outage_start, recovery_time,
     'device-error'): the outage begins when an exception is first caught and ends either
@@ -86,8 +88,10 @@ def resilient_source(
     attempt = 0
     outage_start: float | None = None
     while True:
+        made_progress = False
         try:
             for item in make_source():
+                made_progress = True
                 # The first frame after an outage marks recovery: close the gap now.
                 if outage_start is not None and on_gap is not None:
                     on_gap(outage_start, clock(), "device-error")
@@ -95,6 +99,8 @@ def resilient_source(
                 yield item
             return  # source ended normally
         except Exception:
+            if made_progress:
+                attempt = 0
             attempt += 1
             if outage_start is None:
                 outage_start = clock()

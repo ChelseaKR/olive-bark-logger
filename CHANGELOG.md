@@ -24,7 +24,7 @@ release" defect this file's absence let stand.
   file's header for what's deliberately still out of scope (PyPI, GHCR, cosign) and
   `docs/GAP-LEDGER.md#gap-rel-1` for the remaining release-pipeline gap.
 - **EXP-06: optional tagged PDF/A-3a export** (`report/pdf_export.py`,
-  `docs/adr/0003-weasyprint-for-tagged-pdf-a-export.md`). New `pdf` extra
+  `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md`). New `pdf` extra
   (`weasyprint>=67,<70`, needs Python >=3.10); new `--pdf` / `--violations-pdf` CLI
   flags on `olive-report`; `tests/test_pdf_export.py` verifies structural
   properties (tag tree, `/Lang`, heading order, table header association, chart
