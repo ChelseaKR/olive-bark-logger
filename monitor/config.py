@@ -14,6 +14,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 
+from monitor.log import LOG_FORMATS
+
 logger = logging.getLogger(__name__)
 
 try:  # zoneinfo is stdlib from 3.9; tzdata may be absent on some hosts.
@@ -296,6 +298,9 @@ class Config:
 
     # Operations.
     db_path: str = "olive.db"
+    # Operator log output: "text" (human lines, the default) or "json"
+    # (newline-delimited JSON for a log shipper). See monitor/log.py (GAP-OBS-1).
+    log_format: str = "text"
     retention_days: int = 0  # 0 = keep everything; >0 prunes events older than N days
     health_path: str = ""  # where the monitor writes its heartbeat JSON ("" = disabled)
     # How often (seconds) to refresh the heartbeat and persist session frame counters on
@@ -332,6 +337,8 @@ class Config:
             raise ConfigError("clock_jump_tolerance_s must be positive")
         if self.checkpoint_interval_s <= 0:
             raise ConfigError("checkpoint_interval_s must be positive")
+        if self.log_format not in LOG_FORMATS:
+            raise ConfigError(f"log_format must be one of {LOG_FORMATS}")
 
     def status_html_path(self) -> str:
         """Effective path for the static status page ("" = disabled).

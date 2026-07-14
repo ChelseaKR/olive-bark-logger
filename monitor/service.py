@@ -29,6 +29,7 @@ from monitor.features import classify, zero_crossing_rate
 from monitor.health import CaptureStats, write_health
 from monitor.ipc import LocalIpcEmitter
 from monitor.level import dbfs
+from monitor.log import LOG_FORMATS, emit
 
 
 def run_pipeline(
@@ -171,7 +172,12 @@ def _write_status_page(config: Config, store: EventStore, payload: dict[str, obj
         )
         write_status(status_path, html)
     except Exception as exc:
-        print(f"status page not written ({exc}).")
+        emit(
+            config.log_format,
+            "status_page_error",
+            f"status page not written ({exc}).",
+            error=str(exc),
+        )
 
 
 def _bootstrap_session(store: EventStore, config: Config, started_at: float) -> int:
@@ -190,7 +196,13 @@ def _bootstrap_session(store: EventStore, config: Config, started_at: float) -> 
     if config.retention_days > 0:
         removed = store.prune(before=started_at - config.retention_days * 86400)
         if removed:
-            print(f"Retention: pruned {removed} event(s) older than {config.retention_days} days.")
+            emit(
+                config.log_format,
+                "retention_pruned",
+                f"Retention: pruned {removed} event(s) older than {config.retention_days} days.",
+                pruned=removed,
+                retention_days=config.retention_days,
+            )
     return store.start_session(
         started_at=started_at,
         device_label=config.device_label,
@@ -220,13 +232,20 @@ def _load_monitor_config(argv: list[str] | None) -> Config:
         help="AF_UNIX path for the opt-in emit-only local automation feed "
         '(overrides config; "" = disabled)',
     )
+    parser.add_argument(
+        "--log-format",
+        choices=LOG_FORMATS,
+        default=None,
+        help="operator log output: text (default) or json (one JSON object per line); "
+        "overrides config",
+    )
     args = parser.parse_args(argv)
     config = Config.load(args.config)
-    return (
-        dataclasses.replace(config, ipc_socket=args.ipc_socket)
-        if args.ipc_socket is not None
-        else config
-    )
+    if args.ipc_socket is not None:
+        config = dataclasses.replace(config, ipc_socket=args.ipc_socket)
+    if args.log_format is not None:
+        config = dataclasses.replace(config, log_format=args.log_format)
+    return config
 
 
 def _publish_heartbeat(
@@ -304,10 +323,16 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             delta=anomaly.delta,
             detected_at=anomaly.detected_at,
         )
-        print(
+        emit(
+            config.log_format,
+            "clock_anomaly",
             f"clock {anomaly.kind}: wall time moved {anomaly.delta:+.1f}s relative to "
             f"the monotonic clock (expected {anomaly.wall_before:.0f}, saw "
-            f"{anomaly.wall_after:.0f}). Event timestamps around this point may be off."
+            f"{anomaly.wall_after:.0f}). Event timestamps around this point may be off.",
+            kind=anomaly.kind,
+            delta=anomaly.delta,
+            wall_before=anomaly.wall_before,
+            wall_after=anomaly.wall_after,
         )
 
     def checkpoint() -> None:
@@ -324,9 +349,13 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             frames_dropped=stats.frames_dropped,
         )
 
-    print(
+    emit(
+        config.log_format,
+        "monitoring_started",
         f"Monitoring (threshold {config.threshold_dbfs} dBFS). "
-        f"Logging events to {config.db_path}. Audio is never recorded. Ctrl-C to stop."
+        f"Logging events to {config.db_path}. Audio is never recorded. Ctrl-C to stop.",
+        threshold_dbfs=config.threshold_dbfs,
+        db_path=config.db_path,
     )
 
     def record_gap(start: float, end: float, reason: str) -> None:
@@ -348,14 +377,19 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
         ):
             latest_level = event.peak_level
             check_clock()
-            print(
+            emit(
+                config.log_format,
+                "event_detected",
                 f"event @ {event.start:.0f}  dur {event.duration:.1f}s  "
-                f"peak {event.peak_level:.1f} dBFS"
+                f"peak {event.peak_level:.1f} dBFS",
+                start=event.start,
+                duration=event.duration,
+                peak_level=event.peak_level,
             )
             _emit_event(emitter, event, session_id)
             heartbeat()
     except KeyboardInterrupt:  # pragma: no cover - interactive
-        print("\nStopped.")
+        emit(config.log_format, "stopped", "\nStopped.")
     finally:
         store.update_session(
             session_id,

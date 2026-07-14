@@ -15,6 +15,12 @@ release" defect this file's absence let stand.
 
 ## [Unreleased]
 
+### Added
+- `--log-format json` (and a matching `log_format` config field) emits the
+  monitor's operator lines as newline-delimited JSON for a log shipper, using
+  only the standard library (`monitor/log.py`). `text` stays the default and is
+  byte-for-byte the previous output. Implements GAP-OBS-1 / control OBS-22.
+
 ### Changed
 - Development, CI, and tag verification now install from a committed `uv.lock` with
   `uv sync --locked`; `.python-version` preserves the accepted Python 3.9 device target,

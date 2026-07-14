@@ -123,12 +123,15 @@ RTF-08 (artifacts regenerated on every release) remains open; see GAP-A11Y-1 for
 concrete stale artifact.
 Plan: REMEDIATION.md P2-3.
 
-## GAP-OBS-1 — Observability: `--log-format json` (Tier C structlog reference implementation)
-**Status: Open (2026-07-05).** Controls: OBS-22.
-OBS §3 names this repo the portfolio's reference implementation for the Tier C
-structlog JSON renderer; the monitor still only emits `print()` lines and one
-heartbeat JSON blob. Not implemented this pass (M effort, touches the CLI surface and
-needs its own tests) — tracked here rather than silently dropped.
+## GAP-OBS-1 — Observability: `--log-format json`
+**Status: Addressed (2026-07-14).** Controls: OBS-22.
+The monitor supports `--log-format json` (and a `log_format` config field): its
+operator lines are emitted as newline-delimited JSON through `monitor/log.py`,
+with `text` the byte-for-byte default. OBS §3 framed this as the Tier C structlog
+renderer; it is instead implemented with the standard library only, honoring the
+zero-dependency runtime-core ADR — an equivalent stdlib JSON renderer rather than
+a new dependency. The interactive `olive-calibrate` meter stays plain text (a live
+TTY UI, not operator logging).
 Plan: REMEDIATION.md P2-5.
 
 ## GAP-A11Y-2 — Accessibility: tagged PDF/A export (EXP-06) has no human AT walkthrough or veraPDF CI gate

@@ -285,3 +285,27 @@ def test_config_to_dict_roundtrips_quiet_hours():
     assert d["quiet_hours"]["windows"] == [
         {"days": [0, 1, 2, 3, 4, 5, 6], "start": "22:00", "end": "08:00"}
     ]
+
+
+def test_monitor_main_json_log_format_emits_structured_lines(tmp_path, monkeypatch, capsys):
+    # With --log-format json every operator line is a single JSON object, so a
+    # log shipper can consume the monitor's output without scraping text.
+    db = tmp_path / "olive.db"
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(json.dumps({"db_path": str(db)}))
+
+    def fake_live_source(sample_rate=16000, frame_size=1600, stats=None):
+        yield from synthetic_session(8.0, [LoudRegion(1.0, 4.0, 0.4)], frame_size=frame_size)
+
+    monkeypatch.setattr(capture_live, "live_source", fake_live_source)
+    rc = monitor_main(["--config", str(cfg), "--log-format", "json"], now=1000.0)
+    assert rc == 0
+
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.strip()]
+    records = [json.loads(ln) for ln in lines]  # raises if any operator line is not JSON
+    events = {r["event"] for r in records}
+    assert "monitoring_started" in events
+    assert "event_detected" in events
+    detected = next(r for r in records if r["event"] == "event_detected")
+    assert detected["duration"] > 0
+    assert detected["peak_level"] <= 0.0

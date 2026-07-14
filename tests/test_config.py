@@ -112,3 +112,18 @@ def test_status_path_derives_from_health_path_or_uses_explicit_path(tmp_path):
         explicit
     )
     assert Config().status_html_path() == ""
+
+
+def test_defaults_to_text_log_format():
+    assert Config.load(None).log_format == "text"
+
+
+def test_loads_json_log_format(tmp_path):
+    path = tmp_path / "cfg.json"
+    path.write_text(json.dumps({"log_format": "json"}))
+    assert Config.load(path).log_format == "json"
+
+
+def test_invalid_log_format_rejected():
+    with pytest.raises(ConfigError):
+        Config(log_format="yaml")
