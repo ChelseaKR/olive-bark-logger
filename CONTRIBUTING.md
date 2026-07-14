@@ -16,9 +16,11 @@ new contributor would follow, and it's what CI enforces.
   why, not just a diff.
 
 ## Prerequisites
-`make dev` creates `.venv` and installs the `dev` dependency group (pytest, ruff, mypy,
-bandit, pip-audit, hypothesis — all pinned with floors in `pyproject.toml`'s
-`[dependency-groups]`). One tool is **not** on PyPI and needs a separate install:
+`make dev` creates `.venv` from the committed `uv.lock` and installs the `dev` dependency
+group (pytest, ruff, mypy, bandit, pip-audit, hypothesis). Install
+[uv](https://docs.astral.sh/uv/getting-started/installation/) first; the lock is the
+single dependency snapshot used by local, CI, and release verification. One tool is
+**not** on PyPI and needs a separate install:
 
 - **gitleaks** (secret scanning): `brew install gitleaks` (macOS) or see
   <https://github.com/gitleaks/gitleaks#installing>. Required for `make security` /

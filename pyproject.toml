@@ -31,7 +31,10 @@ live = ["sounddevice>=0.4"]
 # tests/test_pdf_export.py's structural assertions (tag presence, reading order,
 # header association) — the only way to verify what actually got written, short of
 # a human assistive-technology pass (still deferred, see the ADR).
-pdf = ["weasyprint>=67,<70", "pypdf>=5,<7"]
+pdf = [
+    "weasyprint>=67,<70; python_version >= '3.10'",
+    "pypdf>=5,<7; python_version >= '3.10'",
+]
 
 [dependency-groups]
 # PEP 735 dependency group (CQ-27): dev-only tooling, not a runtime extra.
@@ -43,9 +46,10 @@ dev = [
     "pytest-cov>=5",
     "hypothesis>=6",
     "ruff>=0.15",
-    "mypy>=1.13,<2",
+    "mypy>=1.18,<2",
     "bandit>=1.8",
     "pip-audit>=2.7",
+    "tzdata>=2025.2",
 ]
 
 [project.scripts]

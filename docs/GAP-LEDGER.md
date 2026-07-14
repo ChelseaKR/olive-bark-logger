@@ -27,23 +27,25 @@ that document's section headers).
   tag; corrected this pass, see the Release & Versioning row).
 Plan: REMEDIATION.md P2-3.
 
-## GAP-CQ-1 — Code Quality: Python-floor formal ADR, uv/lockfile, pre-commit hook wiring, src/ layout, hatchling
-**Status: Partially open (2026-07-05).** Controls: CQ-01, CQ-09, CQ-10, CQ-12 (mechanism
+## GAP-CQ-1 — Code Quality: Python floor, pre-commit hook wiring, src/ layout, hatchling
+**Status: Partially open (updated 2026-07-14).** Controls: CQ-01, CQ-10, CQ-12 (mechanism
 added, not yet wired to CI as a required gate), CQ-13/CQ-23, CQ-27 (closed this pass).
 - `docs/adr/0002-python-39-floor.md` records the floor decision (option (b): keep 3.9,
   ADR on file) — this makes the *declaration* honest but the standard's floor is still
   ≥3.12, so this remains a tracked, accepted divergence, not a pass.
-- No `uv.lock` / lockfile yet (CQ-09, SEC-13); Pi deploy still installs unpinned
-  (`scripts/setup-pi.sh:19`, CQ-28).
+- `uv.lock` and `.python-version` now make development, CI, and tag verification
+  reproducible (CQ-09, SEC-13). The Pi deploy remains source-based because the runtime
+  has zero mandatory dependencies; pinning the optional live-capture stack is still
+  tracked under CQ-28 (`scripts/setup-pi.sh:19`).
 - `.pre-commit-config.yaml` now exists (this pass) but is opt-in until a CI job asserts
   hooks are current, or until the ruleset in `.github/rulesets/main.json` is applied.
 - Flat `monitor/`/`store`/`report/` layout, not `src/` (CQ-23) — no ADR yet either way.
 - setuptools build backend, not hatchling (CQ-10).
 Plan: REMEDIATION.md P1-3, P1-5, P2-4, P3.
 
-## GAP-SEC-1 — Security & Supply-Chain: harden-runner block-mode, CodeQL, lockfile+osv-scanner, TruffleHog, SBOM+signing, Scorecard
-**Status: Partially open (2026-07-05).** Controls: SEC-04 (audit-mode landed this pass,
-block-mode still open), SEC-08, SEC-13, SEC-19, SEC-27, SEC-29, SEC-35..38.
+## GAP-SEC-1 — Security & Supply-Chain: harden-runner block-mode, CodeQL, osv-scanner, TruffleHog, SBOM+signing, Scorecard
+**Status: Partially open (updated 2026-07-14).** Controls: SEC-04 (audit-mode landed,
+block-mode still open), SEC-08, SEC-19, SEC-27, SEC-29, SEC-35..38.
 - `step-security/harden-runner` now runs in `audit` mode on both CI jobs (this pass) —
   it logs egress instead of blocking it. Flipping to `egress-policy: block` needs one
   collected audit run to build the allow-list first (README Standards Conformance
