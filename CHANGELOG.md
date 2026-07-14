@@ -15,6 +15,12 @@ release" defect this file's absence let stand.
 
 ## [Unreleased]
 
+### Changed
+- Development, CI, and tag verification now install from a committed `uv.lock` with
+  `uv sync --locked`; `.python-version` preserves the accepted Python 3.9 device target,
+  and the PDF-only dependencies carry explicit Python 3.10+ markers so the universal
+  lock remains honest about that optional feature's runtime floor.
+
 ### Added
 - Tag-triggered release workflow (`.github/workflows/release.yml`, REL-14, STANDARDS
   conformance remediation 2026-07-10): re-runs `make verify` at the tagged commit, then

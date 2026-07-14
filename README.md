@@ -26,7 +26,7 @@ make dev                       # create .venv and install (dev extras)
 make verify                    # lint, type, coverage, security, a11y, PWA tests, i18n gate
 make report                    # render report.html from a demo session (no hardware)
 # Live capture on a Pi/laptop (optional audio dependency):
-.venv/bin/pip install -e ".[live]"
+uv sync --locked --group dev --extra live
 .venv/bin/olive-tune     --config config.sample.json    # live meter; suggests a threshold
 .venv/bin/olive-calibrate --config config.sample.json --reference-db 70   # store SPL offset
 .venv/bin/olive-monitor  --config config.sample.json    # logs events; Ctrl-C to stop
@@ -126,7 +126,7 @@ write-effect, so gaps live here instead — see that file's header for why).
 | Standard | State |
 |----------|-------|
 | Quality & Metrics | Applies — gap tracked in [GAP-QM-1](./docs/GAP-LEDGER.md#gap-qm-1--quality--metrics-dora-ledger--release-gate-checklist-execution) (DORA ledger; release-gate checklist exists in `DEFINITION_OF_DONE.md` but has never been run, since no release has happened) |
-| Code Quality | Applies — gap tracked in [GAP-CQ-1](./docs/GAP-LEDGER.md#gap-cq-1--code-quality-python-floor-formal-adr-uvlockfile-pre-commit-hook-wiring-src-layout-hatchling) (Python-floor divergence recorded in [ADR-0002](./docs/adr/0002-python-39-floor.md); lockfile, hatchling, src/ layout still open) |
+| Code Quality | Applies — gap tracked in [GAP-CQ-1](./docs/GAP-LEDGER.md#gap-cq-1--code-quality-python-floor-pre-commit-hook-wiring-src-layout-hatchling) (Python-floor divergence recorded in [ADR-0002](./docs/adr/0002-python-39-floor.md); pre-commit enforcement, hatchling, and `src/` layout still open) |
 | Security & Supply-Chain | Applies — hardened posture (ASVS **L2**); gap tracked in [GAP-SEC-1](./docs/GAP-LEDGER.md#gap-sec-1--security--supply-chain-harden-runner-block-mode-codeql-lockfileosv-scanner-trufflehog-sbomsigning-scorecard) |
 | CI/CD | Applies — gap tracked in [GAP-CICD-1](./docs/GAP-LEDGER.md#gap-cicd-1--cicd-apply-the-branch-ruleset-add-zizmor--codeql-actions) (ruleset committed at `.github/rulesets/main.json`, not yet applied — that's a live GitHub action for the maintainer, see the file's header) |
 | Release & Versioning | Applies — release-producing deployed app; gap tracked in [GAP-REL-1](./docs/GAP-LEDGER.md#gap-rel-1--release--versioning-the-releasesupply-chain-pipeline-is-still-absent) (tag-triggered `release.yml` now exists, REL-14 — no tag cut yet, and PyPI/GHCR/cosign are still open; `CITATION.cff` intentionally carries no `date-released` until a tag exists) |

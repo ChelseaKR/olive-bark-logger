@@ -33,7 +33,7 @@ later change supersedes an ADR by adding a new one and marking the old one
 
 The 13 decisions already embedded in `docs/ROADMAP.md` are not being mechanically
 migrated in this pass (that's a bulk-conversion task, tracked in
-`docs/GAP-LEDGER.md#gap-cq-1--code-quality-python-floor-formal-adr-uvlockfile-pre-commit-hook-wiring-src-layout-hatchling`);
+`docs/GAP-LEDGER.md#gap-cq-1--code-quality-python-floor-pre-commit-hook-wiring-src-layout-hatchling`);
 `docs/ROADMAP.md` remains the source of historical record for those until migrated.
 New expensive-to-reverse decisions from this point forward get a numbered file here
 first.

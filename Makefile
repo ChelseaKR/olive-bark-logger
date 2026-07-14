@@ -2,9 +2,9 @@
 # `make verify` runs the full merge-blocking gate set locally, mirroring CI.
 
 PY ?= .venv/bin/python
-PIP ?= .venv/bin/pip
-RUFF ?= ruff
-MYPY ?= mypy
+RUFF ?= .venv/bin/ruff
+MYPY ?= .venv/bin/mypy
+UV ?= uv
 
 .PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n verify clean
 
@@ -12,9 +12,8 @@ help:
 	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test verify clean"
 
 venv:
-	python3 -m venv .venv
-	$(PIP) install --upgrade pip
-	$(PIP) install -e . --group dev
+	@command -v $(UV) >/dev/null 2>&1 || { echo "uv not installed — see CONTRIBUTING.md#prerequisites"; exit 1; }
+	$(UV) sync --locked --group dev
 
 dev: venv
 	@echo "Dev environment ready. Run 'make verify' to check all gates."
