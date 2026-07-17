@@ -1,0 +1,48 @@
+name: nightly
+
+# Nightly macOS compatibility sweep (CI-CD-STANDARD §11b): macos-* runners cost
+# 10x minutes and are forbidden on per-push/PR CI, so the macOS legs of ci.yml's
+# test-matrix live here on a schedule instead. Platform coverage is kept (rather
+# than dropped) because the test suite exercises filesystem/path and store
+# behavior a macOS host can plausibly diverge on; ci.yml's same-named twin job
+# keeps the ruleset-required macos contexts green on PRs. workflow_dispatch is
+# for re-running a leg by hand after a nightly failure.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"  # nightly, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-matrix-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # harden-runner (SEC-04) is deliberately absent: it does not support macOS
+      # runners (Linux-only network interception) — see ci.yml's audit-mode notes.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          version: "0.11.28"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install
+        run: uv sync --locked --group dev --python "${{ matrix.python-version }}"
+      - name: Tests & coverage
+        run: .venv/bin/pytest --cov --cov-report=term-missing --cov-fail-under=85
