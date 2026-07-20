@@ -15,10 +15,21 @@ You've been on the receiving end of vague noise complaints about Olive with noth
 - **Generates reports:** daily/hourly distributions, quiet-hours summaries, and event counts as an accessible HTML report with charts and a methodology + limitations section. An optional, opt-in tagged PDF/A-3a export (`--pdf`, needs the `pdf` extra) is also available — see [Standards Conformance](#standards-conformance) for exactly what its accessibility claim does and does not cover.
 - **Runs on-device:** a Raspberry Pi service (primary) or a browser PWA (zero-hardware alternative), no network required.
 
-## For Claude Code
-- **Build entrypoint:** [`docs/ROADMAP.md`](./docs/ROADMAP.md) → *Implementation Plan*.
-- **Hard guardrails:** **never write audio bytes to disk and never transmit audio anywhere** — raw frames are processed in memory and discarded; only derived levels + event metadata are persisted (this is the central design gate and has a merge-blocking test); the report must state its **methodology and limitations honestly** (uncalibrated dBFS is relative, not absolute SPL unless calibrated; the device cannot prove a sound's source); the tool runs **local-only** (no cloud, no telemetry); data is presented to inform, never fabricated or cherry-picked to manufacture a case.
-- **Commands:** `make dev` · `make verify` · `make a11y` · `make report` · `make pwa-test`.
+## Guardrails
+
+Enforced by merge-blocking tests, not just promised:
+
+- **No audio, ever.** Raw frames are processed in memory and discarded — audio bytes are
+  never written to disk and never transmitted anywhere. Only derived levels and event
+  metadata are persisted (this is the central design gate and has a merge-blocking test).
+- **Local-only.** No cloud, no telemetry; the only optional output channel is the local,
+  emit-only automation socket described below.
+- **Honest reports.** Every report states its methodology and limitations — uncalibrated
+  dBFS is relative, not absolute SPL unless calibrated, and the device cannot prove a
+  sound's source. Data is presented to inform, never fabricated or cherry-picked to
+  manufacture a case.
+
+Agent-facing build instructions live in [`CLAUDE.md`](./CLAUDE.md).
 
 ## Quickstart
 ```bash
