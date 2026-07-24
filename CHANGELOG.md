@@ -22,6 +22,9 @@ release" defect this file's absence let stand.
   byte-for-byte the previous output. Implements GAP-OBS-1 / control OBS-22.
 
 ### Changed
+- Moved agent-only repository instructions out of the public README and
+  time-boxed the Python 3.9 device-floor divergence: `make verify` now fails
+  after 2026-10-05 until ADR-0002 is deliberately resolved.
 - Development, CI, and tag verification now install from a committed `uv.lock` with
   `uv sync --locked`; `.python-version` preserves the accepted Python 3.9 device target,
   and the PDF-only dependencies carry explicit Python 3.10+ markers so the universal

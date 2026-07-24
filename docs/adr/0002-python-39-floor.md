@@ -1,6 +1,8 @@
 # 0002. Python ≥3.9 floor (divergence from the ≥3.12 standard)
 
-**Status:** Accepted (divergence, not a pass) · **Date:** 2026-07-05
+**Status:** Accepted (time-boxed divergence, not a pass) · **Date:** 2026-07-05
+
+**Revisit-by:** 2026-10-05
 
 ## Context
 `STANDARDS/CODE-QUALITY-STANDARD.md` (CQ-01) sets a floor of Python ≥3.12 (≥3.11 only
@@ -52,6 +54,10 @@ weigh into that decision sooner rather than later.
   floor moves or upstream ships a <3.10-compatible patch; mypy runs under a pinned
   `<2` floor (`pyproject.toml`) since `mypy>=2` dropped 3.9 host support (verified
   2026-07-05).
-- **Revisit trigger:** either (1) the maintainer decides to reimage/upgrade the Pi
+- **Mandatory review:** `make python-floor-review` fails after 2026-10-05 so this
+  divergence cannot quietly become permanent. Review the active Raspberry Pi OS
+  Python floor, the current dev-tool vulnerability set, and the cost of a 3.12
+  upgrade. Record a new decision; do not merely move the date.
+- **Earlier revisit trigger:** either (1) the maintainer decides to reimage/upgrade the Pi
   target, making option (a) free, or (2) the dev-toolchain CVE list grows large enough
   that the waiver-maintenance cost exceeds the shim-deletion cost of option (a).

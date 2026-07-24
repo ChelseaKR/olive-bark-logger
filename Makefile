@@ -6,7 +6,7 @@ RUFF ?= .venv/bin/ruff
 MYPY ?= .venv/bin/mypy
 UV ?= uv
 
-.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n verify clean
+.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n python-floor-review verify clean
 
 help:
 	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test verify clean"
@@ -117,7 +117,10 @@ i18n:
 	@grep -Eq '^Reason: .+' docs/I18N.md || { echo "docs/I18N.md missing a non-empty 'Reason:' line"; exit 1; }
 	@echo "i18n: N/A declaration present."
 
-verify: lint type cov security a11y pwa-test i18n
+python-floor-review:
+	@$(PY) -c "from datetime import date; deadline=date.fromisoformat('2026-10-05'); today=date.today(); assert today <= deadline, f'Python 3.9 divergence review overdue since {deadline}; resolve ADR-0002 instead of extending it'; print(f'python-floor-review: divergence review due {deadline}')"
+
+verify: lint type cov security a11y pwa-test i18n python-floor-review
 	@echo "All local gates passed."
 
 clean:
