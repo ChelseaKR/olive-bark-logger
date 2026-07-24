@@ -15,11 +15,6 @@ You've been on the receiving end of vague noise complaints about Olive with noth
 - **Generates reports:** daily/hourly distributions, quiet-hours summaries, and event counts as an accessible HTML report with charts and a methodology + limitations section. An optional, opt-in tagged PDF/A-3a export (`--pdf`, needs the `pdf` extra) is also available — see [Standards Conformance](#standards-conformance) for exactly what its accessibility claim does and does not cover.
 - **Runs on-device:** a Raspberry Pi service (primary) or a browser PWA (zero-hardware alternative), no network required.
 
-## For Claude Code
-- **Build entrypoint:** [`docs/ROADMAP.md`](./docs/ROADMAP.md) → *Implementation Plan*.
-- **Hard guardrails:** **never write audio bytes to disk and never transmit audio anywhere** — raw frames are processed in memory and discarded; only derived levels + event metadata are persisted (this is the central design gate and has a merge-blocking test); the report must state its **methodology and limitations honestly** (uncalibrated dBFS is relative, not absolute SPL unless calibrated; the device cannot prove a sound's source); the tool runs **local-only** (no cloud, no telemetry); data is presented to inform, never fabricated or cherry-picked to manufacture a case.
-- **Commands:** `make dev` · `make verify` · `make a11y` · `make report` · `make pwa-test`.
-
 ## Quickstart
 ```bash
 make dev                       # create .venv and install (dev extras)
