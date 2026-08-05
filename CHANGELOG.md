@@ -15,6 +15,11 @@ release" defect this file's absence let stand.
 
 ## [Unreleased]
 
+- Release authorization now runs from reviewed `main` through the immutable
+  portfolio authorizer, builds the exact verified commit, and hands only
+  distributions, SBOM, and notes to a checkout-free publisher that rechecks
+  the tag object.
+
 ### Added
 - `--log-format json` (and a matching `log_format` config field) emits the
   monitor's operator lines as newline-delimited JSON for a log shipper, using
