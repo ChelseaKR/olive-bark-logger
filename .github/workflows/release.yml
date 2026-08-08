@@ -39,7 +39,7 @@ concurrency:
 
 jobs:
   authorize:
-    uses: ChelseaKR/portfolio-standards/.github/workflows/release-authorize.yml@3692aa5270d673f91f8571b4fc0ce1c622bf67e5
+    uses: ChelseaKR/.github/.github/workflows/release-authorize.yml@315a513ff3b4e7c5c0628428909052d947f4f1ab
     permissions:
       contents: read
     with:
