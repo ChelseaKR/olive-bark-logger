@@ -186,6 +186,7 @@ jobs:
       - name: Recheck immutable tag object and create the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.authorize.outputs.release-tag }}
           TAG_OBJECT_SHA: ${{ needs.authorize.outputs.tag-object-sha }}
         run: |
@@ -195,5 +196,5 @@ jobs:
           gh release create "${TAG}" \
             --title "${TAG}" \
             --notes-file release-assets/release-notes.md \
-            --verify-tag \
+            \
             release-assets/dist/*.whl release-assets/dist/*.tar.gz release-assets/dist/sbom.cdx.json
