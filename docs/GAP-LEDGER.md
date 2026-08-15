@@ -1,6 +1,12 @@
 # Gap Ledger
 
-**Last verified: 2026-07-05 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+**Last verified: 2026-08-15 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+
+> An entry that describes a gap the code has since closed is as wrong as one that hides a
+> gap — gentler, but the same defect: a document about the code that stopped tracking the
+> code. `tests/test_gap_ledger.py` reads this file and the README against a small set of
+> code facts, so a stale entry fails a build rather than ageing quietly. Add an assertion
+> there whenever an entry here makes a claim a test could check.
 
 This is the durable, in-repo tracking mechanism the README's
 [Standards Conformance table](../README.md#standards-conformance) points to for every
@@ -66,14 +72,29 @@ table, CI/CD row, for the exact command). No zizmor workflow-linter step; no Cod
 Plan: REMEDIATION.md P0-2 (activation step), P1-2, P1-6 (revisit required-check list
 after these land).
 
-## GAP-A11Y-1 — Accessibility: scan the PWA, Lighthouse CI, regenerate the stale walkthrough, ACR/VPAT
-**Status: Open (2026-07-05).** Controls: A11Y-01/02/03/05/06 (PWA-surface half),
-A11Y-11/12 (stale since `8a9f1eb`, 2026-06-29), A11Y-14, A11Y-18.
-`pwa/index.html` is never scanned by pa11y/axe or Lighthouse; the committed manual
-walkthrough (`docs/a11y/STATEMENT.md`, moved this pass from
-`docs/audits/accessibility-2026-06-05.md`) predates the calendar-heatmap +
-violations-export template change and has not been regenerated; no ACR/VPAT artifact
-exists; no NVDA or iOS VoiceOver pass.
+## GAP-A11Y-1 — Accessibility: Lighthouse CI, regenerate the stale walkthrough, ACR/VPAT, AT pass
+**Status: Partially open (updated 2026-08-15).** Controls: A11Y-01/02/03/05/06 (PWA-surface
+half — automated scan **closed**, manual pass still open), A11Y-11/12 (stale since
+`8a9f1eb`, 2026-06-29), A11Y-14, A11Y-18.
+
+Correction to this entry as written on 2026-07-05: its opening sentence claimed the PWA
+page had no pa11y/axe or Lighthouse coverage at all. **The axe half closed on
+2026-07-11** (`8858c45`, #17): `.github/workflows/ci.yml:113–116` runs
+`npx pa11y --runner axe ./pwa/index.html` on every push and pull request, in the `verify`
+job, which is a required status check. That was six days after this entry was written and
+it stayed stale for a month; the clause that reads as the headline was the wrong one.
+
+Still open, unchanged:
+- **No Lighthouse CI accessibility score** for either surface.
+- **The manual walkthrough is stale.** `docs/a11y/STATEMENT.md` (moved this pass from
+  `docs/audits/accessibility-2026-06-05.md`) predates the calendar-heatmap +
+  violations-export template change and has not been regenerated.
+- **No manual pass on the PWA surface** — keyboard / screen-reader / zoom / reflow. The
+  axe scan is automated coverage, which is not the same claim.
+- **No ACR/VPAT artifact.**
+- **No NVDA+Firefox/Chrome or iOS VoiceOver pass** (VoiceOver/macOS only, on the report).
+- **No target-size (WCAG 2.5.8) check** for the PWA's real buttons and inputs.
+
 Plan: REMEDIATION.md P1-7, P2-2.
 
 ## GAP-REL-1 — Release & Versioning: the release/supply-chain pipeline is still absent

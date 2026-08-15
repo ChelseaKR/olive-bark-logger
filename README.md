@@ -120,10 +120,13 @@ and the heartbeat health dict on each beat. Levels and metadata only — never a
 - **Definition of done:** the monitor runs unattended, logs noise events (levels + timestamps, zero audio) to local SQLite, and produces an honest, accessible report with charts and a stated methodology — all **applicable** `/STANDARDS` gates green (see Standards Conformance below) and the no-audio test passing. Full checklist: [`DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md).
 
 ## Observability
-Tier C — OTel tracing out-of-scope (no network surface). Opt-in `--log-format json` is
-not implemented yet (tracked: [`GAP-OBS-1`](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation));
-today's surface is operator-facing `print()` lines plus a heartbeat JSON file
-(`monitor/service.py`) with no secret/PII fields by design.
+Tier C — OTel tracing out-of-scope (no network surface). Opt-in `--log-format json`
+**ships** (`monitor/log.py`, `--log-format json` or `"log_format": "json"` in the config):
+every operator line is emitted as one JSON object per line for a log shipper, using only
+the standard library. `text` stays the default and is byte-for-byte the previous output.
+See [`GAP-OBS-1`, addressed 2026-07-14](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation).
+Alongside it: a heartbeat JSON file (`monitor/service.py`) with no secret/PII fields by
+design.
 
 ## Standards Conformance
 Inherits [`/STANDARDS`](../STANDARDS/) (this table is the individual declaration DOC-11
@@ -141,8 +144,8 @@ write-effect, so gaps live here instead — see that file's header for why).
 | Security & Supply-Chain | Applies — hardened posture (ASVS **L2**); gap tracked in [GAP-SEC-1](./docs/GAP-LEDGER.md#gap-sec-1--security--supply-chain-harden-runner-block-mode-codeql-lockfileosv-scanner-trufflehog-sbomsigning-scorecard) |
 | CI/CD | Applies — gap tracked in [GAP-CICD-1](./docs/GAP-LEDGER.md#gap-cicd-1--cicd-apply-the-branch-ruleset-add-zizmor--codeql-actions) (ruleset committed at `.github/rulesets/main.json`, not yet applied — that's a live GitHub action for the maintainer, see the file's header) |
 | Release & Versioning | Applies — release-producing deployed app; gap tracked in [GAP-REL-1](./docs/GAP-LEDGER.md#gap-rel-1--release--versioning-the-releasesupply-chain-pipeline-is-still-absent) (tag-triggered `release.yml` now exists, REL-14 — no tag cut yet, and PyPI/GHCR/cosign are still open; `CITATION.cff` intentionally carries no `date-released` until a tag exists) |
-| Accessibility | Applies — gap tracked in [GAP-A11Y-1](./docs/GAP-LEDGER.md#gap-a11y-1--accessibility-scan-the-pwa-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat) (PWA surface unscanned; walkthrough stale since `8a9f1eb`) and [GAP-A11Y-2](./docs/GAP-LEDGER.md#gap-a11y-2--accessibility-tagged-pdfa-export-exp-06-has-no-human-at-walkthrough-or-verapdf-ci-gate) (the optional tagged PDF/A-3a export's structure is tested; its PDF/UA/"fully accessible" conformance is **not** verified — no human AT walkthrough has been done) |
-| Observability | Applies — Tier C: OTel out-of-scope (no network surface); `--log-format json` opt-in planned, gap tracked in [GAP-OBS-1](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation) |
+| Accessibility | Applies — gap tracked in [GAP-A11Y-1](./docs/GAP-LEDGER.md#gap-a11y-1--accessibility-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat-at-pass) (`pwa/index.html` **is** scanned by axe on every push and PR since 2026-07-11; still open: no Lighthouse, walkthrough stale since `8a9f1eb`, no ACR/VPAT, no NVDA or iOS VoiceOver pass) and [GAP-A11Y-2](./docs/GAP-LEDGER.md#gap-a11y-2--accessibility-tagged-pdfa-export-exp-06-has-no-human-at-walkthrough-or-verapdf-ci-gate) (the optional tagged PDF/A-3a export's structure is tested; its PDF/UA/"fully accessible" conformance is **not** verified — no human AT walkthrough has been done) |
+| Observability | Applies — Tier C: OTel out-of-scope (no network surface); opt-in `--log-format json` **shipped** 2026-07-14 ([GAP-OBS-1: Addressed](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation)) |
 | Internationalization | N/A — single-user tool, operator-only English output ([`docs/I18N.md`](./docs/I18N.md)) |
 | AI Evaluation | N/A — no model/prompt/retrieval surface; nothing in this codebase calls an LLM SDK |
 | Documentation | Applies — gap tracked in [GAP-DOC-1](./docs/GAP-LEDGER.md#gap-doc-1--documentation-vendor-standards-as-a-pinned-submodule-finish-the-adr-migration) (`/STANDARDS` vendoring blocked on a portfolio-level tag prerequisite; ADR migration in progress) |

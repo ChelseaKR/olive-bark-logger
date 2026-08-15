@@ -16,7 +16,7 @@ applied — see that file's header). Lifted from `README.md`'s one-line DoD and
       `docs/adr/`.
 - [ ] If you changed the report template, the PWA, or anything `docs/audits/*`
       describes, the corresponding dated artifact is regenerated (not just source code
-      — see "Release checklist" below and `docs/GAP-LEDGER.md#gap-a11y-1--accessibility-scan-the-pwa-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat`
+      — see "Release checklist" below and `docs/GAP-LEDGER.md#gap-a11y-1--accessibility-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat-at-pass`
       for what happens when this step is skipped).
 
 ## Feature-complete for the monitor

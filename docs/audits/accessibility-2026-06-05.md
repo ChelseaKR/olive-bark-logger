@@ -7,7 +7,7 @@
 > substantially (calendar heatmap, quiet-hours violation export) after this walkthrough
 > was performed, and it has not been regenerated per this file's own cadence. Treat the
 > manual-walkthrough rows below as evidence of the *pre-2026-06-29* template, not the
-> current one. Tracked: `docs/GAP-LEDGER.md#gap-a11y-1--accessibility-scan-the-pwa-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat`.
+> current one. Tracked: `docs/GAP-LEDGER.md#gap-a11y-1--accessibility-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat-at-pass`.
 > The canonical, current accessibility statement is [`docs/a11y/STATEMENT.md`](../a11y/STATEMENT.md).
 
 ## Automated (auto-gated)
