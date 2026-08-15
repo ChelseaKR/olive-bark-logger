@@ -6,10 +6,10 @@ RUFF ?= .venv/bin/ruff
 MYPY ?= .venv/bin/mypy
 UV ?= uv
 
-.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n verify clean
+.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check verify clean
 
 help:
-	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test verify clean"
+	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check verify clean"
 
 venv:
 	@command -v $(UV) >/dev/null 2>&1 || { echo "uv not installed — see CONTRIBUTING.md#prerequisites"; exit 1; }
@@ -117,8 +117,20 @@ i18n:
 	@grep -Eq '^Reason: .+' docs/I18N.md || { echo "docs/I18N.md missing a non-empty 'Reason:' line"; exit 1; }
 	@echo "i18n: N/A declaration present."
 
+# Diff the LIVE branch ruleset on main against .github/rulesets/main.json. Exits 1 on any
+# difference and 2 ("CANNOT VERIFY") when gh is missing, unauthenticated, or the API
+# errors — never 0 without having read the live configuration. Deliberately NOT part of
+# `verify`: it needs network access and a `gh` token that can read repository
+# administration, neither of which a local gate may assume. The check it replaces
+# selected the ruleset by a name the live one does not have, so it printed nothing and
+# exited 0 forever; see .github/rulesets/README.md.
+ruleset-check:
+	$(PY) scripts/check_ruleset.py
+
 verify: lint type cov security a11y pwa-test i18n
 	@echo "All local gates passed."
+	@echo "Note: 'make ruleset-check' is separate (needs network + gh auth) and is the"
+	@echo "only thing that can tell you whether the live branch ruleset matches the repo."
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .coverage htmlcov report.html demo.db
