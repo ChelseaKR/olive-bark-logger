@@ -665,14 +665,15 @@ def _unmonitored_buckets(
     return buckets
 
 
-def _coverage_hours(
+def _coverage_window(
     events: list[Event], gaps: list[Gap], session: Session | None
 ) -> tuple[float, float] | None:
-    """Monitored vs wall-clock hours over the reporting window, or None if undeterminable.
+    """The observed reporting span as (start_unix, end_unix), or None if undeterminable.
 
-    The window spans the earliest observed moment to the latest across events, gaps, and
-    the latest session. Time inside a recorded gap (including any stretch outside a
-    session) is unmonitored; everything else is treated as monitored.
+    The span runs from the earliest observed moment to the latest across events, gaps,
+    and the latest session. This is the single definition of "the window" that every
+    coverage figure is measured against, so the main report and the violations export
+    cannot disagree about what they are covering.
     """
     starts: list[float] = [e.start for e in events]
     ends: list[float] = [e.end for e in events]
@@ -686,9 +687,24 @@ def _coverage_hours(
     if not starts or not ends:
         return None
     win_start, win_end = min(starts), max(ends)
-    span = win_end - win_start
-    if span <= 0:
+    if win_end - win_start <= 0:
         return None
+    return win_start, win_end
+
+
+def _coverage_hours(
+    events: list[Event], gaps: list[Gap], session: Session | None
+) -> tuple[float, float] | None:
+    """Monitored vs wall-clock hours over the reporting window, or None if undeterminable.
+
+    The window is `_coverage_window()`. Time inside a recorded gap (including any stretch
+    outside a session) is unmonitored; everything else is treated as monitored.
+    """
+    window = _coverage_window(events, gaps, session)
+    if window is None:
+        return None
+    win_start, win_end = window
+    span = win_end - win_start
     gap_seconds = sum(_overlap(g.start, g.end, win_start, win_end) for g in gaps)
     monitored = max(0.0, span - gap_seconds)
     return monitored / 3600.0, span / 3600.0
@@ -861,6 +877,10 @@ def main(argv: list[str] | None = None) -> int:
             raw_events = store.events()  # raw dBFS; calibration is applied below, at render
             history = store.calibration_history()
             gaps = store.gaps()
+            # The exports state their own monitoring coverage, computed from the same
+            # (events, gaps, session) triple the main report uses — so the handed-over
+            # document cannot claim a window the device did not observe.
+            latest_session = store.latest_session()
         # Exports must agree numerically with the main report: the same render-time,
         # per-epoch calibration is applied to every exported artifact, and each CSV row
         # records the offset it received (raw = value - offset). The calibrated flag is
@@ -901,6 +921,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz_name=config.tz,
                     offsets_db=offsets,
                     gaps=gaps,
+                    session=latest_session,
                 )
                 print(f"Wrote {args.violations_csv} ({rows} rows).")
             if args.violations_html is not None or args.violations_pdf is not None:
@@ -911,6 +932,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz_name=config.tz,
                     offsets_db=offsets,
                     gaps=gaps,
+                    session=latest_session,
                 )
                 vhtml = build_violation_report_html(
                     report,
