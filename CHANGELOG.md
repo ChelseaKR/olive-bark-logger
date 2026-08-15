@@ -15,6 +15,28 @@ release" defect this file's absence let stand.
 
 ## [Unreleased]
 
+### Fixed
+- **The caveats now travel with every export path, in both implementations.** The
+  "what this can and cannot prove" cover block leads the browser edition's report HTML
+  and both of its CSV downloads (`pwa/report.js`), and the Python event CSV
+  (`--csv`), none of which carried it. The browser quiet-hours report also gains the
+  no-verdict line ("being within quiet hours is not the same as a violation, and only
+  the relevant authority can decide whether a rule was broken") and states that its
+  readings are uncalibrated; its quiet-hours CSV preamble names the recorded monitoring
+  gaps. In the CSVs the block is a leading `#` comment preamble, so the data rows below
+  it still parse.
+- The required strings are now one shared vector, `spec/report/cover.json`, replayed
+  against both implementations (`tests/test_export_caveats.py`, `pwa/report.test.mjs`) —
+  the same arrangement `spec/detector/*.json` uses for the two detectors, which is why
+  the detectors never drifted and the report content did. The gate also *discovers*
+  export paths from source and fails when the discovered set is not the checked set, so
+  a new export path cannot ship without its caveats.
+
+### Changed
+- `--csv` (`report/export.py`) and the browser CSV downloads now begin with the `#`
+  cover preamble. Data rows are unchanged; readers that do not skip `#` comment lines
+  need a one-line filter.
+
 - Release authorization now runs from reviewed `main` through the immutable
   portfolio authorizer, builds the exact verified commit, and hands only
   distributions, SBOM, and notes to a checkout-free publisher that rechecks

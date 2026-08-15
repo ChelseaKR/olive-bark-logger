@@ -28,6 +28,13 @@ Enforced by merge-blocking tests, not just promised:
   dBFS is relative, not absolute SPL unless calibrated, and the device cannot prove a
   sound's source. Data is presented to inform, never fabricated or cherry-picked to
   manufacture a case.
+- **The caveats travel with every export.** The "what this can and cannot prove" cover
+  block leads every artifact either implementation produces — HTML report, quiet-hours
+  report, and both CSVs (as a `#` preamble, so the data rows still parse) — and anything
+  reporting a quiet-hours count carries the line that a count is a measurement, not a
+  determination. The strings live in [`spec/report/cover.json`](./spec/report/cover.json)
+  and are replayed against Python *and* the browser edition; the gate discovers export
+  paths from source, so a new one cannot ship without them.
 
 Agent-facing build instructions live in [`CLAUDE.md`](./CLAUDE.md).
 
