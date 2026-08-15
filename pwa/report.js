@@ -2,9 +2,10 @@
 // same honest methodology + limitations, same "no audio" guarantee, data tables for a11y.
 //
 // The caveats are not optional and they are not the Python side's alone. This is the
-// zero-hardware route into the same task, so it is plausibly the edition more people
-// reach for, and it exports the same kind of file to hand to a landlord. Every export
-// path below therefore carries the "what this can and cannot prove" cover block, and
+// zero-hardware route into the same task — no Raspberry Pi, no install, no command line —
+// and it exports the same kind of file to hand to a landlord. The path with the lowest
+// barrier to reaching for it must not be the path that ships without its limits. Every
+// export path below therefore carries the "what this can and cannot prove" cover block, and
 // anything that reports a quiet-hours count also carries the no-verdict line. The exact
 // strings live in spec/report/cover.json and are replayed against both implementations
 // (pwa/report.test.mjs here, tests/test_export_caveats.py on the Python side), the same

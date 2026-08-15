@@ -2,8 +2,9 @@
 
 `report/violations.py` says the cover block is written into the CSV "so the caveat travels
 with the file". It travelled with one CSV. The event CSV had none, and the whole browser
-edition -- the zero-hardware route, the one a non-technical tenant is most likely to reach
-for -- had none at all: `pwa/report.js` exported a bare table of timestamps and
+edition -- the zero-hardware route, no Raspberry Pi and no command line, the path with the
+lowest barrier to reaching for it -- had none at all: `pwa/report.js` exported a bare table
+of timestamps and
 `within_quiet_hours,yes` with nothing attached saying what that does and does not mean.
 
 Two gates, and the second is the one that matters:
