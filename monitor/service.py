@@ -225,6 +225,7 @@ def _load_monitor_config(argv: list[str] | None) -> Config:
         prog="olive-monitor",
         description="On-device noise monitor: logs sound-level events, never audio.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", type=Path, default=None, help="path to JSON config")
     parser.add_argument(
         "--ipc-socket",

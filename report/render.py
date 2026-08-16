@@ -15,6 +15,7 @@ from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from monitor import __version__
 from monitor.config import Config
 from monitor.detector import Event
 
@@ -795,6 +796,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="olive-report",
         description="Generate an accessible HTML noise report from the event log.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", type=Path, default=None, help="path to JSON config")
     parser.add_argument("--db", type=str, default=None, help="path to SQLite event log")
     parser.add_argument("--out", type=Path, default=Path("report.html"), help="output HTML path")

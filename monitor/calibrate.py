@@ -20,6 +20,7 @@ from pathlib import Path
 
 from store import EventStore
 
+from monitor import __version__
 from monitor.config import Config
 from monitor.level import SILENCE_FLOOR_DBFS, dbfs
 
@@ -70,6 +71,7 @@ def main_calibrate(
         prog="olive-calibrate",
         description="Measure the mean level and store an offset toward approximate SPL.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument(
         "--reference-db", type=float, required=True, help="SPL (dB) shown on a reference meter now"
@@ -117,6 +119,7 @@ def main_tune(argv: list[str] | None = None) -> int:  # pragma: no cover - live 
         prog="olive-tune",
         description="Show the live sound level to help pick a threshold. Ctrl-C to finish.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", type=Path, default=None)
     args = parser.parse_args(argv)
     config = Config.load(args.config)

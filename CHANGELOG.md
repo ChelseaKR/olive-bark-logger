@@ -21,6 +21,10 @@ release" defect this file's absence let stand.
   the tag object.
 
 ### Added
+- `--version` on all four CLI entrypoints (`olive-monitor`, `olive-report`,
+  `olive-calibrate`, `olive-tune`), backed by the existing single-source-of-truth
+  `monitor.__version__` (REL-02). Prints and exits before touching any config, device,
+  or database, so it works even with no `--config` and no hardware attached.
 - `--log-format json` (and a matching `log_format` config field) emits the
   monitor's operator lines as newline-delimited JSON for a log shipper, using
   only the standard library (`monitor/log.py`). `text` stays the default and is
