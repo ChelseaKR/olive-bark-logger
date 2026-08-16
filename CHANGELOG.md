@@ -15,6 +15,20 @@ release" defect this file's absence let stand.
 
 ## [Unreleased]
 
+### Fixed
+- The quiet-hours violation report (`--violations-html`, `--violations-csv`, and the
+  `--violations-pdf` rendered from the same HTML) now states **how much of the window
+  the device actually monitored**, in the Summary block above the counts: monitored vs
+  wall-clock hours, every recorded monitoring gap with its bounds and length, and the
+  `monitored` flag per event row that until now only the CSV carried. Hours that were
+  not monitored are reported as not monitored, not quiet. The figure is declared an
+  upper bound (an interruption the monitor never recorded cannot appear in it), and a
+  record that cannot support the figure at all says coverage could not be determined
+  rather than omitting it. The document the README points at for a neighbor/landlord/HOA
+  submission previously printed counts with nothing about the time they were counted
+  over, so an outage during quiet hours read as a quiet night. Gated in
+  `tests/test_report_content.py`, which now covers the violations renderer too.
+
 - Release authorization now runs from reviewed `main` through the immutable
   portfolio authorizer, builds the exact verified commit, and hands only
   distributions, SBOM, and notes to a checkout-free publisher that rechecks
