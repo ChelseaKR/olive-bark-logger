@@ -15,6 +15,20 @@ release" defect this file's absence let stand.
 
 ## [Unreleased]
 
+### Changed
+- The README standards-conformance table now declares all fifteen standards.
+  Performance, Incident Response, Data Governance, and AI Development
+  Measurement were absent from it, so none of the four was recorded as met, as
+  exempt, or as a gap. Performance, Incident Response, and AI Development
+  Measurement are declared as applying with open gaps and no committed
+  artifact; Data Governance points at the existing
+  `docs/audits/data-card.md`.
+- Rows that pointed at `docs/GAP-LEDGER.md` said "gap tracked in GAP-NN". The
+  phrase reads as a reference to an issue tracker, and this repository
+  deliberately keeps gaps in a committed ledger instead (the reason is in the
+  paragraph above the table). Those rows now say "open gap recorded in
+  GAP-NN", which is what the link actually resolves to. No gap changed state.
+
 ### Fixed
 - The quiet-hours violation report (`--violations-html`, `--violations-csv`, and the
   `--violations-pdf` rendered from the same HTML) now states **how much of the window
