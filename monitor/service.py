@@ -21,6 +21,7 @@ from pathlib import Path
 from store import EventStore
 
 from monitor import __version__
+from monitor.ambient import MinuteAggregator, MinuteLevel
 from monitor.capture import resilient_source
 from monitor.clock import ClockGuard
 from monitor.config import Config
@@ -50,6 +51,11 @@ def run_pipeline(
     so a later recalibration never changes the meaning of a stored row. `threshold_dbfs`
     is therefore defined against raw dBFS as well. The calibration offset is an append-
     only history in the store and is applied at *render* time (see report/render.py).
+
+    When `config.ambient_ledger` is on (opt-in, off by default — EXP-01), the same raw
+    levels also feed a :class:`~monitor.ambient.MinuteAggregator`, which persists a
+    bounded four-scalar summary of each wall-clock minute. This is a second, independent
+    consumer of the level the detector already computed; no extra audio exposure.
     """
     detector = Detector(
         threshold_dbfs=config.threshold_dbfs,
@@ -60,6 +66,7 @@ def run_pipeline(
     # classified over its own time window. The buffer is pruned past each event's end,
     # so it never holds more than one event's worth of frame features (numbers, no audio).
     feats: list[tuple[float, float]] = []
+    ambient = _AmbientSink(config, store, session_id)
 
     def finish(ev: Event) -> Event:
         if config.tagging:
@@ -76,6 +83,7 @@ def run_pipeline(
         level = dbfs(frame)
         if config.tagging:
             feats.append((t, zero_crossing_rate(frame)))
+        ambient.push(t, level)
         # `frame` is not referenced again; it is dropped on the next iteration.
         event = detector.push(t, level)
         if event is not None:
@@ -84,6 +92,7 @@ def run_pipeline(
     final = detector.flush()
     if final is not None:
         yield finish(final)
+    ambient.flush()
 
 
 def checkpointed(
@@ -110,6 +119,33 @@ def checkpointed(
         if clock() - last >= interval_s:
             checkpoint()
             last = clock()
+
+
+class _AmbientSink:
+    """Streams levels into the opt-in ambient-baseline ledger (EXP-01), if enabled.
+
+    Wraps the enabled/disabled branching in one place so it costs run_pipeline's main
+    loop a single unconditional method call either way, keeping that function's own
+    complexity flat regardless of how many optional consumers a level reading feeds.
+    Disabled (the default) is a true no-op: no aggregator is even constructed.
+    """
+
+    def __init__(self, config: Config, store: EventStore | None, session_id: int | None) -> None:
+        self._aggregator = MinuteAggregator() if config.ambient_ledger else None
+        self._store = store
+        self._session_id = session_id
+
+    def push(self, t: float, level: float) -> None:
+        if self._aggregator is not None:
+            self._persist(self._aggregator.push(t, level))
+
+    def flush(self) -> None:
+        if self._aggregator is not None:
+            self._persist(self._aggregator.flush())
+
+    def _persist(self, minute: MinuteLevel | None) -> None:
+        if minute is not None and self._store is not None:
+            self._store.add_minute_level(minute, session_id=self._session_id)
 
 
 def _attach_tag(event: Event, feats: list[tuple[float, float]]) -> Event:
