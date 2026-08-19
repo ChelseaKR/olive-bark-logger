@@ -14,6 +14,7 @@ EXPECTED_TABLES = {
     "schema_migrations",
     "gaps",
     "clock_anomalies",
+    "minute_levels",
 }
 
 EVENT_COLUMNS = {
@@ -38,6 +39,26 @@ SIGNAL_DERIVED_FIELDS = {
     "longest_run_s",
 }
 MAX_SIGNAL_SCALARS_PER_EVENT = 5
+
+# Ambient baseline ledger (EXP-01, opt-in, off by default). One row per wall-clock
+# minute while enabled; see docs/audits/derived-data-budget.md for the analysis.
+MINUTE_LEVEL_COLUMNS = {
+    "id",
+    "session_id",
+    "minute_start",
+    "min_dbfs",
+    "median_dbfs",
+    "max_dbfs",
+    "l90_dbfs",
+    "frame_count",
+}
+SIGNAL_DERIVED_MINUTE_FIELDS = {
+    "min_dbfs",
+    "median_dbfs",
+    "max_dbfs",
+    "l90_dbfs",
+}
+MAX_SIGNAL_SCALARS_PER_MINUTE = 4
 
 
 def _schema(db_path) -> dict[str, set[str]]:
@@ -68,6 +89,17 @@ def test_persisted_tables_and_event_shape_match_budget(tmp_path):
     assert schema["events"] == EVENT_COLUMNS, "event schema changed; review the privacy budget"
     assert schema["events"] >= SIGNAL_DERIVED_FIELDS
     assert len(SIGNAL_DERIVED_FIELDS) <= MAX_SIGNAL_SCALARS_PER_EVENT
+
+
+def test_minute_levels_shape_matches_budget(tmp_path):
+    """The opt-in ambient ledger (EXP-01) stays inside its own, separately declared
+    per-minute ceiling — see docs/audits/derived-data-budget.md."""
+    schema = _schema(tmp_path / "olive.db")
+    assert schema["minute_levels"] == MINUTE_LEVEL_COLUMNS, (
+        "minute_levels schema changed; review the privacy budget"
+    )
+    assert schema["minute_levels"] >= SIGNAL_DERIVED_MINUTE_FIELDS
+    assert len(SIGNAL_DERIVED_MINUTE_FIELDS) <= MAX_SIGNAL_SCALARS_PER_MINUTE
 
 
 def test_schema_has_no_spectral_or_reconstruction_fields(tmp_path):

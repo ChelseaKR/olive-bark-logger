@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from monitor.ambient import MinuteLevel
 from monitor.config import QuietHours
 from monitor.detector import Event
-from report.aggregate import summarize
+from report.aggregate import summarize, summarize_ambient
 
 
 def _ev(hour: int, day: int = 1, duration: float = 2.0, peak: float = -10.0) -> Event:
@@ -184,3 +185,87 @@ def test_dst_aware_bucketing():
     s = summarize(events, quiet_hours=QuietHours(22, 8), tz=la)
     assert s.by_hour[23] == 2  # both at local 23:30 despite the offset change
     assert s.quiet_hours_event_count == 2
+
+
+# --- EXP-01: ambient baseline ledger day rollup -----------------------------------
+
+
+def _minute(dt: datetime, *, min_dbfs, median_dbfs, max_dbfs, l90_dbfs) -> MinuteLevel:
+    return MinuteLevel(
+        minute_start=dt.timestamp(),
+        min_dbfs=min_dbfs,
+        median_dbfs=median_dbfs,
+        max_dbfs=max_dbfs,
+        l90_dbfs=l90_dbfs,
+        frame_count=600,
+    )
+
+
+def test_summarize_ambient_empty():
+    assert summarize_ambient([]) == []
+
+
+def test_summarize_ambient_rolls_up_one_day():
+    day = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    minutes = [
+        _minute(day, min_dbfs=-40.0, median_dbfs=-35.0, max_dbfs=-20.0, l90_dbfs=-38.0),
+        _minute(
+            day + timedelta(minutes=1),
+            min_dbfs=-45.0,
+            median_dbfs=-30.0,
+            max_dbfs=-25.0,
+            l90_dbfs=-42.0,
+        ),
+        _minute(
+            day + timedelta(minutes=2),
+            min_dbfs=-50.0,
+            median_dbfs=-33.0,
+            max_dbfs=-22.0,
+            l90_dbfs=-44.0,
+        ),
+    ]
+    days = summarize_ambient(minutes)
+    assert len(days) == 1
+    d = days[0]
+    assert d.day == "2026-01-01"
+    assert d.min_dbfs == -50.0  # exact: min of the per-minute mins
+    assert d.max_dbfs == -20.0  # exact: max of the per-minute maxes
+    assert d.median_dbfs == -33.0  # approximation: median of the per-minute medians
+    assert d.l90_dbfs == -43.6  # approximation: P10 of the per-minute L90 values
+    assert d.minutes_covered == 3
+
+
+def test_summarize_ambient_splits_and_sorts_by_day():
+    minutes = [
+        _minute(
+            datetime(2026, 1, 2, 12, tzinfo=timezone.utc),
+            min_dbfs=-40.0,
+            median_dbfs=-35.0,
+            max_dbfs=-30.0,
+            l90_dbfs=-38.0,
+        ),
+        _minute(
+            datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+            min_dbfs=-50.0,
+            median_dbfs=-45.0,
+            max_dbfs=-40.0,
+            l90_dbfs=-48.0,
+        ),
+    ]
+    days = summarize_ambient(minutes)
+    assert [d.day for d in days] == ["2026-01-01", "2026-01-02"]
+    assert [d.minutes_covered for d in days] == [1, 1]
+
+
+def test_summarize_ambient_buckets_by_the_given_time_zone():
+    # 23:30 UTC on Jan 1 is already Jan 2 local at a fixed +2h offset -- same day-
+    # bucketing rule summarize() uses for events (test_fixed_offset_shifts_buckets).
+    m = _minute(
+        datetime(2026, 1, 1, 23, 30, tzinfo=timezone.utc),
+        min_dbfs=-40.0,
+        median_dbfs=-35.0,
+        max_dbfs=-30.0,
+        l90_dbfs=-38.0,
+    )
+    days = summarize_ambient([m], tz=timezone(timedelta(hours=2)))
+    assert [d.day for d in days] == ["2026-01-02"]

@@ -7,16 +7,18 @@ transitions, and the same event log + zone always produces the same report.
 
 from __future__ import annotations
 
+import statistics
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
 from typing import TYPE_CHECKING
 
+from monitor.ambient import percentile
 from monitor.config import QuietSchedule
 from monitor.detector import Event
 
 if TYPE_CHECKING:
-    from store import ClockAnomaly
+    from store import ClockAnomaly, MinuteLevel
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,60 @@ class Summary:
     # (attributed by each event's start time). Feeds the ordinance/CC&R duration rollup;
     # it reports accumulated duration, never a violation verdict.
     quiet_hours_loud_seconds_by_day: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class AmbientDay:
+    """One day's ambient baseline (EXP-01), rolled up from per-minute summaries.
+
+    `min_dbfs`/`max_dbfs` are exact (the extrema of the day's per-minute extrema).
+    `median_dbfs`/`l90_dbfs` are *approximations*: computed across the day's per-minute
+    median/L90 values rather than re-derived from raw samples, which no longer exist
+    past the minute they summarized. The renderer discloses this explicitly.
+    """
+
+    day: str  # ISO date, in the report's configured time zone
+    min_dbfs: float
+    median_dbfs: float
+    max_dbfs: float
+    l90_dbfs: float
+    minutes_covered: int
+
+
+# The percentile rank used to roll per-minute L90 values up to a day figure -- the same
+# "exceeded 90% of the time" rule described in monitor/ambient.py, applied one level up.
+_DAY_L90_PERCENTILE_RANK = 10.0
+
+
+def summarize_ambient(
+    minute_levels: list[MinuteLevel], *, tz: tzinfo = timezone.utc
+) -> list[AmbientDay]:
+    """Roll up per-minute ambient summaries (EXP-01) into one row per calendar day.
+
+    Empty input yields an empty list, exactly like `summarize`'s `by_day` for events --
+    the ambient section is omitted entirely by the renderer when there is nothing to
+    show (the feature is opt-in and off by default).
+    """
+    by_day: dict[str, list[MinuteLevel]] = {}
+    for m in minute_levels:
+        day = datetime.fromtimestamp(m.minute_start, tz=tz).date().isoformat()
+        by_day.setdefault(day, []).append(m)
+
+    days: list[AmbientDay] = []
+    for day, minutes in sorted(by_day.items()):
+        medians = sorted(m.median_dbfs for m in minutes)
+        l90s = sorted(m.l90_dbfs for m in minutes)
+        days.append(
+            AmbientDay(
+                day=day,
+                min_dbfs=min(m.min_dbfs for m in minutes),
+                median_dbfs=statistics.median(medians),
+                max_dbfs=max(m.max_dbfs for m in minutes),
+                l90_dbfs=percentile(l90s, _DAY_L90_PERCENTILE_RANK),
+                minutes_covered=len(minutes),
+            )
+        )
+    return days
 
 
 def describe_clock_anomalies(
