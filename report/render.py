@@ -780,13 +780,13 @@ def _session_end(session: Session) -> float:
     A session with neither an end nor usable framing metadata (a legacy row from before
     those columns existed) vouches for nothing past its own start. Its events still
     count: `on_air_spans` unions them in separately.
+
+    The rule itself lives on the store's `Session.last_vouched_at`, because retention
+    applies the same one when deciding whether a session row is old enough to delete:
+    a session is never credited as listening for longer than it is kept, or kept for
+    longer than it is credited.
     """
-    if session.ended_at is not None:
-        return session.ended_at
-    frames = session.frames_seen + session.frames_dropped
-    if frames > 0 and session.sample_rate and session.frame_size:
-        return session.started_at + frames * session.frame_size / session.sample_rate
-    return session.started_at
+    return session.last_vouched_at
 
 
 def on_air_spans(events: list[Event], sessions: list[Session], window: Span) -> list[Span] | None:

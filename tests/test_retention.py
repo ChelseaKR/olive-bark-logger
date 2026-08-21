@@ -70,10 +70,7 @@ def _session(store: EventStore, started_at: float, *, frames: int = 0) -> int:
 def test_every_table_is_either_pruned_or_explicitly_exempt(tmp_path):
     with EventStore(tmp_path / "olive.db") as store:
         live = {
-            r[0]
-            for r in store._conn.execute(  # noqa: SLF001 - the schema is the subject
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            r[0] for r in store._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
     covered = set(PRUNED_TABLES) | set(RETENTION_EXEMPT_TABLES)
     unaccounted = live - covered
@@ -147,9 +144,7 @@ def test_monitor_startup_prunes_the_ambient_ledger(tmp_path, monkeypatch, capsys
     minute rows stayed."""
     db = tmp_path / "olive.db"
     cfg = tmp_path / "cfg.json"
-    cfg.write_text(
-        json.dumps({"db_path": str(db), "retention_days": 1, "ambient_ledger": True})
-    )
+    cfg.write_text(json.dumps({"db_path": str(db), "retention_days": 1, "ambient_ledger": True}))
     now = 1_000_000.0
     ancient = 0.5
     # Distinctive seeded timestamps: the synthetic capture's clock starts at 0 and will
@@ -263,18 +258,18 @@ def test_prune_is_atomic(tmp_path, monkeypatch):
         def __init__(self, real: sqlite3.Connection) -> None:
             self._real = real
 
-        def execute(self, sql: str, *args):  # noqa: ANN202
+        def execute(self, sql: str, *args):
             if sql.startswith("DELETE FROM gaps"):
                 raise sqlite3.OperationalError("simulated failure mid-prune")
             return self._real.execute(sql, *args)
 
-        def __getattr__(self, name: str):  # noqa: ANN204
+        def __getattr__(self, name: str):
             return getattr(self._real, name)
 
     with EventStore(tmp_path / "olive.db") as store:
         store.add_event(_ev(HORIZON - DAY))
         store.add_minute_level(_minute(HORIZON - DAY))
-        real = store._conn  # noqa: SLF001
+        real = store._conn
         monkeypatch.setattr(store, "_conn", FailingConn(real))
         try:
             store.prune(before=HORIZON)
