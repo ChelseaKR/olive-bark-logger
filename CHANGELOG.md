@@ -129,6 +129,12 @@ release" defect this file's absence let stand.
   installed and found something. `make security` now fails loudly instead.
 
 ### Security
+- Dev toolchain: `pip` 26.1.2 -> 26.2.1 in `uv.lock` for PYSEC-2026-3721 (the
+  Python >=3.10 resolution CI audits). The 3.9 resolution stays on 26.0.1 because
+  26.2 dropped 3.9, so that ID and PYSEC-2026-3447 (`setuptools`, a venv seed package
+  that is not a locked dependency) join the dated local-only waiver list in the
+  `Makefile`, under the same "fix needs 3.10+" justification as the existing entries.
+  Nothing here is shipped in the runtime, which has zero dependencies.
 - GitHub Actions pinned to 40-character commit SHAs with Renovate digest-freshness
   automation (72h cooldown).
 - `persist-credentials: false` on all checkout steps.
