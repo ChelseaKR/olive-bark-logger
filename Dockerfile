@@ -9,6 +9,21 @@
 # the registry API for `python:3.12-slim`.
 FROM python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf AS base
 
+# Apply Debian security updates on top of the pinned digest.
+#
+# The digest pin gives a reproducible base, but it also freezes the package set
+# at whatever the upstream image was built with. CVE-2026-53615 (integer
+# overflow in util-linux libblkid) is fixed in Debian's 2.41.5-0+deb13u1, and
+# that package is available from the security suite today, but the upstream
+# python:*-slim image has not been rebuilt since. Without this step the image
+# ships the vulnerable 2.41-5 no matter how recently the digest was bumped, and
+# the container CVE scan fails on a finding a rebase cannot clear.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY monitor ./monitor

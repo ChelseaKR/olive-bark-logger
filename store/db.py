@@ -7,8 +7,11 @@ session row is metadata about *where and how* a run measured (for data lineage a
 bias audit) plus frame-coverage counters. Calibration is an append-only history of
 (effective_from, offset, note, reference_instrument) rows — the offset in force at any
 instant is the latest row whose effective_from is at or before it, and offsets are
-applied at *render* time so persisted event levels stay raw. That is the entire data
-model.
+applied at *render* time so persisted event levels stay raw. An opt-in ambient
+baseline ledger (`minute_levels`, EXP-01) adds one bounded four-scalar summary
+(min/median/max/L90 dBFS) per wall-clock minute, off by default
+(`config.ambient_ledger`) — see `docs/audits/derived-data-budget.md`. That is the
+entire data model.
 
 Durability: WAL journaling with synchronous=NORMAL survives process and OS crashes
 without corruption. Schema changes are applied as ordered migrations keyed on
@@ -27,9 +30,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from monitor.ambient import MinuteLevel
 from monitor.detector import Event
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Ordered migrations. Each entry upgrades the database from version i to i+1. A fresh
 # database (user_version 0) runs them all; an existing one runs only the new ones.
@@ -138,6 +142,24 @@ _MIGRATIONS: list[str] = [
     ALTER TABLE events ADD COLUMN loud6_s REAL;        -- total seconds spent at/above thr+6 dB; shape, not audio
     ALTER TABLE events ADD COLUMN longest_run_s REAL;  -- longest unbroken above-threshold run; shape, not audio
     """,
+    # 7 -> 8: ambient baseline ledger (EXP-01), opt-in via config.ambient_ledger. Each
+    # row is a bounded four-scalar summary (min/median/max/L90 dBFS) of one wall-clock
+    # minute, computed streaming from the same per-frame levels the detector already
+    # sees. Never audio, never per-frame data — see docs/audits/derived-data-budget.md
+    # for the privacy-budget analysis this table must stay inside.
+    """
+    CREATE TABLE minute_levels (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id   INTEGER,
+        minute_start REAL NOT NULL,   -- unix seconds, floored to the minute
+        min_dbfs     REAL NOT NULL,
+        median_dbfs  REAL NOT NULL,
+        max_dbfs     REAL NOT NULL,
+        l90_dbfs     REAL NOT NULL,   -- level exceeded 90% of the time this minute (P10)
+        frame_count  INTEGER NOT NULL
+    );
+    CREATE INDEX idx_minute_levels_start ON minute_levels(minute_start);
+    """,
 ]
 
 
@@ -224,7 +246,8 @@ class Gap:
 
 
 class EventStore:
-    """Event log, calibration record, session lineage, monitoring gaps, clock anomalies."""
+    """Event log, calibration record, session lineage, monitoring gaps, clock anomalies,
+    and the opt-in ambient baseline ledger (minute_levels)."""
 
     def __init__(self, path: str | Path = "olive.db") -> None:
         self.path = str(path)
@@ -329,6 +352,57 @@ class EventStore:
         cur = self._conn.execute("DELETE FROM events WHERE start < ?", (before,))
         self._conn.commit()
         return cur.rowcount
+
+    # -- ambient baseline ledger (opt-in) -------------------------------------
+    def add_minute_level(self, minute: MinuteLevel, *, session_id: int | None = None) -> int:
+        """Persist one bounded per-minute ambient summary. Metadata only — never audio."""
+        cur = self._conn.execute(
+            "INSERT INTO minute_levels (session_id, minute_start, min_dbfs, median_dbfs, "
+            "max_dbfs, l90_dbfs, frame_count) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                session_id,
+                minute.minute_start,
+                minute.min_dbfs,
+                minute.median_dbfs,
+                minute.max_dbfs,
+                minute.l90_dbfs,
+                minute.frame_count,
+            ),
+        )
+        self._conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def minute_levels(
+        self, *, since: float | None = None, until: float | None = None
+    ) -> list[MinuteLevel]:
+        """Ambient minute summaries, optionally bounded by [since, until) on minute_start."""
+        sql = (
+            "SELECT minute_start, min_dbfs, median_dbfs, max_dbfs, l90_dbfs, frame_count "
+            "FROM minute_levels"
+        )
+        clauses: list[str] = []
+        params: list[float] = []
+        if since is not None:
+            clauses.append("minute_start >= ?")
+            params.append(since)
+        if until is not None:
+            clauses.append("minute_start < ?")
+            params.append(until)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY minute_start ASC"
+        rows: Iterable[sqlite3.Row] = self._conn.execute(sql, params)
+        return [
+            MinuteLevel(
+                minute_start=r["minute_start"],
+                min_dbfs=r["min_dbfs"],
+                median_dbfs=r["median_dbfs"],
+                max_dbfs=r["max_dbfs"],
+                l90_dbfs=r["l90_dbfs"],
+                frame_count=r["frame_count"],
+            )
+            for r in rows
+        ]
 
     # -- monitoring gaps -----------------------------------------------------
     def add_gap(
