@@ -79,10 +79,23 @@ security:
 
 # Structural a11y checks run in the pytest suite; this adds the pa11y/axe pass when
 # Node is available, against a freshly rendered report.
+#
+# Written as if/then/else, not `command -v npx && npx pa11y-ci ... || echo ...`: in
+# `A && B || C` the fallback runs whenever B *fails*, so a genuine accessibility finding
+# exited 0 and printed "npx/pa11y not available" — a green gate plus a false reason for
+# it, on a machine where pa11y was installed and had just reported errors. Same
+# silent-gate defect the `security` target's comment describes (CICD-27), in its nastier
+# shape, because this one fires when the tool is present. tests/test_gate_selftest.py
+# now holds every recipe in this file to the if/then/else form. Only a genuinely absent
+# npx is soft: pytest's structural gate is the documented enforced floor there.
 a11y:
 	@$(PY) -m pytest tests/test_a11y.py -q
 	@$(MAKE) report >/dev/null
-	@command -v npx >/dev/null 2>&1 && npx --yes pa11y-ci --json report.html || echo "npx/pa11y not available — structural a11y gate (pytest) is the enforced floor"
+	@if command -v npx >/dev/null 2>&1; then \
+		npx --yes pa11y-ci --json report.html; \
+	else \
+		echo "npx/pa11y not available — structural a11y gate (pytest) is the enforced floor"; \
+	fi
 
 snapshot:
 	$(PY) scripts/gen_snapshot.py

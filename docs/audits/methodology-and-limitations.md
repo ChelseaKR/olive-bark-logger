@@ -76,10 +76,19 @@ baked into the export:
   reported as **not monitored, not quiet**. When the record cannot support the figure at
   all (no session, no recorded gap, no measurable event span), the export says coverage
   could not be determined rather than omitting it.
-- **Coverage is an upper bound.** It is measured from what the monitor recorded, so an
-  interruption the device never got to write down (a power cut, a crash before the gap
-  was saved, time before monitoring started or after it stopped) cannot appear. Every
-  export says so in those words.
+- **Hours with no monitor running are subtracted too.** A gap row is written by the
+  *running* monitor when its audio source fails, so the most ordinary outage of all — the
+  monitor not running, after a stop, a reboot, a crash, or a power cut — leaves no gap
+  row. The capture-session ledger records it anyway, as the hole between one session's
+  end and the next one's start, and coverage is measured against that ledger. Those
+  stretches are listed by date under "Time the monitor was not running" and counted as
+  not monitored. A log carrying no capture sessions cannot support the claim in either
+  direction; it keeps the older whole-span-minus-recorded-gaps figure and says in writing
+  that this is the most generous reading the record allows.
+- **Coverage is an upper bound.** It is measured from what the record contains, so an
+  interruption *inside* a run that the device never got to write down cannot appear, and
+  neither can time before the first run or after the last. Every export says so in those
+  words.
 
 ## Limitations (what this cannot prove)
 
