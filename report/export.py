@@ -4,6 +4,11 @@ Pure stdlib `csv`. Times are written both as unix seconds and as an ISO-8601 str
 the report's time zone, so the file is usable without re-deriving local time. Each row
 also records the calibration offset included in its levels (0.0 = raw dBFS), so the
 export is self-describing about its calibration state: raw = value - offset.
+
+Like every other export path, the "what this can and cannot prove" cover block is written
+as a leading ``#`` comment preamble so the caveat travels with the file. This one is
+handed to property management as readily as the quiet-hours export is, and it shipped
+without the block until the export gate started enumerating paths rather than naming them.
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from typing import TYPE_CHECKING
 
 from monitor.detector import Event
 
-from report.render import CALIBRATION_NONE, CALIBRATION_UNSTATED
+from report.render import CALIBRATION_NONE, CALIBRATION_UNSTATED, cover_text_lines
 
 if TYPE_CHECKING:
     from store import Gap
@@ -91,6 +96,9 @@ def events_to_csv(
 
     The `monitored` column is "yes" unless the event overlaps a recorded monitoring gap
     (the device was not listening), so an event logged at the edge of an outage is flagged.
+
+    The R1 cover block leads the file as ``#`` comments; the machine-readable rows below
+    it are unchanged, and every csv reader in common use skips comment lines.
     """
     offs = list(offsets_db) if offsets_db is not None else [0.0] * len(events)
     if len(offs) != len(events):
@@ -98,6 +106,8 @@ def events_to_csv(
     bases = resolve_basis(basis, offsets_db, len(events))
     gap_list = gaps or []
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
+        for line in cover_text_lines():
+            fh.write(f"# {line}\n" if line else "#\n")
         writer = csv.writer(fh)
         writer.writerow(_HEADER)
         for ev, off, how in zip(events, offs, bases):

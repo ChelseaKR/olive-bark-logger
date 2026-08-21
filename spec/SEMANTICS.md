@@ -9,6 +9,15 @@ The Pi monitor (`monitor/`, Python) and the browser PWA (`pwa/`, JavaScript) are
 
 Both assert the produced events match `expected_events` within `1e-9`.
 
+`spec/report/cover.json` extends the same arrangement to **report content**:
+
+- `tests/test_export_caveats.py` replays it against every Python export path.
+- `pwa/report.test.mjs` replays it against every browser export path.
+
+The detector had vectors and did not drift. The report content had none, and it did:
+the browser edition exported a quiet-hours CSV with no cover block and no no-verdict
+line for months. One list, two consumers, is the fix.
+
 ## The rule
 
 **Changing detection semantics requires changing a vector — on purpose.**
@@ -23,6 +32,21 @@ detector (`monitor/detector.py`) and then confirmed to match the JS port. So:
   (or adding new ones) in the same commit, so both language suites move together.
 - New behaviour (a new knob, a new boundary rule) should arrive with a new
   vector that pins it.
+
+## What the cover vector pins
+
+`spec/report/cover.json` fixes the strings a person handed one of these files must see:
+the "what this can and cannot prove" heading and its can/cannot bullets, the privacy and
+not-legal-advice line, the no-verdict line for anything reporting a quiet-hours count,
+and the uncalibrated headline. The same rule applies as to the detector vectors:
+**changing the wording means changing the vector, on purpose** (regenerate with
+`scripts/gen_cover_spec.py` and review the diff). Both suites read the committed JSON, so
+softening a caveat in one implementation fails in both.
+
+The enumeration half is in `tests/test_export_caveats.py`: export paths are discovered
+from the source rather than listed, so a **new** export path fails the gate until it is
+rendered and asserted on. That is the half that was missing — the browser CSV drifted
+because the gate only checked the paths someone had remembered to name.
 
 ## What the detector vectors pin
 

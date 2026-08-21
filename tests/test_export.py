@@ -1,4 +1,9 @@
-"""CSV export of the event log, directly and via the report CLI."""
+"""CSV export of the event log, directly and via the report CLI.
+
+Every export path leads with the R1 "what this can and cannot prove" cover block as a
+``#`` comment preamble (FIX-40), so these tests read the data rows below it -- the same
+way tests/test_violations.py always has for the quiet-hours export.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,11 @@ from monitor.detector import Event
 from report.export import events_to_csv
 from report.render import main as report_main
 from store import EventStore
+
+
+def _data_rows(path):
+    """CSV rows below the cover preamble (comment lines are not data)."""
+    return list(csv.reader(ln for ln in path.read_text().splitlines() if not ln.startswith("#")))
 
 
 def _events():
@@ -22,7 +32,7 @@ def test_events_to_csv_writes_header_and_rows(tmp_path):
     out = tmp_path / "events.csv"
     n = events_to_csv(_events(), out)
     assert n == 2
-    rows = list(csv.reader(out.read_text().splitlines()))
+    rows = _data_rows(out)
     assert rows[0] == [
         "start_unix",
         "start_iso",
@@ -55,7 +65,7 @@ def test_events_to_csv_writes_anatomy_and_blanks_legacy_values(tmp_path):
         Event(4.0, 5.0, 1.0, -9.0, -13.0),
     ]
     events_to_csv(events, out)
-    rows = list(csv.DictReader(out.read_text().splitlines()))
+    rows = list(csv.DictReader(ln for ln in out.read_text().splitlines() if not ln.startswith("#")))
     assert rows[0]["rise_time_s"] == "0.4"
     assert rows[0]["loud6_s"] == "1.6"
     assert rows[0]["longest_run_s"] == "1.9"
@@ -68,7 +78,7 @@ def test_events_to_csv_records_per_row_offsets(tmp_path):
     out = tmp_path / "events.csv"
     n = events_to_csv(_events(), out, offsets_db=[6.5, 0.0])
     assert n == 2
-    rows = list(csv.reader(out.read_text().splitlines()))
+    rows = _data_rows(out)
     assert rows[1][6] == "+6.5"  # calibrated row is self-describing
     assert rows[2][6] == "+0.0"  # raw row too
 
@@ -86,7 +96,7 @@ def test_events_to_csv_marks_events_in_a_gap_unmonitored(tmp_path):
         id=1, session_id=None, start=evs[0].start - 1, end=evs[0].end + 1, reason="device-error"
     )
     events_to_csv(evs, out, gaps=[gap])
-    rows = list(csv.reader(out.read_text().splitlines()))
+    rows = _data_rows(out)
     mon_idx = rows[0].index("monitored")
     assert rows[1][mon_idx] == "no"  # overlaps the gap
     assert rows[2][mon_idx] == "yes"  # outside the gap
@@ -113,5 +123,6 @@ def test_report_cli_also_exports_csv(tmp_path, capsys):
     )
     assert rc == 0
     assert csv_out.exists()
-    assert len(csv_out.read_text().splitlines()) == 3
+    assert len(_data_rows(csv_out)) == 3  # header + 2, below the cover preamble
+    assert csv_out.read_text().startswith("# What this can and cannot prove")
     assert "rows" in capsys.readouterr().out
