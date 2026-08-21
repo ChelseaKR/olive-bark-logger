@@ -30,6 +30,77 @@ release" defect this file's absence let stand.
   GAP-NN", which is what the link actually resolves to. No gap changed state.
 
 ### Fixed
+- **The caveats now travel with every export path, in both implementations.** The
+  "what this can and cannot prove" cover block leads the browser edition's report HTML
+  and both of its CSV downloads (`pwa/report.js`), and the Python event CSV
+  (`--csv`), none of which carried it. The browser quiet-hours report also gains the
+  no-verdict line ("being within quiet hours is not the same as a violation, and only
+  the relevant authority can decide whether a rule was broken") and states that its
+  readings are uncalibrated; its quiet-hours CSV preamble names the recorded monitoring
+  gaps. In the CSVs the block is a leading `#` comment preamble, so the data rows below
+  it still parse.
+- The required strings are now one shared vector, `spec/report/cover.json`, replayed
+  against both implementations (`tests/test_export_caveats.py`, `pwa/report.test.mjs`) —
+  the same arrangement `spec/detector/*.json` uses for the two detectors, which is why
+  the detectors never drifted and the report content did. The gate also *discovers*
+  export paths from source and fails when the discovered set is not the checked set, so
+  a new export path cannot ship without its caveats.
+- **The docs now describe the branch ruleset that is actually live.** A ruleset
+  (`protect-main`, id 18752850) has been active on `main` since 2026-07-09;
+  `.github/rulesets/README.md`, the README's CI/CD row, and `GAP-CICD-1` all said it had
+  never been applied, and that every merge-blocking gate in `ci.yml` was therefore
+  "advisory only". They now state what is enforced (deletion, non-fast-forward, and
+  eleven required checks — five of which are the always-green macOS twin, so the real
+  strength is six) and enumerate the four ways the live ruleset is weaker than the
+  committed `main.json`: `strict_required_status_checks_policy` false,
+  `required_signatures` absent, the `pull_request` rule absent, and one bypass actor
+  where the file says `[]`. The earlier changelog line describing a "committed (not yet
+  applied) branch ruleset" was accurate when written and is superseded by this one.
+- **The documented verification step can now see the live configuration.**
+  `gh api .../rulesets --jq '.[] | select(.name=="main")'` selected on a name the live
+  ruleset does not have, so it printed nothing and exited 0 — permanently reporting
+  "not applied" whether or not a ruleset existed. Replaced by `make ruleset-check`
+  (`scripts/check_ruleset.py`), which selects the ruleset covering `refs/heads/main` by
+  target rather than name, prints every difference, and exits 1 on a difference or 2
+  with `CANNOT VERIFY` when `gh` is missing, unauthenticated, or erroring. No path
+  exits 0 without having read the live configuration. Not part of `make verify`, which
+  may not assume network access or a `gh` token.
+- **Two documents described gaps the code had already closed.** `README.md` called
+  opt-in `--log-format json` "not implemented yet" and "planned" in two places; it
+  shipped 2026-07-14 (`9a8dd4b`, #31) and the README was edited twice afterwards
+  without catching it. `GAP-A11Y-1`'s headline clause said `pwa/index.html` was never
+  scanned by pa11y/axe; CI has run `npx pa11y --runner axe ./pwa/index.html` on every
+  push and PR since 2026-07-11 (`8858c45`, #17), in the required `verify` job. Both
+  corrected, and the rest of GAP-A11Y-1 — no Lighthouse, stale walkthrough, no manual
+  PWA pass, no ACR/VPAT, no NVDA/iOS VoiceOver — deliberately left open, because an
+  automated scan is not a human walkthrough.
+- `docs/a11y/STATEMENT.md`, the canonical accessibility declaration, carried the same
+  stale "never scanned" claim in two places and is corrected with it.
+- **The ledger is now readable by a test.** `tests/test_gap_ledger.py` pairs each
+  closed-gap claim with the code fact that closed it (does `monitor/log.py` implement
+  the JSON emitter; does `ci.yml` scan `pwa/index.html`) and fails when any document
+  still describes it as open. Each check fires only while the capability is genuinely
+  present, so removing a feature relaxes the check rather than breaking it.
+- **Monitoring coverage no longer counts time when no monitor was running.** The
+  coverage figure was the reporting span minus the recorded gap ledger, and a gap row is
+  only ever written by a *running* monitor catching its own audio-source failure
+  (`resilient_source`, reason `device-error`). The most ordinary outage there is — the
+  monitor simply not running, after a stop, a reboot, a crash, or a power cut — writes
+  no gap row at all, so every hour of it was counted as monitored. A log of two runs
+  with eight hours off air between them reported "the device monitored 9.5 of 9.5
+  wall-clock hours (100%)", in green, in the document the README points at for a
+  neighbor/landlord/HOA submission. Coverage is now derived from the capture-session
+  ledger, which does record those hours as the hole between one session's end and the
+  next one's start: the same log now reports 2.0 of 10.0 hours (20%), lists the off-air
+  stretch with its bounds and length under a new "Time the monitor was not running"
+  heading in both the HTML and the CSV preamble, and hatches those hours as *not
+  monitored* in the calendar heatmap (a third state that was previously reachable only
+  from a `device-error` gap). A log with no capture sessions at all cannot support the
+  claim in either direction, so it keeps the old whole-span-minus-gaps figure and says
+  in writing that it is the most generous reading the record allows. Also fixed in the
+  same arithmetic: two *overlapping* recorded gaps were subtracted twice, understating
+  coverage. Gated in `tests/test_report_content.py`.
+
 - The quiet-hours violation report (`--violations-html`, `--violations-csv`, and the
   `--violations-pdf` rendered from the same HTML) now states **how much of the window
   the device actually monitored**, in the Summary block above the counts: monitored vs
@@ -59,6 +130,9 @@ release" defect this file's absence let stand.
   byte-for-byte the previous output. Implements GAP-OBS-1 / control OBS-22.
 
 ### Changed
+- `--csv` (`report/export.py`) and the browser CSV downloads now begin with the `#`
+  cover preamble. Data rows are unchanged; readers that do not skip `#` comment lines
+  need a one-line filter.
 - Development, CI, and tag verification now install from a committed `uv.lock` with
   `uv sync --locked`; `.python-version` preserves the accepted Python 3.9 device target,
   and the PDF-only dependencies carry explicit Python 3.10+ markers so the universal

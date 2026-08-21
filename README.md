@@ -28,6 +28,13 @@ Enforced by merge-blocking tests, not just promised:
   dBFS is relative, not absolute SPL unless calibrated, and the device cannot prove a
   sound's source. Data is presented to inform, never fabricated or cherry-picked to
   manufacture a case.
+- **The caveats travel with every export.** The "what this can and cannot prove" cover
+  block leads every artifact either implementation produces — HTML report, quiet-hours
+  report, and both CSVs (as a `#` preamble, so the data rows still parse) — and anything
+  reporting a quiet-hours count carries the line that a count is a measurement, not a
+  determination. The strings live in [`spec/report/cover.json`](./spec/report/cover.json)
+  and are replayed against Python *and* the browser edition; the gate discovers export
+  paths from source, so a new one cannot ship without them.
 
 Agent-facing build instructions live in [`CLAUDE.md`](./CLAUDE.md).
 
@@ -70,10 +77,14 @@ on any Python 3.9+ with no installs; only live microphone capture needs the `liv
 > wall-clock hours appear in the Summary block above the counts, each recorded monitoring
 > gap is listed with its length, and every event row carries a `monitored` flag. Hours the
 > device was not listening are reported as **not monitored, not quiet** — a count is only
-> readable against the time it was counted over. The figure is an upper bound: an
-> interruption the monitor never got to record cannot appear in it, and the export says so.
-> Where coverage cannot be determined from the record at all, the export says that instead
-> of leaving it out.
+> readable against the time it was counted over. That includes hours with **no monitor
+> running at all**: those leave no gap row behind (writing one takes a running monitor),
+> so coverage is measured against the capture-session ledger, and any stretch between one
+> run ending and the next beginning is listed by date and subtracted. The figure is still
+> an upper bound: an interruption *inside* a run that the monitor never got to record
+> cannot appear in it, and the export says so. Where coverage cannot be determined from
+> the record at all — including a log with no capture sessions, which cannot show off-air
+> time in either direction — the export says that instead of leaving it out.
 
 ## Local status page
 When `health_path` is configured, the monitor writes a static **`status.html`** next to
@@ -129,10 +140,13 @@ and the heartbeat health dict on each beat. Levels and metadata only — never a
 - **Definition of done:** the monitor runs unattended, logs noise events (levels + timestamps, zero audio) to local SQLite, and produces an honest, accessible report with charts and a stated methodology — all **applicable** `/STANDARDS` gates green (see Standards Conformance below) and the no-audio test passing. Full checklist: [`DEFINITION_OF_DONE.md`](./DEFINITION_OF_DONE.md).
 
 ## Observability
-Tier C — OTel tracing out-of-scope (no network surface). Opt-in `--log-format json` is
-not implemented yet (tracked: [`GAP-OBS-1`](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation));
-today's surface is operator-facing `print()` lines plus a heartbeat JSON file
-(`monitor/service.py`) with no secret/PII fields by design.
+Tier C — OTel tracing out-of-scope (no network surface). Opt-in `--log-format json`
+**ships** (`monitor/log.py`, `--log-format json` or `"log_format": "json"` in the config):
+every operator line is emitted as one JSON object per line for a log shipper, using only
+the standard library. `text` stays the default and is byte-for-byte the previous output.
+See [`GAP-OBS-1`, addressed 2026-07-14](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation).
+Alongside it: a heartbeat JSON file (`monitor/service.py`) with no secret/PII fields by
+design.
 
 ## Standards Conformance
 Inherits [`/STANDARDS`](../STANDARDS/) (this table is the individual declaration DOC-11
@@ -148,10 +162,10 @@ write-effect, so gaps live here instead — see that file's header for why).
 | Quality & Metrics | Applies — open gap recorded in [GAP-QM-1](./docs/GAP-LEDGER.md#gap-qm-1--quality--metrics-dora-ledger--release-gate-checklist-execution) (DORA ledger; release-gate checklist exists in `DEFINITION_OF_DONE.md` but has never been run, since no release has happened) |
 | Code Quality | Applies — open gap recorded in [GAP-CQ-1](./docs/GAP-LEDGER.md#gap-cq-1--code-quality-python-floor-pre-commit-hook-wiring-src-layout-hatchling) (Python-floor divergence recorded in [ADR-0002](./docs/adr/0002-python-39-floor.md); pre-commit enforcement, hatchling, and `src/` layout still open) |
 | Security & Supply-Chain | Applies — hardened posture (ASVS **L2**); open gap recorded in [GAP-SEC-1](./docs/GAP-LEDGER.md#gap-sec-1--security--supply-chain-harden-runner-block-mode-codeql-lockfileosv-scanner-trufflehog-sbomsigning-scorecard) |
-| CI/CD | Applies — open gap recorded in [GAP-CICD-1](./docs/GAP-LEDGER.md#gap-cicd-1--cicd-apply-the-branch-ruleset-add-zizmor--codeql-actions) (ruleset committed at `.github/rulesets/main.json`, not yet applied — that's a live GitHub action for the maintainer, see the file's header) |
+| CI/CD | Applies — open gap recorded in [GAP-CICD-1](./docs/GAP-LEDGER.md#gap-cicd-1--cicd-reconcile-the-live-branch-ruleset-with-the-committed-one-add-zizmor--codeql-actions) (a branch ruleset **is** active on `main` and enforces deletion, non-fast-forward, and eleven required checks — five of which are an always-green macOS twin, so the real strength is six; it diverges from the committed `.github/rulesets/main.json` in four named ways, verified by `make ruleset-check`) |
 | Release & Versioning | Applies — release-producing deployed app; open gap recorded in [GAP-REL-1](./docs/GAP-LEDGER.md#gap-rel-1--release--versioning-the-releasesupply-chain-pipeline-is-still-absent) (tag-triggered `release.yml` now exists, REL-14 — no tag cut yet, and PyPI/GHCR/cosign are still open; `CITATION.cff` intentionally carries no `date-released` until a tag exists) |
-| Accessibility | Applies — open gap recorded in [GAP-A11Y-1](./docs/GAP-LEDGER.md#gap-a11y-1--accessibility-scan-the-pwa-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat) (PWA surface unscanned; walkthrough stale since `8a9f1eb`) and [GAP-A11Y-2](./docs/GAP-LEDGER.md#gap-a11y-2--accessibility-tagged-pdfa-export-exp-06-has-no-human-at-walkthrough-or-verapdf-ci-gate) (the optional tagged PDF/A-3a export's structure is tested; its PDF/UA/"fully accessible" conformance is **not** verified — no human AT walkthrough has been done) |
-| Observability | Applies — Tier C: OTel out-of-scope (no network surface); `--log-format json` opt-in planned, open gap recorded in [GAP-OBS-1](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation) |
+| Accessibility | Applies — open gap recorded in [GAP-A11Y-1](./docs/GAP-LEDGER.md#gap-a11y-1--accessibility-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat-at-pass) (`pwa/index.html` **is** scanned by axe on every push and PR since 2026-07-11; still open: no Lighthouse, walkthrough stale since `8a9f1eb`, no ACR/VPAT, no NVDA or iOS VoiceOver pass) and [GAP-A11Y-2](./docs/GAP-LEDGER.md#gap-a11y-2--accessibility-tagged-pdfa-export-exp-06-has-no-human-at-walkthrough-or-verapdf-ci-gate) (the optional tagged PDF/A-3a export's structure is tested; its PDF/UA/"fully accessible" conformance is **not** verified — no human AT walkthrough has been done) |
+| Observability | Applies — Tier C: OTel out-of-scope (no network surface); opt-in `--log-format json` **shipped** 2026-07-14 ([GAP-OBS-1: Addressed](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation)) |
 | Internationalization | N/A — single-user tool, operator-only English output ([`docs/I18N.md`](./docs/I18N.md)) |
 | AI Evaluation | N/A — no model/prompt/retrieval surface; nothing in this codebase calls an LLM SDK |
 | Documentation | Applies — open gap recorded in [GAP-DOC-1](./docs/GAP-LEDGER.md#gap-doc-1--documentation-vendor-standards-as-a-pinned-submodule-finish-the-adr-migration) (`/STANDARDS` vendoring blocked on a portfolio-level tag prerequisite; ADR migration in progress) |

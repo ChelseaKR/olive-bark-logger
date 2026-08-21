@@ -6,10 +6,10 @@ RUFF ?= .venv/bin/ruff
 MYPY ?= .venv/bin/mypy
 UV ?= uv
 
-.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n verify clean
+.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check verify clean
 
 help:
-	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test verify clean"
+	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check verify clean"
 
 venv:
 	@command -v $(UV) >/dev/null 2>&1 || { echo "uv not installed — see CONTRIBUTING.md#prerequisites"; exit 1; }
@@ -79,10 +79,23 @@ security:
 
 # Structural a11y checks run in the pytest suite; this adds the pa11y/axe pass when
 # Node is available, against a freshly rendered report.
+#
+# Written as if/then/else, not `command -v npx && npx pa11y-ci ... || echo ...`: in
+# `A && B || C` the fallback runs whenever B *fails*, so a genuine accessibility finding
+# exited 0 and printed "npx/pa11y not available" — a green gate plus a false reason for
+# it, on a machine where pa11y was installed and had just reported errors. Same
+# silent-gate defect the `security` target's comment describes (CICD-27), in its nastier
+# shape, because this one fires when the tool is present. tests/test_gate_selftest.py
+# now holds every recipe in this file to the if/then/else form. Only a genuinely absent
+# npx is soft: pytest's structural gate is the documented enforced floor there.
 a11y:
 	@$(PY) -m pytest tests/test_a11y.py -q
 	@$(MAKE) report >/dev/null
-	@command -v npx >/dev/null 2>&1 && npx --yes pa11y-ci --json report.html || echo "npx/pa11y not available — structural a11y gate (pytest) is the enforced floor"
+	@if command -v npx >/dev/null 2>&1; then \
+		npx --yes pa11y-ci --json report.html; \
+	else \
+		echo "npx/pa11y not available — structural a11y gate (pytest) is the enforced floor"; \
+	fi
 
 snapshot:
 	$(PY) scripts/gen_snapshot.py
@@ -125,8 +138,20 @@ i18n:
 	@grep -Eq '^Reason: .+' docs/I18N.md || { echo "docs/I18N.md missing a non-empty 'Reason:' line"; exit 1; }
 	@echo "i18n: N/A declaration present."
 
+# Diff the LIVE branch ruleset on main against .github/rulesets/main.json. Exits 1 on any
+# difference and 2 ("CANNOT VERIFY") when gh is missing, unauthenticated, or the API
+# errors — never 0 without having read the live configuration. Deliberately NOT part of
+# `verify`: it needs network access and a `gh` token that can read repository
+# administration, neither of which a local gate may assume. The check it replaces
+# selected the ruleset by a name the live one does not have, so it printed nothing and
+# exited 0 forever; see .github/rulesets/README.md.
+ruleset-check:
+	$(PY) scripts/check_ruleset.py
+
 verify: lint type cov security a11y pwa-test i18n
 	@echo "All local gates passed."
+	@echo "Note: 'make ruleset-check' is separate (needs network + gh auth) and is the"
+	@echo "only thing that can tell you whether the live branch ruleset matches the repo."
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .coverage htmlcov report.html demo.db

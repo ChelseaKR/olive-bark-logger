@@ -29,6 +29,7 @@ from report.aggregate import (
 from report.charts import bar_chart, heatmap
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from datetime import tzinfo
 
     from store import CalibrationEpoch, ClockAnomaly, Gap, MinuteLevel, Session
@@ -87,6 +88,19 @@ COVER_PRIVACY = (
     "leak, subpoena, or misuse. This is general information, not legal advice; verify your "
     "local rule before relying on these numbers."
 )
+
+# R3 — the no-verdict line. Any artifact that reports a quiet-hours count carries it:
+# a count is a measurement, and a measurement is not a finding. Named as a constant so
+# the browser port and the export gate are held to the same sentence.
+NO_VERDICT_NOTE = (
+    "This is a measurement, not a determination. Being within quiet hours is not the "
+    "same as a violation, and only the relevant authority can decide whether a rule was "
+    "broken."
+)
+
+# R2 — the headline of the uncalibrated banner. Uncalibrated readings must never get to
+# look like dB(A)/SPL, in either implementation.
+UNCALIBRATED_HEADLINE = "Uncalibrated — these readings are relative, not dB(A)."
 
 
 def cover_text_lines() -> list[str]:
@@ -583,7 +597,7 @@ def build_report(
     else:
         banner_html = (
             '<aside class="banner" role="note" aria-label="Calibration status">\n'
-            "<strong>Uncalibrated — these readings are relative, not dB(A).</strong> "
+            f"<strong>{UNCALIBRATED_HEADLINE}</strong> "
             "Levels are relative dBFS, not absolute sound level in dB(A) or dB SPL. Do not "
             "read them as the decibel numbers an ordinance or lease specifies; only their "
             "pattern relative to each other on this device is meaningful. Run "
@@ -607,10 +621,8 @@ def build_report(
             "accumulated duration in a day — figures of around <strong>30 minutes "
             "continuous</strong> or <strong>60 minutes intermittent</strong> are sometimes "
             "cited — but the threshold, the unit, and the definition vary by jurisdiction.</p>\n"
-            '<div class="note"><p>This is a measurement, not a determination. Being within '
-            "quiet hours is not the same as a violation, and only the relevant authority can "
-            "decide whether a rule was broken. Compare these durations against your own local "
-            "ordinance, lease, or HOA rule.</p></div>\n"
+            f'<div class="note"><p>{NO_VERDICT_NOTE} Compare these durations against your '
+            "own local ordinance, lease, or HOA rule.</p></div>\n"
             "<table><caption>Loud time within quiet hours, per day</caption>"
             '<thead><tr><th scope="col">Day</th>'
             '<th scope="col">Loud time within quiet hours</th></tr></thead>'
@@ -714,26 +726,139 @@ numbers are offered to inform, not to manufacture a case.</p>
 """
 
 
-def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
-    """Length of the overlap between intervals [a_start, a_end) and [b_start, b_end)."""
-    return max(0.0, min(a_end, b_end) - max(a_start, b_start))
+Span = tuple[float, float]
+
+
+def _merge_spans(spans: Iterable[Span]) -> list[Span]:
+    """Union of half-open intervals: sorted, non-overlapping, empty ones dropped.
+
+    Merging matters for correctness, not tidiness: coverage arithmetic subtracts these
+    from a window, and two overlapping intervals summed independently would subtract the
+    shared seconds twice.
+    """
+    merged: list[Span] = []
+    for lo, hi in sorted(s for s in spans if s[1] > s[0]):
+        if merged and lo <= merged[-1][1]:
+            if hi > merged[-1][1]:
+                merged[-1] = (merged[-1][0], hi)
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
+def _subtract_spans(base: list[Span], holes: list[Span]) -> list[Span]:
+    """``base`` minus ``holes``. Both must already be merged (see `_merge_spans`)."""
+    out: list[Span] = []
+    for lo, hi in base:
+        cursor = lo
+        for h_lo, h_hi in holes:
+            if h_hi <= cursor:
+                continue
+            if h_lo >= hi:
+                break
+            if h_lo > cursor:
+                out.append((cursor, h_lo))
+            cursor = h_hi
+            if cursor >= hi:
+                break
+        if cursor < hi:
+            out.append((cursor, hi))
+    return out
+
+
+def _clip_spans(spans: Iterable[Span], window: Span) -> list[Span]:
+    """Every span trimmed to ``window``, merged."""
+    win_start, win_end = window
+    return _merge_spans((max(lo, win_start), min(hi, win_end)) for lo, hi in spans)
+
+
+def _span_seconds(spans: Iterable[Span]) -> float:
+    return sum(hi - lo for lo, hi in spans)
+
+
+def _session_end(session: Session) -> float:
+    """The last moment this session can be *shown* to have been capturing.
+
+    ``ended_at`` when the run recorded one. When it did not, the run died before its
+    shutdown path could write one — a crash, a power cut, a SIGKILL — and the frame
+    counters are the only evidence left. They are checkpointed on a wall-clock cadence
+    (``checkpoint_interval_s``), so the start time plus the duration of the frames
+    actually accounted for is the last instant the record vouches for. Running such a
+    session to the end of the window instead would hand a dead monitor credit for every
+    hour it was dead, which is exactly the defect this module is being corrected for; a
+    live monitor loses at most one checkpoint interval, which errs toward claiming less.
+
+    A session with neither an end nor usable framing metadata (a legacy row from before
+    those columns existed) vouches for nothing past its own start. Its events still
+    count: `on_air_spans` unions them in separately.
+    """
+    if session.ended_at is not None:
+        return session.ended_at
+    frames = session.frames_seen + session.frames_dropped
+    if frames > 0 and session.sample_rate and session.frame_size:
+        return session.started_at + frames * session.frame_size / session.sample_rate
+    return session.started_at
+
+
+def on_air_spans(events: list[Event], sessions: list[Session], window: Span) -> list[Span] | None:
+    """Stretches of ``window`` when the device is known to have been listening.
+
+    Derived from the capture-session ledger, because the gap ledger cannot answer this:
+    a gap row is written *by the running monitor* (``resilient_source`` reporting a
+    device error), so the most ordinary outage of all — the monitor not running, after a
+    stop, a reboot, a crash, or a power cut — leaves no gap behind. It does leave two
+    session rows with a hole between them, and that hole is what this reads.
+
+    Each session runs from its start to `_session_end`. Each event's own span is unioned
+    in as well: a logged event is proof the device was listening at that moment, whatever
+    the session rows do or do not say.
+
+    Returns None — "cannot be determined", not "fully covered" — for a log with no
+    session rows at all (written before session tracking existed). Callers fall back to
+    the older whole-window-minus-recorded-gaps figure there rather than inventing an
+    outage the record cannot support.
+    """
+    if not sessions:
+        return None
+    spans: list[Span] = [(s.started_at, _session_end(s)) for s in sessions]
+    spans += [(e.start, e.end) for e in events]
+    return _clip_spans(spans, window)
+
+
+def off_air_spans(
+    events: list[Event], gaps: list[Gap], sessions: list[Session]
+) -> list[Span] | None:
+    """Stretches of the reporting window with no monitor running at all, or None.
+
+    None means the record cannot say (no sessions, or no determinable window). These are
+    reported separately from the gap ledger because they are a different fact about a
+    different kind of outage, and a reader handed "20% coverage" alongside "no monitoring
+    gaps were recorded" deserves to see where the other 80% went.
+    """
+    window = _coverage_window(events, gaps, sessions)
+    if window is None:
+        return None
+    on_air = on_air_spans(events, sessions, window)
+    if on_air is None:
+        return None
+    return _subtract_spans([window], on_air)
 
 
 def _unmonitored_buckets(
-    gaps: list[Gap], day_hour: dict[str, dict[int, int]], tz: tzinfo
+    spans: list[Span], day_hour: dict[str, dict[int, int]], tz: tzinfo
 ) -> set[tuple[str, int]]:
-    """Which (day_label, hour) heatmap cells a gap covers.
+    """Which (day_label, hour) heatmap cells the unmonitored ``spans`` cover.
 
     Only cells that appear in the heatmap (days that had events) and that hold zero
     events are marked, so a partly-monitored hour with a real event still shows its count.
-    A gap is expanded hour by hour; each touched hour whose cell is empty becomes
+    A span is expanded hour by hour; each touched hour whose cell is empty becomes
     'not monitored'.
     """
     buckets: set[tuple[str, int]] = set()
-    for gap in gaps:
-        # Walk each clock hour the gap touches. Step by 3600 s from the gap start.
-        t = gap.start
-        while t < gap.end:
+    for start, end in spans:
+        # Walk each clock hour the span touches. Step by 3600 s from its start.
+        t = start
+        while t < end:
             dt = datetime.fromtimestamp(t, tz=tz)
             day = dt.date().isoformat()
             hour = dt.hour
@@ -744,24 +869,26 @@ def _unmonitored_buckets(
 
 
 def _coverage_window(
-    events: list[Event], gaps: list[Gap], session: Session | None
+    events: list[Event], gaps: list[Gap], sessions: list[Session]
 ) -> tuple[float, float] | None:
     """The observed reporting span as (start_unix, end_unix), or None if undeterminable.
 
     The span runs from the earliest observed moment to the latest across events, gaps,
-    and the latest session. This is the single definition of "the window" that every
-    coverage figure is measured against, so the main report and the violations export
-    cannot disagree about what they are covering.
+    and every capture session — not just the most recent one, or a log whose monitor was
+    restarted would report a window starting at whichever event happened to come first.
+    This is the single definition of "the window" that every coverage figure is measured
+    against, so the main report and the violations export cannot disagree about what they
+    are covering.
     """
     starts: list[float] = [e.start for e in events]
     ends: list[float] = [e.end for e in events]
     for g in gaps:
         starts.append(g.start)
         ends.append(g.end)
-    if session is not None:
-        starts.append(session.started_at)
-        if session.ended_at is not None:
-            ends.append(session.ended_at)
+    for s in sessions:
+        starts.append(s.started_at)
+        if s.ended_at is not None:
+            ends.append(s.ended_at)
     if not starts or not ends:
         return None
     win_start, win_end = min(starts), max(ends)
@@ -771,20 +898,29 @@ def _coverage_window(
 
 
 def _coverage_hours(
-    events: list[Event], gaps: list[Gap], session: Session | None
+    events: list[Event], gaps: list[Gap], sessions: list[Session]
 ) -> tuple[float, float] | None:
     """Monitored vs wall-clock hours over the reporting window, or None if undeterminable.
 
-    The window is `_coverage_window()`. Time inside a recorded gap (including any stretch
-    outside a session) is unmonitored; everything else is treated as monitored.
+    The window is `_coverage_window()`. Monitored time is the session ledger's on-air
+    stretches (`on_air_spans`) minus any recorded gap inside them: time with no monitor
+    running counts as unmonitored even though no gap row exists for it, which is the
+    whole point — the device cannot write down an outage it was not running for.
+
+    Only a log with no session rows at all falls back to treating the window as monitored
+    apart from recorded gaps, because such a record genuinely cannot say more.
     """
-    window = _coverage_window(events, gaps, session)
+    window = _coverage_window(events, gaps, sessions)
     if window is None:
         return None
     win_start, win_end = window
     span = win_end - win_start
-    gap_seconds = sum(_overlap(g.start, g.end, win_start, win_end) for g in gaps)
-    monitored = max(0.0, span - gap_seconds)
+    holes = _clip_spans(((g.start, g.end) for g in gaps), window)
+    on_air = on_air_spans(events, sessions, window)
+    if on_air is None:
+        monitored = max(0.0, span - _span_seconds(holes))
+    else:
+        monitored = _span_seconds(_subtract_spans(on_air, holes))
     return monitored / 3600.0, span / 3600.0
 
 
@@ -825,9 +961,19 @@ def generate_report_from_db(
     ambient_days = summarize_ambient(adjusted_minutes, tz=tz)
 
     # Monitoring-gap honesty: unmonitored heatmap buckets plus monitored-vs-wall-clock
-    # coverage, rendered on both the single-offset and multi-epoch paths.
-    unmonitored = _unmonitored_buckets(gaps, summary.by_day_hour, tz) if gaps else None
-    coverage = _coverage_hours(events, gaps, session)
+    # coverage, rendered on both the single-offset and multi-epoch paths. "Unmonitored"
+    # is recorded gaps *and* time with no monitor running (off_air_spans) — the heatmap's
+    # hatched third state used to be reachable only from a device-error gap, so a night
+    # the monitor spent switched off rendered as a row of quiet zeros.
+    unmonitored_spans = [(g.start, g.end) for g in gaps] + (
+        off_air_spans(events, gaps, sessions) or []
+    )
+    unmonitored = (
+        _unmonitored_buckets(_merge_spans(unmonitored_spans), summary.by_day_hour, tz)
+        if unmonitored_spans
+        else None
+    )
+    coverage = _coverage_hours(events, gaps, sessions)
     monitored_hours, wall_clock_hours = coverage if coverage else (None, None)
 
     if len(epochs_in_window) > 1:
@@ -968,9 +1114,11 @@ def main(argv: list[str] | None = None) -> int:
             history = store.calibration_history()
             gaps = store.gaps()
             # The exports state their own monitoring coverage, computed from the same
-            # (events, gaps, session) triple the main report uses — so the handed-over
-            # document cannot claim a window the device did not observe.
-            latest_session = store.latest_session()
+            # (events, gaps, sessions) triple the main report uses — so the handed-over
+            # document cannot claim a window the device did not observe. The full session
+            # list, not just the latest: the stretches between runs are exactly the time
+            # no monitor was listening, and no gap row exists for them.
+            export_sessions = store.sessions()
         # Exports must agree numerically with the main report: the same render-time,
         # per-epoch calibration is applied to every exported artifact, and each CSV row
         # records the offset it received (raw = value - offset). The calibrated flag is
@@ -1011,7 +1159,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz_name=config.tz,
                     offsets_db=offsets,
                     gaps=gaps,
-                    session=latest_session,
+                    sessions=export_sessions,
                 )
                 print(f"Wrote {args.violations_csv} ({rows} rows).")
             if args.violations_html is not None or args.violations_pdf is not None:
@@ -1022,7 +1170,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz_name=config.tz,
                     offsets_db=offsets,
                     gaps=gaps,
-                    session=latest_session,
+                    sessions=export_sessions,
                 )
                 vhtml = build_violation_report_html(
                     report,

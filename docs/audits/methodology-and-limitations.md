@@ -67,6 +67,15 @@ baked into the export:
   starting during the window*. It is **not** proof of the source of a sound or of who
   caused it. The no-source and relative-dBFS limitations below are reproduced verbatim in
   every exported violation report.
+- **The caveats travel with every export path, in both implementations.** The
+  "what this can and cannot prove" cover block leads every artifact — the HTML report, the
+  quiet-hours HTML, and both CSVs (as a `#` comment preamble, so the data rows below stay
+  machine-readable), on the Python side and in the browser edition alike. Anything that
+  reports a quiet-hours count also carries the no-verdict line. The exact strings live in
+  `spec/report/cover.json` and are replayed against both implementations
+  (`tests/test_export_caveats.py`, `pwa/report.test.mjs`), the same way
+  `spec/detector/*.json` keeps the two detectors from drifting. That gate also
+  *enumerates* export paths from source, so a new one cannot ship without its caveats.
 - **The export states how much of the window it observed.** Monitored vs wall-clock hours
   are printed in the Summary block, above the counts, together with every recorded
   monitoring gap and its length; each event row also carries a `monitored` flag. A count
@@ -76,10 +85,19 @@ baked into the export:
   reported as **not monitored, not quiet**. When the record cannot support the figure at
   all (no session, no recorded gap, no measurable event span), the export says coverage
   could not be determined rather than omitting it.
-- **Coverage is an upper bound.** It is measured from what the monitor recorded, so an
-  interruption the device never got to write down (a power cut, a crash before the gap
-  was saved, time before monitoring started or after it stopped) cannot appear. Every
-  export says so in those words.
+- **Hours with no monitor running are subtracted too.** A gap row is written by the
+  *running* monitor when its audio source fails, so the most ordinary outage of all — the
+  monitor not running, after a stop, a reboot, a crash, or a power cut — leaves no gap
+  row. The capture-session ledger records it anyway, as the hole between one session's
+  end and the next one's start, and coverage is measured against that ledger. Those
+  stretches are listed by date under "Time the monitor was not running" and counted as
+  not monitored. A log carrying no capture sessions cannot support the claim in either
+  direction; it keeps the older whole-span-minus-recorded-gaps figure and says in writing
+  that this is the most generous reading the record allows.
+- **Coverage is an upper bound.** It is measured from what the record contains, so an
+  interruption *inside* a run that the device never got to write down cannot appear, and
+  neither can time before the first run or after the last. Every export says so in those
+  words.
 
 ## Limitations (what this cannot prove)
 

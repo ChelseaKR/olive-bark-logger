@@ -1,0 +1,22 @@
+{
+  "name": "report-cover",
+  "description": "Strings every human-readable export must carry, in both implementations. Python: report/render.py (cover_text_lines / cover_html) plus every writer in report/export.py and report/violations.py. Browser: pwa/report.js. Same rule as spec/detector/*.json - one list, replayed by tests/test_export_caveats.py and pwa/report.test.mjs, so the two ports cannot drift. See spec/SEMANTICS.md.",
+  "cover": {
+    "heading": "What this can and cannot prove",
+    "can_label": "What it can show:",
+    "cannot_label": "What it cannot prove:",
+    "can": [
+      "When sound at this device crossed a set loudness threshold, and for how long, with timestamps — an honest, time-stamped record of the pattern.",
+      "How that pattern lines up with a quiet-hours window you configure."
+    ],
+    "cannot": [
+      "What made a sound, or who caused it — no audio is recorded, so there is no source attribution.",
+      "Absolute loudness in dB SPL or dB(A): uncalibrated readings are relative dBFS, not the units an ordinance, lease, or HOA rule is written in.",
+      "That any law, lease, or rule was broken — only the relevant authority decides that, and being within quiet hours is not the same as a violation.",
+      "Anything about a place this device was not in — readings are specific to this microphone in this spot, and change if it moves."
+    ],
+    "privacy": "By design no audio is ever recorded, stored, or transmitted, so there is nothing to leak, subpoena, or misuse. This is general information, not legal advice; verify your local rule before relying on these numbers."
+  },
+  "no_verdict": "This is a measurement, not a determination. Being within quiet hours is not the same as a violation, and only the relevant authority can decide whether a rule was broken.",
+  "uncalibrated_headline": "Uncalibrated — these readings are relative, not dB(A)."
+}

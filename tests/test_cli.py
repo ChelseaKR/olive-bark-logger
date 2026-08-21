@@ -251,8 +251,10 @@ def test_report_exports_apply_render_time_calibration(tmp_path, capsys):
     # The HTML report applies +6.5 at render: raw peak -8.0 -> -1.5.
     assert "-1.5 dBFS" in out.read_text()
 
-    # The event CSV agrees numerically and records the offset it applied per row.
-    rows = list(csv_mod.reader(csv_out.read_text().splitlines()))
+    # The event CSV agrees numerically and records the offset it applied per row (its
+    # data rows also live below the R1 cover preamble now — FIX-40).
+    cdata = [ln for ln in csv_out.read_text().splitlines() if not ln.startswith("#")]
+    rows = list(csv_mod.reader(cdata))
     assert rows[1][rows[0].index("peak_dbfs")] == "-1.5"
     assert rows[1][rows[0].index("calibration_offset_db")] == "+6.5"
 
