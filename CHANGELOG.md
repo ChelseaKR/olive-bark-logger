@@ -15,6 +15,20 @@ release" defect this file's absence let stand.
 
 ## [Unreleased]
 
+### Changed
+- The README standards-conformance table now declares all fifteen standards.
+  Performance, Incident Response, Data Governance, and AI Development
+  Measurement were absent from it, so none of the four was recorded as met, as
+  exempt, or as a gap. Performance, Incident Response, and AI Development
+  Measurement are declared as applying with open gaps and no committed
+  artifact; Data Governance points at the existing
+  `docs/audits/data-card.md`.
+- Rows that pointed at `docs/GAP-LEDGER.md` said "gap tracked in GAP-NN". The
+  phrase reads as a reference to an issue tracker, and this repository
+  deliberately keeps gaps in a committed ledger instead (the reason is in the
+  paragraph above the table). Those rows now say "open gap recorded in
+  GAP-NN", which is what the link actually resolves to. No gap changed state.
+
 ### Fixed
 - **Readings the first calibration postdates are now disclosed as such.** A
   timestamp before the first calibration epoch resolves to that epoch by design (epoch
@@ -32,6 +46,21 @@ release" defect this file's absence let stand.
   this way — it genuinely covers everything and keeps its own legacy caveat. Gated in
   `tests/test_calibration_disclosure.py` on the issue's exact fixture through the real
   CLI. (#50)
+- **`retention_days` now reaches every table it should, and says what it reached.**
+  Retention deleted rows from `events` and nothing else, so the opt-in ambient minute
+  ledger (`minute_levels`, EXP-01) — the one *continuous* dataset in the store, 1,440
+  rows a day while enabled — was kept forever, along with every gap, clock anomaly,
+  and session row older than the horizon, while the operator line said "pruned N
+  event(s)". `EventStore.prune` now returns per-table counts and prunes events, ambient
+  minutes, gaps that ended before the horizon, clock anomalies, and sessions whose last
+  vouched-for moment is before it and that no retained row references.
+  `calibration_history` is exempt by design (a few operator-entered offsets needed to
+  interpret what is kept); `store.RETENTION_EXEMPT_TABLES` states each exemption's
+  reason and `tests/test_retention.py` enumerates the live schema against the two
+  lists so a new table cannot sit outside the policy unnoticed. The operator line
+  names every table's count (the JSON form carries `pruned_by_table`), and the data
+  card documents retention per table. `Session.last_vouched_at` is the single rule
+  for a session's end, shared by retention and the coverage arithmetic.
 - **The caveats now travel with every export path, in both implementations.** The
   "what this can and cannot prove" cover block leads the browser edition's report HTML
   and both of its CSV downloads (`pwa/report.js`), and the Python event CSV

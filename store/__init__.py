@@ -4,6 +4,25 @@ from __future__ import annotations
 
 from monitor.ambient import MinuteLevel
 
-from store.db import CalibrationEpoch, ClockAnomaly, EventStore, Gap, Session
+from store.db import (
+    PRUNED_TABLES,
+    RETENTION_EXEMPT_TABLES,
+    CalibrationEpoch,
+    ClockAnomaly,
+    EventStore,
+    Gap,
+    PruneResult,
+    Session,
+)
 
-__all__ = ["CalibrationEpoch", "ClockAnomaly", "EventStore", "Gap", "MinuteLevel", "Session"]
+__all__ = [
+    "PRUNED_TABLES",
+    "RETENTION_EXEMPT_TABLES",
+    "CalibrationEpoch",
+    "ClockAnomaly",
+    "EventStore",
+    "Gap",
+    "MinuteLevel",
+    "PruneResult",
+    "Session",
+]

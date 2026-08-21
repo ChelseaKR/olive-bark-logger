@@ -204,6 +204,71 @@ class Session:
         total = self.frames_seen + self.frames_dropped
         return 1.0 if total == 0 else self.frames_seen / total
 
+    @property
+    def last_vouched_at(self) -> float:
+        """The last moment this session can be *shown* to have been capturing.
+
+        ``ended_at`` when the run recorded one. When it did not, the run died before its
+        shutdown path could write one (a crash, a power cut, a SIGKILL) and the
+        checkpointed frame counters are the only evidence left: start time plus the
+        duration of the frames accounted for. A legacy row with neither an end nor
+        framing metadata vouches for nothing past its own start. This is the one rule
+        both the coverage arithmetic and retention use, so a session is never credited
+        as listening for longer than it is kept, or kept for longer than it is credited.
+        """
+        if self.ended_at is not None:
+            return self.ended_at
+        frames = self.frames_seen + self.frames_dropped
+        if frames > 0 and self.sample_rate and self.frame_size:
+            return self.started_at + frames * self.frame_size / self.sample_rate
+        return self.started_at
+
+
+@dataclass(frozen=True)
+class PruneResult:
+    """What one retention pass deleted, per table, so the operator line can say it.
+
+    Retention is a privacy control, and a privacy control that reports "pruned 412
+    event(s)" while silently keeping every other row older than the horizon is the
+    opposite of what it claims. Every table that holds time-keyed measurement or
+    lineage data is named here; the only tables retention deliberately does not reach
+    are `calibration_history` (a handful of operator-entered rows needed to interpret
+    whatever is kept, not sensor data) and the bookkeeping tables
+    (`schema_migrations`, the legacy write-free `calibration` row).
+    """
+
+    events: int
+    minute_levels: int
+    gaps: int
+    clock_anomalies: int
+    sessions: int
+
+    @property
+    def total(self) -> int:
+        return self.events + self.minute_levels + self.gaps + self.clock_anomalies + self.sessions
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "events": self.events,
+            "minute_levels": self.minute_levels,
+            "gaps": self.gaps,
+            "clock_anomalies": self.clock_anomalies,
+            "sessions": self.sessions,
+        }
+
+
+# Tables retention deliberately leaves alone, with the reason. `tests/test_retention.py`
+# enumerates the live schema against PRUNED_TABLES + RETENTION_EXEMPT_TABLES so a new
+# table cannot quietly sit outside the retention policy.
+RETENTION_EXEMPT_TABLES: dict[str, str] = {
+    "calibration_history": "operator-entered offsets needed to interpret retained rows; not sensor data",
+    "calibration": "legacy single-row table, no writers since schema v3",
+    "schema_migrations": "bookkeeping: when each migration ran (forensic era boundaries)",
+    "sqlite_sequence": "SQLite AUTOINCREMENT bookkeeping",
+}
+
+PRUNED_TABLES: tuple[str, ...] = ("events", "minute_levels", "gaps", "clock_anomalies", "sessions")
+
 
 @dataclass(frozen=True)
 class ClockAnomaly:
@@ -347,11 +412,72 @@ class EventStore:
             for r in rows
         ]
 
-    def prune(self, *, before: float) -> int:
-        """Delete events that started before `before` (unix seconds). Returns the count."""
-        cur = self._conn.execute("DELETE FROM events WHERE start < ?", (before,))
-        self._conn.commit()
-        return cur.rowcount
+    def prune(self, *, before: float) -> PruneResult:
+        """Apply the retention horizon to every table it should reach. Returns the counts.
+
+        `before` is unix seconds. What goes, per table:
+
+        - ``events`` that started before the horizon.
+        - ``minute_levels`` (the opt-in ambient ledger, EXP-01) whose minute started
+          before it. This is the one *continuous* dataset in the store — 1,440 rows a
+          day about the inside of a home — and it was kept forever while the operator
+          line said "pruned N event(s)"; it is the reason this method reaches past
+          ``events`` at all.
+        - ``gaps`` that ended before it. A gap straddling the horizon still says
+          something about retained time and stays.
+        - ``clock_anomalies`` detected before it.
+        - ``sessions`` whose last vouched-for moment (`Session.last_vouched_at`: the
+          recorded end, or for a crashed run the end its frame counters prove) is
+          before it, *and* that no retained row still references. A session row carries
+          the operator's ``placement_note`` and ``device_label``, so it is lineage for
+          the rows it explains and nothing once they are gone. The reference check is
+          belt-and-braces: by construction a session that ended before the horizon
+          cannot own an event that started after it.
+
+        `calibration_history` is deliberately not pruned: a few operator-entered rows
+        are needed to interpret whatever is retained. See `RETENTION_EXEMPT_TABLES`.
+
+        One transaction, so a crash mid-prune leaves either the old state or the new.
+        """
+        conn = self._conn
+        try:
+            events = conn.execute("DELETE FROM events WHERE start < ?", (before,)).rowcount
+            minutes = conn.execute(
+                "DELETE FROM minute_levels WHERE minute_start < ?", (before,)
+            ).rowcount
+            gaps = conn.execute("DELETE FROM gaps WHERE end < ?", (before,)).rowcount
+            anomalies = conn.execute(
+                "DELETE FROM clock_anomalies WHERE detected_at < ?", (before,)
+            ).rowcount
+            # Sessions: the vouched-for end is a Python rule (it reads the frame
+            # counters), so select candidates by start and decide in Python.
+            candidates = [
+                self._row_to_session(r)
+                for r in conn.execute("SELECT * FROM sessions WHERE started_at < ?", (before,))
+            ]
+            expired = [s.id for s in candidates if s.last_vouched_at < before]
+            sessions = 0
+            for sid in expired:
+                referenced = conn.execute(
+                    "SELECT 1 FROM events WHERE session_id = ? "
+                    "UNION ALL SELECT 1 FROM minute_levels WHERE session_id = ? "
+                    "UNION ALL SELECT 1 FROM gaps WHERE session_id = ? "
+                    "UNION ALL SELECT 1 FROM clock_anomalies WHERE session_id = ? LIMIT 1",
+                    (sid, sid, sid, sid),
+                ).fetchone()
+                if referenced is None:
+                    sessions += conn.execute("DELETE FROM sessions WHERE id = ?", (sid,)).rowcount
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return PruneResult(
+            events=events,
+            minute_levels=minutes,
+            gaps=gaps,
+            clock_anomalies=anomalies,
+            sessions=sessions,
+        )
 
     # -- ambient baseline ledger (opt-in) -------------------------------------
     def add_minute_level(self, minute: MinuteLevel, *, session_id: int | None = None) -> int:

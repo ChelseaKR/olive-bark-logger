@@ -69,8 +69,24 @@ run. The report's "Measurement conditions" section surfaces this for the reader.
 - **Where:** a single local SQLite file (default `olive.db`) on the device. No cloud.
 - **Encryption:** rely on the host's full-disk encryption; the file is not separately
   encrypted (it contains no sensitive content). Set file permissions to the owner only.
-- **Retention:** unlimited by default; set `retention_days` to auto-prune older events on
-  monitor start (tested in `tests/test_store_durability.py` and `tests/test_cli.py`).
+- **Retention:** unlimited by default; set `retention_days` to auto-prune, on monitor
+  start, every time-keyed row older than the horizon — per table:
+
+  | Table | Pruned when | Why it is in scope |
+  |---|---|---|
+  | `events` | `start` is older than the horizon | the threshold-triggered event log |
+  | `minute_levels` (EXP-01, opt-in) | `minute_start` is older | the one **continuous** dataset in the store (1,440 rows/day while enabled); until 2026-08-21 retention did not reach it and an operator who set `retention_days: 30` kept every minute forever |
+  | `gaps` | the gap **ended** before the horizon (a gap straddling it still describes retained time) | interval metadata about retained time |
+  | `clock_anomalies` | `detected_at` is older | same |
+  | `sessions` | the run's last vouched-for moment (recorded end, or the end its frame counters prove for a crashed run) is older **and** no retained row references it | carries the operator's `placement_note` / `device_label`; lineage for rows that are gone is nothing |
+
+  Deliberately **not** pruned: `calibration_history` (a handful of operator-entered
+  offsets needed to interpret whatever is retained; not sensor data), the legacy
+  write-free `calibration` row, and `schema_migrations` (bookkeeping). That exemption
+  list is `store.RETENTION_EXEMPT_TABLES`, and `tests/test_retention.py` enumerates the
+  live schema against it so a new table cannot sit outside the policy unnoticed. The
+  operator line reports what was deleted per table. Tested in `tests/test_retention.py`,
+  `tests/test_store_durability.py`, and `tests/test_cli.py`.
 - **Deletion / subject access:** there is no personal data and no third party in the data,
   so there is no subject-access obligation; to erase everything, delete the SQLite file.
 
