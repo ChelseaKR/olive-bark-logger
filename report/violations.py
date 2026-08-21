@@ -39,8 +39,10 @@ from monitor.detector import Event
 if TYPE_CHECKING:
     from store import Gap, Session
 
+from report.export import resolve_basis
 from report.render import (
     _STYLE,
+    CALIBRATION_UNSTATED,
     NO_AUDIO_RATIONALE,
     NO_SOURCE_NOTE,
     RELATIVE_DBFS_NOTE,
@@ -75,6 +77,12 @@ class ViolationRow:
     # (0.0 = raw, uncalibrated dBFS). Recorded so the export is self-describing:
     # raw = value - calibration_offset_db.
     calibration_offset_db: float = 0.0
+    # Whether that offset was in force when this row was measured ("in-force"), applied
+    # retroactively from a calibration taken later ("back-applied"), the config bootstrap
+    # ("bootstrap-config"), or absent ("none"); "unstated" when the caller did not say.
+    # See report.render.CALIBRATION_*. Without this, a row measured before the microphone
+    # was ever calibrated is indistinguishable from one the calibration vouched for.
+    calibration_basis: str = CALIBRATION_UNSTATED
 
 
 @dataclass(frozen=True)
@@ -139,6 +147,7 @@ def compute_violations(
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
+    basis: Sequence[str] | None = None,
     gaps: list[Gap] | None = None,
     sessions: Sequence[Session] | None = None,
 ) -> ViolationReport:
@@ -147,6 +156,9 @@ def compute_violations(
     `offsets_db`, when given, must parallel `events` and record the calibration offset
     already applied (at render time) to each event's levels, so every row is
     self-describing about its calibration state. Omitted means the levels are raw (0.0).
+    `basis` parallels it and says whether each offset was in force when the row was
+    measured or back-applied from a later calibration (`report.export.resolve_basis`
+    documents the defaults when it is omitted).
 
     When `gaps` is given, each row also carries a `monitored` flag (False if the event
     overlaps a monitoring gap), so a reader can tell an event logged at the edge of an
@@ -165,12 +177,13 @@ def compute_violations(
     offs = list(offsets_db) if offsets_db is not None else [0.0] * len(events)
     if len(offs) != len(events):
         raise ValueError("offsets_db must have one entry per event")
+    bases = resolve_basis(basis, offsets_db, len(events))
     gap_list = gaps or []
     rows: list[ViolationRow] = []
     within = 0
     within_secs = 0.0
     outside_secs = 0.0
-    for ev, off in zip(events, offs):
+    for ev, off, how in zip(events, offs, bases):
         dt = datetime.fromtimestamp(ev.start, tz=tz)
         end_dt = datetime.fromtimestamp(ev.start + ev.duration, tz=tz)
         is_within = quiet_hours.contains(dt)
@@ -197,6 +210,7 @@ def compute_violations(
                 monitored=monitored,
                 coarse_tag=ev.coarse_tag,
                 calibration_offset_db=off,
+                calibration_basis=how,
             )
         )
     session_list = list(sessions) if sessions is not None else []
@@ -251,6 +265,7 @@ _CSV_HEADER = [
     "peak_dbfs",
     "avg_dbfs",
     "calibration_offset_db",
+    "calibration_basis",
     "rise_time_s",
     "loud6_s",
     "longest_run_s",
@@ -458,6 +473,7 @@ def violations_to_csv(
     tz: tzinfo = timezone.utc,
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
+    basis: Sequence[str] | None = None,
     gaps: list[Gap] | None = None,
     sessions: Sequence[Session] | None = None,
 ) -> int:
@@ -477,6 +493,7 @@ def violations_to_csv(
         tz=tz,
         tz_name=tz_name,
         offsets_db=offsets_db,
+        basis=basis,
         gaps=gaps,
         sessions=sessions,
     )
@@ -496,6 +513,7 @@ def violations_to_csv(
                     f"{r.peak_dbfs:.1f}",
                     f"{r.avg_dbfs:.1f}",
                     f"{r.calibration_offset_db:+.1f}",
+                    r.calibration_basis,
                     _anatomy_cell(r.rise_time_s),
                     _anatomy_cell(r.loud6_s),
                     _anatomy_cell(r.longest_run_s),
@@ -528,6 +546,7 @@ def build_violation_report_html(
     generated_at: str,
     calibrated: bool,
     multi_epoch: bool = False,
+    back_applied_note: str | None = None,
     title: str = "Olive's Bark Logger — Quiet-Hours Report",
 ) -> str:
     """Render a standalone, accessible HTML quiet-hours violation report.
@@ -541,6 +560,9 @@ def build_violation_report_html(
     `calibrated` must reflect the calibration actually applied to the rows (the store's
     history, not a config field); `multi_epoch` discloses that more than one offset is
     in play across the window, in which case each row's own offset column governs.
+    `back_applied_note` (from `report.render.back_applied_sentence`) discloses rows that
+    predate the first calibration and carry its offset retroactively; it is rendered
+    with the calibration statement whenever given, single- or multi-epoch alike.
     """
     if report.rows:
         body_rows = "".join(
@@ -550,6 +572,7 @@ def build_violation_report_html(
             f"<td>{_fmt_seconds(r.duration_s)}</td>"
             f"<td>{r.peak_dbfs:.1f}</td><td>{r.avg_dbfs:.1f}</td>"
             f"<td>{r.calibration_offset_db:+.1f}</td>"
+            f"<td>{escape(r.calibration_basis)}</td>"
             f"<td>{_anatomy_cell(r.rise_time_s)}</td>"
             f"<td>{_anatomy_cell(r.loud6_s)}</td>"
             f"<td>{_anatomy_cell(r.longest_run_s)}</td>"
@@ -568,6 +591,7 @@ def build_violation_report_html(
             '<th scope="col">Peak (dBFS)</th>'
             '<th scope="col">Avg (dBFS)</th>'
             '<th scope="col">Calibration offset (dB)</th>'
+            '<th scope="col">Offset basis</th>'
             '<th scope="col">Rise (s)</th>'
             '<th scope="col">Loud +6 dB (s)</th>'
             '<th scope="col">Longest run (s)</th>'
@@ -591,6 +615,8 @@ def build_violation_report_html(
             if calibrated
             else "No calibration offset is applied; levels are relative dBFS, not absolute SPL."
         )
+    if back_applied_note:
+        calib_line = f"{calib_line} Calibration postdates some readings: {back_applied_note}"
 
     return f"""<!DOCTYPE html>
 <html lang="en">

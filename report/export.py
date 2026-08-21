@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 from monitor.detector import Event
 
+from report.render import CALIBRATION_NONE, CALIBRATION_UNSTATED
+
 if TYPE_CHECKING:
     from store import Gap
 
@@ -27,12 +29,30 @@ _HEADER = [
     "peak_dbfs",
     "avg_dbfs",
     "calibration_offset_db",
+    "calibration_basis",
     "monitored",
     "rise_time_s",
     "loud6_s",
     "longest_run_s",
     "coarse_tag",
 ]
+
+
+def resolve_basis(
+    basis: Sequence[str] | None, offsets_db: Sequence[float] | None, n: int
+) -> list[str]:
+    """The per-row calibration basis an export writes, never guessed.
+
+    Given, it must parallel the rows. Absent with no offsets, every row is raw
+    (`none`). Absent with offsets present, the export cannot know whether each offset
+    was in force or back-applied, and says `unstated` rather than inventing an answer.
+    """
+    if basis is not None:
+        out = list(basis)
+        if len(out) != n:
+            raise ValueError("basis must have one entry per event")
+        return out
+    return [CALIBRATION_NONE if offsets_db is None else CALIBRATION_UNSTATED] * n
 
 
 def _is_monitored(start: float, end: float, gaps: list[Gap]) -> bool:
@@ -51,6 +71,7 @@ def events_to_csv(
     *,
     tz: tzinfo = timezone.utc,
     offsets_db: Sequence[float] | None = None,
+    basis: Sequence[str] | None = None,
     gaps: list[Gap] | None = None,
 ) -> int:
     """Write events to a CSV file. Returns the number of rows written.
@@ -59,17 +80,27 @@ def events_to_csv(
     already applied (at render time) to each event's peak/avg levels. Omitted means the
     levels are raw, uncalibrated dBFS (offset 0.0).
 
+    `basis` parallels `offsets_db` and says, per row, whether that offset was in force
+    when the row was measured (`in-force`), back-applied from a calibration taken later
+    (`back-applied`), the deprecated config bootstrap (`bootstrap-config`), or absent
+    (`none`) — see `report.render.CALIBRATION_*`. A row measured nineteen days before
+    the microphone was ever calibrated carries the same `+48.0` as one measured after,
+    and without this column nothing in the file distinguishes them. Omitted with
+    offsets present, the column reads `unstated` rather than guessing; omitted with no
+    offsets, every row is `none`.
+
     The `monitored` column is "yes" unless the event overlaps a recorded monitoring gap
     (the device was not listening), so an event logged at the edge of an outage is flagged.
     """
     offs = list(offsets_db) if offsets_db is not None else [0.0] * len(events)
     if len(offs) != len(events):
         raise ValueError("offsets_db must have one entry per event")
+    bases = resolve_basis(basis, offsets_db, len(events))
     gap_list = gaps or []
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(_HEADER)
-        for ev, off in zip(events, offs):
+        for ev, off, how in zip(events, offs, bases):
             monitored = _is_monitored(ev.start, ev.end, gap_list)
             writer.writerow(
                 [
@@ -80,6 +111,7 @@ def events_to_csv(
                     f"{ev.peak_level:.1f}",
                     f"{ev.avg_level:.1f}",
                     f"{off:+.1f}",
+                    how,
                     "yes" if monitored else "no",
                     # Envelope anatomy is independent of coarse_tag: it is emitted even
                     # when the (opt-in) tag is suppressed, since it carries no hint about

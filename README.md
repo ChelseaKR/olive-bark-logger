@@ -56,7 +56,10 @@ on any Python 3.9+ with no installs; only live microphone capture needs the `liv
 > `threshold_dbfs` is defined against the same raw stored scale, so recalibrating never
 > changes detection sensitivity. Render-time calibration is applied identically to the
 > HTML report **and** to the `--csv` / `--violations-csv` / `--violations-html` exports;
-> each CSV row records the offset included in its levels (`calibration_offset_db`).
+> each CSV row records the offset included in its levels (`calibration_offset_db`) and
+> whether that offset was in force when the row was measured or back-applied from a
+> calibration taken later (`calibration_basis`); the report states how many readings
+> the first calibration postdates.
 
 ## CLIs
 | Command | What it does |
