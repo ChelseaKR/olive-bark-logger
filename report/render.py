@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -48,6 +48,18 @@ NO_SOURCE_NOTE = (
     "where it came from; it does not record or identify any voice or source."
 )
 NO_CLOCK_ANOMALY_NOTE = "No clock anomalies detected during the measurement window."
+
+#: What a peak or duration figure reads when there were no events to take it from.
+NO_EVENTS_VALUE = "no events"
+
+#: The main report's coverage statement when the record cannot support one. Said, not
+#: omitted: the violations export already says this, and the main report used to print
+#: nothing at all here, which reads as "the whole window was observed".
+COVERAGE_UNDETERMINED_NOTE = (
+    "How much of this reporting window the device actually monitored could not be "
+    "determined from this record (no capture session, no recorded gap, and no measurable "
+    "span of events). Do not read the counts above as covering the whole window."
+)
 
 # R5 — reader-facing "why there is deliberately no audio" note. The rationale already
 # lives in docs/audits/recording-law-notes.md; this surfaces it to the neighbor / PM /
@@ -533,7 +545,9 @@ def build_report(
         calendar_section = (
             "\n<h2>Calendar heatmap</h2>\n"
             "<p>Each cell is the number of sound-level events that began in that hour, by "
-            "day and hour of day. Darker cells saw more events; the count is printed in "
+            "day and hour of day. Every calendar day in the reporting window has a row, "
+            "including days with no events, so a quiet day is visible as a quiet day "
+            "rather than missing. Darker cells saw more events; the count is printed in "
             "every non-empty cell and repeated in the data table below, so the pattern "
             "does not depend on color. These are event counts only — never audio."
             f"{unmon_note}</p>\n"
@@ -553,12 +567,22 @@ def build_report(
 
     quiet_window = config.quiet_hours.label()
 
+    # With no events there is no peak to report. `summarize` returns 0.0 for the empty
+    # case, and 0.0 dBFS is digital full scale — the loudest reading the device can
+    # produce — so printing it would state that a silent log hit maximum loudness.
+    # Absence is written as absence.
+    if summary.event_count:
+        longest = _fmt_seconds(summary.longest_event_seconds)
+        loudest = f"{summary.loudest_peak_dbfs:.1f} dBFS"
+        mean_peak = f"{summary.mean_peak_dbfs:.1f} dBFS"
+    else:
+        longest = loudest = mean_peak = NO_EVENTS_VALUE
     stats = {
         "Total events": str(summary.event_count),
         "Total loud time": _fmt_seconds(summary.total_loud_seconds),
-        "Longest event": _fmt_seconds(summary.longest_event_seconds),
-        "Loudest peak": f"{summary.loudest_peak_dbfs:.1f} dBFS",
-        "Mean peak": f"{summary.mean_peak_dbfs:.1f} dBFS",
+        "Longest event": longest,
+        "Loudest peak": loudest,
+        "Mean peak": mean_peak,
         f"Events during quiet hours ({quiet_window})": str(summary.quiet_hours_event_count),
         "Loud time during quiet hours (pro-rated)": _fmt_seconds(summary.quiet_hours_loud_seconds),
         "Loud time during quiet hours (start-attributed)": _fmt_seconds(
@@ -637,13 +661,14 @@ def build_report(
 
     methodology_html = _methodology_html(config, calib_line, sessions)
 
-    coverage_html = ""
     if monitored_hours is not None and wall_clock_hours is not None:
         coverage_html = (
             f"<p>Over this reporting window the device monitored "
             f"{monitored_hours:.1f} of {wall_clock_hours:.1f} wall-clock hours; the "
             "remainder is shown as not monitored rather than quiet.</p>\n"
         )
+    else:
+        coverage_html = f'<p class="note">{escape(COVERAGE_UNDETERMINED_NOTE)}</p>\n'
 
     tags_section = ""
     if summary.by_tag:
@@ -844,6 +869,23 @@ def off_air_spans(
     return _subtract_spans([window], on_air)
 
 
+def _fill_window_days(
+    by_day_hour: dict[str, dict[int, int]], window: Span, tz: tzinfo
+) -> dict[str, dict[int, int]]:
+    """`by_day_hour` with a zero row for every calendar day (in `tz`) the window touches.
+
+    Days are keyed by ISO date like `summarize` keys them; existing rows are kept as-is
+    and the result is sorted by day so the heatmap reads in calendar order.
+    """
+    filled = dict(by_day_hour)
+    day = datetime.fromtimestamp(window[0], tz=tz).date()
+    last = datetime.fromtimestamp(window[1], tz=tz).date()
+    while day <= last:
+        filled.setdefault(day.isoformat(), {h: 0 for h in range(24)})
+        day += timedelta(days=1)
+    return dict(sorted(filled.items()))
+
+
 def _unmonitored_buckets(
     spans: list[Span], day_hour: dict[str, dict[int, int]], tz: tzinfo
 ) -> set[tuple[str, int]]:
@@ -965,6 +1007,16 @@ def generate_report_from_db(
     # is recorded gaps *and* time with no monitor running (off_air_spans) — the heatmap's
     # hatched third state used to be reachable only from a device-error gap, so a night
     # the monitor spent switched off rendered as a row of quiet zeros.
+    # Every calendar day the window covers gets a heatmap row, not only the days that
+    # had events. Without this a quiet monitored day and a day the monitor was off
+    # both simply vanished from the calendar — indistinguishable from each other and
+    # from the days that were never in the window. With the row present, a quiet day
+    # shows its zeros and an off-air day is hatched "not monitored" below.
+    window = _coverage_window(events, gaps, sessions)
+    if window is not None:
+        summary = dataclasses.replace(
+            summary, by_day_hour=_fill_window_days(summary.by_day_hour, window, tz)
+        )
     unmonitored_spans = [(g.start, g.end) for g in gaps] + (
         off_air_spans(events, gaps, sessions) or []
     )

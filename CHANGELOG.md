@@ -16,6 +16,18 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **Three more places where "no data" rendered as a confident value.** (1) A log with
+  no events printed "Loudest peak: 0.0 dBFS" — digital full scale, the loudest reading
+  the device can produce — in both the Python report and the browser edition; those
+  figures now read "no events". (2) When monitoring coverage could not be computed, the
+  main report printed nothing where the coverage sentence goes, which reads as "the
+  whole window was observed"; it now says coverage could not be determined, the way the
+  quiet-hours export already did. (3) The calendar heatmap had rows only for days that
+  had events, so a quiet monitored day and a day the monitor was switched off both
+  simply vanished from the calendar; every calendar day in the reporting window now has
+  a row, so a quiet day shows its zeros and an off-air day is hatched "not monitored".
+  Gated in `tests/test_absence_as_value.py` and `pwa/report.test.mjs`; the snapshot
+  golden gains the explicit coverage note.
 - **The caveats now travel with every export path, in both implementations.** The
   "what this can and cannot prove" cover block leads the browser edition's report HTML
   and both of its CSV downloads (`pwa/report.js`), and the Python event CSV
