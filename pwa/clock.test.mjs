@@ -46,9 +46,12 @@ test("gap records are excluded from event counts and both CSVs", () => {
   assert.equal(s.gapCount, 1);
   assert.equal(s.gapSeconds, 40);
 
-  const eventLines = eventsToCsv([real, gap]).split("\n");
+  // Data rows only: both CSVs lead with the "#" cover/caveat preamble (FIX-40).
+  const dataRows = (csvText) => csvText.split("\n").filter((l) => !l.startsWith("#"));
+
+  const eventLines = dataRows(eventsToCsv([real, gap]));
   assert.equal(eventLines.length, 2); // header + 1 real event only
 
-  const violationLines = violationsToCsv([real, gap], { tz: "UTC" }).split("\n");
+  const violationLines = dataRows(violationsToCsv([real, gap], { tz: "UTC" }));
   assert.equal(violationLines.length, 2); // header + 1 real event only
 });

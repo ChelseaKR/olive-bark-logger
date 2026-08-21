@@ -67,6 +67,15 @@ baked into the export:
   starting during the window*. It is **not** proof of the source of a sound or of who
   caused it. The no-source and relative-dBFS limitations below are reproduced verbatim in
   every exported violation report.
+- **The caveats travel with every export path, in both implementations.** The
+  "what this can and cannot prove" cover block leads every artifact — the HTML report, the
+  quiet-hours HTML, and both CSVs (as a `#` comment preamble, so the data rows below stay
+  machine-readable), on the Python side and in the browser edition alike. Anything that
+  reports a quiet-hours count also carries the no-verdict line. The exact strings live in
+  `spec/report/cover.json` and are replayed against both implementations
+  (`tests/test_export_caveats.py`, `pwa/report.test.mjs`), the same way
+  `spec/detector/*.json` keeps the two detectors from drifting. That gate also
+  *enumerates* export paths from source, so a new one cannot ship without its caveats.
 - **The export states how much of the window it observed.** Monitored vs wall-clock hours
   are printed in the Summary block, above the counts, together with every recorded
   monitoring gap and its length; each event row also carries a `monitored` flag. A count

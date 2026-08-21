@@ -89,6 +89,19 @@ COVER_PRIVACY = (
     "local rule before relying on these numbers."
 )
 
+# R3 — the no-verdict line. Any artifact that reports a quiet-hours count carries it:
+# a count is a measurement, and a measurement is not a finding. Named as a constant so
+# the browser port and the export gate are held to the same sentence.
+NO_VERDICT_NOTE = (
+    "This is a measurement, not a determination. Being within quiet hours is not the "
+    "same as a violation, and only the relevant authority can decide whether a rule was "
+    "broken."
+)
+
+# R2 — the headline of the uncalibrated banner. Uncalibrated readings must never get to
+# look like dB(A)/SPL, in either implementation.
+UNCALIBRATED_HEADLINE = "Uncalibrated — these readings are relative, not dB(A)."
+
 
 def cover_text_lines() -> list[str]:
     """The cover block as plain-text lines, for the comment preamble of CSV exports."""
@@ -584,7 +597,7 @@ def build_report(
     else:
         banner_html = (
             '<aside class="banner" role="note" aria-label="Calibration status">\n'
-            "<strong>Uncalibrated — these readings are relative, not dB(A).</strong> "
+            f"<strong>{UNCALIBRATED_HEADLINE}</strong> "
             "Levels are relative dBFS, not absolute sound level in dB(A) or dB SPL. Do not "
             "read them as the decibel numbers an ordinance or lease specifies; only their "
             "pattern relative to each other on this device is meaningful. Run "
@@ -608,10 +621,8 @@ def build_report(
             "accumulated duration in a day — figures of around <strong>30 minutes "
             "continuous</strong> or <strong>60 minutes intermittent</strong> are sometimes "
             "cited — but the threshold, the unit, and the definition vary by jurisdiction.</p>\n"
-            '<div class="note"><p>This is a measurement, not a determination. Being within '
-            "quiet hours is not the same as a violation, and only the relevant authority can "
-            "decide whether a rule was broken. Compare these durations against your own local "
-            "ordinance, lease, or HOA rule.</p></div>\n"
+            f'<div class="note"><p>{NO_VERDICT_NOTE} Compare these durations against your '
+            "own local ordinance, lease, or HOA rule.</p></div>\n"
             "<table><caption>Loud time within quiet hours, per day</caption>"
             '<thead><tr><th scope="col">Day</th>'
             '<th scope="col">Loud time within quiet hours</th></tr></thead>'
