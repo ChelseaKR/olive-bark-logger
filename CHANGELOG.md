@@ -16,6 +16,22 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **Readings the first calibration postdates are now disclosed as such.** A
+  timestamp before the first calibration epoch resolves to that epoch by design (epoch
+  0 covers all historical rows, ADR-0003), so one `olive-calibrate` run on day 20 was
+  applied to events from day 1 with no marker anywhere: the report said "Calibrated.",
+  the multi-epoch caveat never fired (one epoch), and every export row carried the same
+  offset whether or not it was in force when the row was measured. The numbers are
+  unchanged; every artifact now says it. The calibration banner and the methodology line
+  name how many events (and ambient-ledger minutes) were recorded before the first
+  calibration and when it was taken, on the single-offset and multi-epoch paths alike;
+  the violations HTML carries the same statement; and every CSV row and the violations
+  table carry a `calibration_basis` of `in-force` or `back-applied` (`bootstrap-config`
+  / `none` without a history; `unstated` if a caller supplies offsets without a basis,
+  rather than guessing). The migration's epoch 0 at `effective_from = 0` is not reported
+  this way — it genuinely covers everything and keeps its own legacy caveat. Gated in
+  `tests/test_calibration_disclosure.py` on the issue's exact fixture through the real
+  CLI. (#50)
 - **The caveats now travel with every export path, in both implementations.** The
   "what this can and cannot prove" cover block leads the browser edition's report HTML
   and both of its CSV downloads (`pwa/report.js`), and the Python event CSV
@@ -116,6 +132,9 @@ release" defect this file's absence let stand.
   byte-for-byte the previous output. Implements GAP-OBS-1 / control OBS-22.
 
 ### Changed
+- `--csv` and `--violations-csv` gain a `calibration_basis` column after
+  `calibration_offset_db`; the violations HTML table gains the matching "Offset basis"
+  column. Existing columns are unchanged and keep their order.
 - `--csv` (`report/export.py`) and the browser CSV downloads now begin with the `#`
   cover preamble. Data rows are unchanged; readers that do not skip `#` comment lines
   need a one-line filter.
