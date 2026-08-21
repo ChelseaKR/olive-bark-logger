@@ -16,6 +16,26 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **The docs now describe the branch ruleset that is actually live.** A ruleset
+  (`protect-main`, id 18752850) has been active on `main` since 2026-07-09;
+  `.github/rulesets/README.md`, the README's CI/CD row, and `GAP-CICD-1` all said it had
+  never been applied, and that every merge-blocking gate in `ci.yml` was therefore
+  "advisory only". They now state what is enforced (deletion, non-fast-forward, and
+  eleven required checks — five of which are the always-green macOS twin, so the real
+  strength is six) and enumerate the four ways the live ruleset is weaker than the
+  committed `main.json`: `strict_required_status_checks_policy` false,
+  `required_signatures` absent, the `pull_request` rule absent, and one bypass actor
+  where the file says `[]`. The earlier changelog line describing a "committed (not yet
+  applied) branch ruleset" was accurate when written and is superseded by this one.
+- **The documented verification step can now see the live configuration.**
+  `gh api .../rulesets --jq '.[] | select(.name=="main")'` selected on a name the live
+  ruleset does not have, so it printed nothing and exited 0 — permanently reporting
+  "not applied" whether or not a ruleset existed. Replaced by `make ruleset-check`
+  (`scripts/check_ruleset.py`), which selects the ruleset covering `refs/heads/main` by
+  target rather than name, prints every difference, and exits 1 on a difference or 2
+  with `CANNOT VERIFY` when `gh` is missing, unauthenticated, or erroring. No path
+  exits 0 without having read the live configuration. Not part of `make verify`, which
+  may not assume network access or a `gh` token.
 - **Two documents described gaps the code had already closed.** `README.md` called
   opt-in `--log-format json` "not implemented yet" and "planned" in two places; it
   shipped 2026-07-14 (`9a8dd4b`, #31) and the README was edited twice afterwards

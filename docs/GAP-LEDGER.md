@@ -61,16 +61,37 @@ block-mode still open), SEC-08, SEC-19, SEC-27, SEC-29, SEC-35..38.
   OpenSSF Scorecard workflow/report.
 Plan: REMEDIATION.md P1-2, P1-3, P1-4, P1-6, P2-1.
 
-## GAP-CICD-1 — CI/CD: apply the branch ruleset, add zizmor + CodeQL-actions
-**Status: Open (2026-07-05).** Controls: CICD-11, CICD-13, CICD-14, CICD-15, CICD-16,
-CICD-19, CICD-20.
-`.github/CODEOWNERS` and `.github/rulesets/main.json` are committed (this pass; see
-P0-2 in the remediation plan), but the ruleset has not been **applied** — that's a live
-GitHub UI/API action outside this session's scope (see README Standards Conformance
-table, CI/CD row, for the exact command). No zizmor workflow-linter step; no CodeQL
-`language: actions` workflow.
-Plan: REMEDIATION.md P0-2 (activation step), P1-2, P1-6 (revisit required-check list
-after these land).
+## GAP-CICD-1 — CI/CD: reconcile the live branch ruleset with the committed one, add zizmor + CodeQL-actions
+**Status: Partially open (updated 2026-08-15).** Controls: CICD-11, CICD-13, CICD-14,
+CICD-15, CICD-16, CICD-19, CICD-20.
+
+Correction to this entry as written on 2026-07-05: it said the ruleset "has not been
+**applied**". **A ruleset has been active on `main` since 2026-07-09** — `protect-main`
+(id 18752850, `enforcement: active`). This entry, `.github/rulesets/README.md`, and the
+README's CI/CD row all kept saying otherwise for over a month, while `ci.yml`'s
+`test-matrix-macos-nightly-notice` job existed precisely because the ruleset *is* live.
+The stated way to confirm it (`--jq '.[] | select(.name=="main")'`) selected on a name
+the live ruleset does not have, printed nothing, and exited 0 — so the check could only
+ever return "not applied". Replaced by `make ruleset-check`
+(`scripts/check_ruleset.py`), which selects by target rather than name, prints every
+difference, and exits 2 with `CANNOT VERIFY` rather than 0 when it cannot read the live
+configuration.
+
+**Enforced today:** deletion, non-fast-forward, and eleven required status checks — of
+which five are the always-green macOS twin job, so the real strength is six.
+
+**Still open:**
+- The live ruleset is weaker than the committed definition in four ways (verified
+  2026-08-15): `strict_required_status_checks_policy` is `false`, `required_signatures`
+  is absent, the whole `pull_request` rule is absent, and one bypass actor
+  (`ChelseaKR`, `bypass_mode: pull_request`) exists where the file says `[]`. Closing
+  this means either applying the file (commit signing must be set up first) or amending
+  the file to reality as a decision — both are live/human actions, enumerated in
+  `.github/rulesets/README.md`.
+- No zizmor workflow-linter step; no CodeQL `language: actions` workflow.
+
+Plan: REMEDIATION.md P0-2 (now a reconciliation, not an activation), P1-2, P1-6
+(revisit required-check list after these land).
 
 ## GAP-A11Y-1 — Accessibility: Lighthouse CI, regenerate the stale walkthrough, ACR/VPAT, AT pass
 **Status: Partially open (updated 2026-08-15).** Controls: A11Y-01/02/03/05/06 (PWA-surface
