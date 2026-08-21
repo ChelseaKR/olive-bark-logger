@@ -43,7 +43,15 @@ cov:
 # yet. Re-audit when P1-5's Python-floor decision resolves, or drop entries as fixes
 # ship for 3.9. Harmless no-op on hosts (e.g. CI's Python 3.12) where these IDs don't
 # occur.
+#
+# 2026-08-21 additions, same shape: PYSEC-2026-3721 (pip <26.2) and PYSEC-2026-3447
+# (setuptools <83.0.0). Both fixes require Python >=3.10 (verified with
+# `uv pip install --dry-run --python .venv/bin/python` on the 3.9 venv: unsatisfiable).
+# uv.lock carries pip 26.2.1 for >=3.10, so CI (3.12) is fixed, not waived; setuptools is
+# a venv seed package, not a locked dependency, and does not occur on CI at all.
 PIP_AUDIT_WAIVERS := \
+	--ignore-vuln PYSEC-2026-3721 \
+	--ignore-vuln PYSEC-2026-3447 \
 	--ignore-vuln GHSA-w853-jp5j-5j7f \
 	--ignore-vuln GHSA-qmgc-5h2g-mvrw \
 	--ignore-vuln GHSA-6v7p-g79w-8964 \
