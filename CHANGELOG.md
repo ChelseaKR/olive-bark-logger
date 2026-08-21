@@ -30,6 +30,21 @@ release" defect this file's absence let stand.
   GAP-NN", which is what the link actually resolves to. No gap changed state.
 
 ### Fixed
+- **`retention_days` now reaches every table it should, and says what it reached.**
+  Retention deleted rows from `events` and nothing else, so the opt-in ambient minute
+  ledger (`minute_levels`, EXP-01) — the one *continuous* dataset in the store, 1,440
+  rows a day while enabled — was kept forever, along with every gap, clock anomaly,
+  and session row older than the horizon, while the operator line said "pruned N
+  event(s)". `EventStore.prune` now returns per-table counts and prunes events, ambient
+  minutes, gaps that ended before the horizon, clock anomalies, and sessions whose last
+  vouched-for moment is before it and that no retained row references.
+  `calibration_history` is exempt by design (a few operator-entered offsets needed to
+  interpret what is kept); `store.RETENTION_EXEMPT_TABLES` states each exemption's
+  reason and `tests/test_retention.py` enumerates the live schema against the two
+  lists so a new table cannot sit outside the policy unnoticed. The operator line
+  names every table's count (the JSON form carries `pruned_by_table`), and the data
+  card documents retention per table. `Session.last_vouched_at` is the single rule
+  for a session's end, shared by retention and the coverage arithmetic.
 - **The caveats now travel with every export path, in both implementations.** The
   "what this can and cannot prove" cover block leads the browser edition's report HTML
   and both of its CSV downloads (`pwa/report.js`), and the Python event CSV
