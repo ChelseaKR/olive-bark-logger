@@ -39,6 +39,19 @@ meaning depends on when it was written breaks that promise.
   offset), and the violations report derives its calibrated/uncalibrated statement from
   the store's history — never from the deprecated config field. Windows spanning more
   than one epoch render a per-epoch disclosure.
+- **Rows before the first epoch carry its offset retroactively — and say so.** A
+  timestamp earlier than the first `effective_from` resolves to that first epoch (epoch
+  0 covers all historical rows), which keeps every level in a report on one scale and
+  keeps re-rendering stable. It also means a calibration taken on day 20 is applied to
+  readings from day 1, on the assumption that the microphone, gain, and placement did
+  not change in between — an assumption the record cannot confirm. Since 2026-08-21
+  (issue #50) every artifact discloses it: the report's calibration banner and
+  methodology line name how many events (and ambient-ledger minutes) the first
+  calibration postdates and the date it was taken; every CSV row and the violations
+  table carry a `calibration_basis` of `in-force` or `back-applied` (or
+  `bootstrap-config` / `none` without a history). The migration's epoch 0 at
+  `effective_from = 0` is not reported this way — it genuinely covers everything, and
+  has the legacy caveat above instead.
 - **Migration timestamps are recorded** in a `schema_migrations` table
   (`version`, `applied_at`), written by `EventStore._migrate` from this version on.
   The v3 timestamp is the **era boundary**: sessions/events written before it may carry

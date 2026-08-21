@@ -215,7 +215,8 @@ def test_prune_removes_old_events(tmp_path):
         for t in (100.0, 200.0, 300.0, 400.0):
             store.add_event(_ev(t))
         removed = store.prune(before=250.0)
-        assert removed == 2
+        assert removed.events == 2
+        assert removed.total == 2  # nothing else in the store to reach
         remaining = [e.start for e in store.events()]
         assert remaining == [300.0, 400.0]
 
