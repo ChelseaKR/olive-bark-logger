@@ -53,3 +53,39 @@ def test_binary_write_scanner_bites():
     assert scan_binary_write("import os\nos.open('x', os.O_WRONLY | os.O_CREAT)")
     assert not scan_binary_write("open('x', 'r')")
     assert not scan_binary_write("open('x')")
+
+
+# --- The gates themselves must be able to fail --------------------------------------
+#
+# `make verify` is the local mirror of CI, and its own `security` target carries a
+# comment about why soft-skipping a missing tool is forbidden (CICD-27): a developer
+# gets a false "all gates passed". The same defect has a second shape, and it is worse,
+# because it fires when the tool IS installed: `command -v tool && tool ... || echo
+# "tool not available"`. In `A && B || C`, C runs whenever B *fails*, so a real finding
+# exits 0 and prints "not available" -- a green gate and a false explanation for it.
+# The `pdf-a11y` target already uses the correct `if command -v ...; then ...; else
+# ...; fi` shape; this test holds every recipe to it.
+
+
+def _recipe_lines() -> list[tuple[int, str]]:
+    from conftest import ROOT
+
+    return [
+        (n, line)
+        for n, line in enumerate((ROOT / "Makefile").read_text().splitlines(), start=1)
+        if line.startswith("\t")
+    ]
+
+
+def test_no_make_recipe_swallows_a_tool_failure_into_an_echo():
+    offenders = []
+    for n, line in _recipe_lines():
+        if "&&" not in line or "||" not in line:
+            continue  # a bare `guard || { echo; exit 1; }` is a precondition, not a gate
+        fallback = line.rsplit("||", 1)[1]
+        if "exit 1" not in fallback and "false" not in fallback:
+            offenders.append(f"Makefile:{n}: {line.strip()}")
+    assert not offenders, (
+        "a recipe catches its own tool's failure in a fallback that exits 0, so the gate "
+        "reports success on a real finding:\n" + "\n".join(offenders)
+    )
