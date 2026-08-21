@@ -76,6 +76,19 @@ baked into the export:
   (`tests/test_export_caveats.py`, `pwa/report.test.mjs`), the same way
   `spec/detector/*.json` keeps the two detectors from drifting. That gate also
   *enumerates* export paths from source, so a new one cannot ship without its caveats.
+- **The export states how much of the window it observed.** Monitored vs wall-clock hours
+  are printed in the Summary block, above the counts, together with every recorded
+  monitoring gap and its length; each event row also carries a `monitored` flag. A count
+  is only readable against the time it was counted over — an outage during quiet hours
+  removes events, so a monitor that dropped out for most of the night would otherwise
+  produce a low count that reads as a quiet night. Hours that were not monitored are
+  reported as **not monitored, not quiet**. When the record cannot support the figure at
+  all (no session, no recorded gap, no measurable event span), the export says coverage
+  could not be determined rather than omitting it.
+- **Coverage is an upper bound.** It is measured from what the monitor recorded, so an
+  interruption the device never got to write down (a power cut, a crash before the gap
+  was saved, time before monitoring started or after it stopped) cannot appear. Every
+  export says so in those words.
 
 ## Limitations (what this cannot prove)
 

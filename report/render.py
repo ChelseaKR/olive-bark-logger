@@ -15,16 +15,23 @@ from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from monitor import __version__
 from monitor.config import Config
 from monitor.detector import Event
 
-from report.aggregate import Summary, describe_clock_anomalies, summarize
+from report.aggregate import (
+    AmbientDay,
+    Summary,
+    describe_clock_anomalies,
+    summarize,
+    summarize_ambient,
+)
 from report.charts import bar_chart, heatmap
 
 if TYPE_CHECKING:
     from datetime import tzinfo
 
-    from store import CalibrationEpoch, ClockAnomaly, Gap, Session
+    from store import CalibrationEpoch, ClockAnomaly, Gap, MinuteLevel, Session
 
 # Phrases the report-content gate checks for. Keeping them as constants makes the
 # contract between the renderer and the test explicit.
@@ -197,6 +204,47 @@ def _clock_anomalies_html(lines: list[str]) -> str:
     )
 
 
+AMBIENT_APPROXIMATION_NOTE = (
+    "Day figures are rolled up from per-minute summaries, not from raw samples (which no "
+    "longer exist past the minute they summarized). Minimum and maximum are exact; median "
+    "and L90 are computed across that day's per-minute median/L90 values, an approximation "
+    "of the true day-level statistic."
+)
+
+
+def _ambient_html(ambient_days: list[AmbientDay]) -> str:
+    """EXP-01: the opt-in ambient-baseline section, or "" when the ledger has no data.
+
+    Omitted entirely (not an empty section) when `ambient_days` is empty, mirroring how
+    the event-types section disappears without any tagged events -- this keeps the
+    snapshot golden untouched for every report that does not enable
+    `config.ambient_ledger`.
+    """
+    if not ambient_days:
+        return ""
+    rows = "".join(
+        f'<tr><th scope="row">{escape(d.day)}</th>'
+        f"<td>{d.min_dbfs:.1f} dBFS</td><td>{d.median_dbfs:.1f} dBFS</td>"
+        f"<td>{d.max_dbfs:.1f} dBFS</td><td>{d.l90_dbfs:.1f} dBFS</td>"
+        f"<td>{d.minutes_covered}</td></tr>"
+        for d in ambient_days
+    )
+    return (
+        "\n<h2>Ambient baseline</h2>\n"
+        "<p>An opt-in, per-minute summary of the room's baseline level (never audio), "
+        "so an event's peak can be read against what the room normally sounds like -- "
+        "and so a quiet night is distinguishable from a period the device was not "
+        "capturing anything at all. L90 is the level exceeded 90% of the time that day, "
+        "a standard background-noise figure (steadier than the bare minimum).</p>\n"
+        f'<p class="note">{escape(AMBIENT_APPROXIMATION_NOTE)}</p>\n'
+        "<table><caption>Ambient baseline by day</caption>"
+        '<thead><tr><th scope="col">Day</th><th scope="col">Min</th>'
+        '<th scope="col">Median</th><th scope="col">Max</th><th scope="col">L90</th>'
+        '<th scope="col">Minutes covered</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
 PARAM_CHANGE_NOTE = (
     "Detection settings changed during this record; each event is described under the "
     "parameters in force when it was logged."
@@ -363,6 +411,31 @@ def _per_event_offsets(
     return [config.calibration_offset] * len(events)
 
 
+def _apply_offset_minute(minute: MinuteLevel, offset: float) -> MinuteLevel:
+    """Return an ambient-ledger minute (EXP-01) with its four scalars shifted by a
+    calibration offset. A dB offset is additive, so shifting min/median/max/L90 by the
+    same amount preserves their relative shape exactly."""
+    if offset == 0.0:
+        return minute
+    return dataclasses.replace(
+        minute,
+        min_dbfs=minute.min_dbfs + offset,
+        median_dbfs=minute.median_dbfs + offset,
+        max_dbfs=minute.max_dbfs + offset,
+        l90_dbfs=minute.l90_dbfs + offset,
+    )
+
+
+def _per_minute_offsets(
+    minutes: list[MinuteLevel], history: list[CalibrationEpoch], config: Config
+) -> list[float]:
+    """The calibration offset applied to each ambient-ledger minute (EXP-01), the same
+    resolution rule `_per_event_offsets` uses for events, attributed by `minute_start`."""
+    if history:
+        return [_offset_at(history, m.minute_start) for m in minutes]
+    return [config.calibration_offset] * len(minutes)
+
+
 def _fmt_effective_from(effective_from: float, tz: tzinfo) -> str:
     """Human label for an epoch boundary; epoch 0 is the start of the record."""
     if effective_from <= 0.0:
@@ -410,6 +483,7 @@ def build_report(
     monitored_hours: float | None = None,
     wall_clock_hours: float | None = None,
     clock_anomaly_lines: list[str] | None = None,
+    ambient_days: list[AmbientDay] | None = None,
     title: str = "Olive's Bark Logger — Noise Report",
 ) -> str:
     """Render the full report as a single self-contained HTML string.
@@ -417,6 +491,9 @@ def build_report(
     When `calibration_epochs` holds more than one epoch, a per-epoch offsets table and a
     recalibration disclosure are rendered; otherwise the single-offset path is used and
     `calibration_offset`/`calibration_note` describe the one offset in force.
+    `ambient_days` (EXP-01) is opt-in and normally empty; when empty the ambient-baseline
+    section is omitted entirely rather than rendered blank, so a report generated without
+    the ledger enabled is byte-identical to what it would have rendered before EXP-01.
     """
     offset = config.calibration_offset if calibration_offset is None else calibration_offset
     note = config.calibration_note if calibration_note is None else calibration_note
@@ -425,6 +502,7 @@ def build_report(
     calibrated = offset != 0.0
     conditions_html = _conditions_html(session)
     clock_html = _clock_anomalies_html(clock_anomaly_lines or [])
+    ambient_html = _ambient_html(ambient_days or [])
 
     hour_chart = bar_chart(
         chart_id="by-hour",
@@ -612,7 +690,7 @@ transmitted to produce it.</p>
 <h2>Distributions</h2>
 {hour_chart}
 {day_chart}
-{calendar_section}
+{calendar_section}{ambient_html}
 
 {tags_section}
 <h2>Quiet hours</h2>
@@ -676,14 +754,15 @@ def _unmonitored_buckets(
     return buckets
 
 
-def _coverage_hours(
+def _coverage_window(
     events: list[Event], gaps: list[Gap], session: Session | None
 ) -> tuple[float, float] | None:
-    """Monitored vs wall-clock hours over the reporting window, or None if undeterminable.
+    """The observed reporting span as (start_unix, end_unix), or None if undeterminable.
 
-    The window spans the earliest observed moment to the latest across events, gaps, and
-    the latest session. Time inside a recorded gap (including any stretch outside a
-    session) is unmonitored; everything else is treated as monitored.
+    The span runs from the earliest observed moment to the latest across events, gaps,
+    and the latest session. This is the single definition of "the window" that every
+    coverage figure is measured against, so the main report and the violations export
+    cannot disagree about what they are covering.
     """
     starts: list[float] = [e.start for e in events]
     ends: list[float] = [e.end for e in events]
@@ -697,9 +776,24 @@ def _coverage_hours(
     if not starts or not ends:
         return None
     win_start, win_end = min(starts), max(ends)
-    span = win_end - win_start
-    if span <= 0:
+    if win_end - win_start <= 0:
         return None
+    return win_start, win_end
+
+
+def _coverage_hours(
+    events: list[Event], gaps: list[Gap], session: Session | None
+) -> tuple[float, float] | None:
+    """Monitored vs wall-clock hours over the reporting window, or None if undeterminable.
+
+    The window is `_coverage_window()`. Time inside a recorded gap (including any stretch
+    outside a session) is unmonitored; everything else is treated as monitored.
+    """
+    window = _coverage_window(events, gaps, session)
+    if window is None:
+        return None
+    win_start, win_end = window
+    span = win_end - win_start
     gap_seconds = sum(_overlap(g.start, g.end, win_start, win_end) for g in gaps)
     monitored = max(0.0, span - gap_seconds)
     return monitored / 3600.0, span / 3600.0
@@ -722,6 +816,7 @@ def generate_report_from_db(
         anomalies = store.clock_anomalies()
         gaps = store.gaps()
         sessions = store.sessions()
+        minute_levels = store.minute_levels()  # EXP-01, opt-in; usually empty
 
     # Which epochs actually cover the events in this window? Only those drive the choice
     # between the single-offset path and the multi-epoch disclosure. Levels are always
@@ -731,6 +826,14 @@ def generate_report_from_db(
     offsets = _per_event_offsets(events, history, config)
     adjusted = [_apply_offset(ev, off) for ev, off in zip(events, offsets)]
     summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=tz)
+
+    # Ambient baseline (EXP-01): same render-time calibration resolution as events, then
+    # rolled up to one row per day. Empty when the ledger was never enabled.
+    minute_offsets = _per_minute_offsets(minute_levels, history, config)
+    adjusted_minutes = [
+        _apply_offset_minute(m, off) for m, off in zip(minute_levels, minute_offsets)
+    ]
+    ambient_days = summarize_ambient(adjusted_minutes, tz=tz)
 
     # Monitoring-gap honesty: unmonitored heatmap buckets plus monitored-vs-wall-clock
     # coverage, rendered on both the single-offset and multi-epoch paths.
@@ -753,6 +856,7 @@ def generate_report_from_db(
             monitored_hours=monitored_hours,
             wall_clock_hours=wall_clock_hours,
             clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
+            ambient_days=ambient_days,
         )
 
     # Single-offset path: the whole window is under one calibration (or none -> config).
@@ -775,6 +879,7 @@ def generate_report_from_db(
         monitored_hours=monitored_hours,
         wall_clock_hours=wall_clock_hours,
         clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
+        ambient_days=ambient_days,
     )
 
 
@@ -806,6 +911,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="olive-report",
         description="Generate an accessible HTML noise report from the event log.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", type=Path, default=None, help="path to JSON config")
     parser.add_argument("--db", type=str, default=None, help="path to SQLite event log")
     parser.add_argument("--out", type=Path, default=Path("report.html"), help="output HTML path")
@@ -872,6 +978,10 @@ def main(argv: list[str] | None = None) -> int:
             raw_events = store.events()  # raw dBFS; calibration is applied below, at render
             history = store.calibration_history()
             gaps = store.gaps()
+            # The exports state their own monitoring coverage, computed from the same
+            # (events, gaps, session) triple the main report uses — so the handed-over
+            # document cannot claim a window the device did not observe.
+            latest_session = store.latest_session()
         # Exports must agree numerically with the main report: the same render-time,
         # per-epoch calibration is applied to every exported artifact, and each CSV row
         # records the offset it received (raw = value - offset). The calibrated flag is
@@ -912,6 +1022,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz_name=config.tz,
                     offsets_db=offsets,
                     gaps=gaps,
+                    session=latest_session,
                 )
                 print(f"Wrote {args.violations_csv} ({rows} rows).")
             if args.violations_html is not None or args.violations_pdf is not None:
@@ -922,6 +1033,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz_name=config.tz,
                     offsets_db=offsets,
                     gaps=gaps,
+                    session=latest_session,
                 )
                 vhtml = build_violation_report_html(
                     report,

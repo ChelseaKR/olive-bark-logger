@@ -31,11 +31,18 @@ release" defect this file's absence let stand.
   the detectors never drifted and the report content did. The gate also *discovers*
   export paths from source and fails when the discovered set is not the checked set, so
   a new export path cannot ship without its caveats.
-
-### Changed
-- `--csv` (`report/export.py`) and the browser CSV downloads now begin with the `#`
-  cover preamble. Data rows are unchanged; readers that do not skip `#` comment lines
-  need a one-line filter.
+- The quiet-hours violation report (`--violations-html`, `--violations-csv`, and the
+  `--violations-pdf` rendered from the same HTML) now states **how much of the window
+  the device actually monitored**, in the Summary block above the counts: monitored vs
+  wall-clock hours, every recorded monitoring gap with its bounds and length, and the
+  `monitored` flag per event row that until now only the CSV carried. Hours that were
+  not monitored are reported as not monitored, not quiet. The figure is declared an
+  upper bound (an interruption the monitor never recorded cannot appear in it), and a
+  record that cannot support the figure at all says coverage could not be determined
+  rather than omitting it. The document the README points at for a neighbor/landlord/HOA
+  submission previously printed counts with nothing about the time they were counted
+  over, so an outage during quiet hours read as a quiet night. Gated in
+  `tests/test_report_content.py`, which now covers the violations renderer too.
 
 - Release authorization now runs from reviewed `main` through the immutable
   portfolio authorizer, builds the exact verified commit, and hands only
@@ -43,12 +50,19 @@ release" defect this file's absence let stand.
   the tag object.
 
 ### Added
+- `--version` on all four CLI entrypoints (`olive-monitor`, `olive-report`,
+  `olive-calibrate`, `olive-tune`), backed by the existing single-source-of-truth
+  `monitor.__version__` (REL-02). Prints and exits before touching any config, device,
+  or database, so it works even with no `--config` and no hardware attached.
 - `--log-format json` (and a matching `log_format` config field) emits the
   monitor's operator lines as newline-delimited JSON for a log shipper, using
   only the standard library (`monitor/log.py`). `text` stays the default and is
   byte-for-byte the previous output. Implements GAP-OBS-1 / control OBS-22.
 
 ### Changed
+- `--csv` (`report/export.py`) and the browser CSV downloads now begin with the `#`
+  cover preamble. Data rows are unchanged; readers that do not skip `#` comment lines
+  need a one-line filter.
 - Development, CI, and tag verification now install from a committed `uv.lock` with
   `uv sync --locked`; `.python-version` preserves the accepted Python 3.9 device target,
   and the PDF-only dependencies carry explicit Python 3.10+ markers so the universal

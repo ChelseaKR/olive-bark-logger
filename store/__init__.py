@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from monitor.ambient import MinuteLevel
+
 from store.db import CalibrationEpoch, ClockAnomaly, EventStore, Gap, Session
 
-__all__ = ["CalibrationEpoch", "ClockAnomaly", "EventStore", "Gap", "Session"]
+__all__ = ["CalibrationEpoch", "ClockAnomaly", "EventStore", "Gap", "MinuteLevel", "Session"]
