@@ -66,6 +66,15 @@ on any Python 3.9+ with no installs; only live microphone capture needs the `liv
 | `olive-calibrate` | Measure mean level against a reference SPL reading and append a calibration offset (with optional `--reference-instrument` provenance). This is the **only** writer of calibration; it is an append-only history applied at report time, so recalibrating never rewrites earlier events. |
 | `olive-report` | Render the accessible HTML report (distributions + day×hour calendar heatmap + quiet-hours summary). Optional `--csv` event export, `--violations-csv` / `--violations-html` for an honest quiet-hours report suitable for a neighbor/landlord/HOA submission, and `--pdf` / `--violations-pdf` for a tagged PDF/A-3a of either (needs the `pdf` extra; see [Standards Conformance](#standards-conformance)). |
 
+> **Every quiet-hours export states how much of the window it observed.** Monitored vs
+> wall-clock hours appear in the Summary block above the counts, each recorded monitoring
+> gap is listed with its length, and every event row carries a `monitored` flag. Hours the
+> device was not listening are reported as **not monitored, not quiet** — a count is only
+> readable against the time it was counted over. The figure is an upper bound: an
+> interruption the monitor never got to record cannot appear in it, and the export says so.
+> Where coverage cannot be determined from the record at all, the export says that instead
+> of leaving it out.
+
 ## Local status page
 When `health_path` is configured, the monitor writes a static **`status.html`** next to
 the heartbeat file on every check-in. You can instead enable only the page by setting

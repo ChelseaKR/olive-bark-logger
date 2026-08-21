@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+from monitor import __version__
 from monitor.calibrate import (
     compute_offset,
     main_calibrate,
+    main_tune,
     measure_levels,
     meter_bar,
     suggest_threshold,
@@ -41,6 +44,24 @@ def test_measure_levels_respects_cap():
     levels = measure_levels(source, max_frames=5)
     assert len(levels) == 5
     assert all(lvl > -20 for lvl in levels)  # loud tone is well above silence
+
+
+def test_main_calibrate_version_flag_prints_and_exits(capsys):
+    # argparse's `action="version"` prints to stdout and exits 0 before any source
+    # (live or fake) is touched, so this needs no --config/--reference-db at all.
+    with pytest.raises(SystemExit) as exc_info:
+        main_calibrate(["--version"])
+    assert exc_info.value.code == 0
+    assert f"olive-calibrate {__version__}" in capsys.readouterr().out
+
+
+def test_main_tune_version_flag_prints_and_exits(capsys):
+    # Same guarantee for olive-tune: --version must short-circuit before the live
+    # meter loop, which needs real hardware and would otherwise hang the test.
+    with pytest.raises(SystemExit) as exc_info:
+        main_tune(["--version"])
+    assert exc_info.value.code == 0
+    assert f"olive-tune {__version__}" in capsys.readouterr().out
 
 
 def test_main_calibrate_stores_offset(tmp_path, capsys):

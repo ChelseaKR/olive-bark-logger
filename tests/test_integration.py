@@ -44,6 +44,42 @@ def test_full_pipeline_logs_events_and_renders_report(tmp_path):
     assert not any(Path(n).suffix in audio_ext for n in produced)
 
 
+def test_ambient_ledger_disabled_by_default(tmp_path):
+    """EXP-01 is opt-in: with the default config, no minute_levels rows are written."""
+    db = tmp_path / "olive.db"
+    config = Config(db_path=str(db))
+    with EventStore(db) as store:
+        list(
+            run_pipeline(synthetic_session(150.0, [], frame_size=config.frame_size), config, store)
+        )
+        assert store.minute_levels() == []
+
+
+def test_ambient_ledger_opt_in_persists_minute_summaries(tmp_path):
+    """With ambient_ledger on, run_pipeline streams a bounded per-minute summary to the
+    store from the same raw levels the detector sees -- 150 s of synthetic audio spans
+    three wall-clock minute buckets, the last one partial."""
+    db = tmp_path / "olive.db"
+    config = Config(db_path=str(db), ambient_ledger=True)
+    # A loud region inside minute 1 (60-120 s) gives that minute a visibly higher max
+    # than the otherwise-quiet minutes, so the assertions below are not vacuous.
+    loud = [LoudRegion(70.0, 75.0, 0.4)]
+    with EventStore(db) as store:
+        list(
+            run_pipeline(
+                synthetic_session(150.0, loud, frame_size=config.frame_size), config, store
+            )
+        )
+        minutes = store.minute_levels()
+
+    assert [m.minute_start for m in minutes] == [0.0, 60.0, 120.0]
+    for m in minutes:
+        assert m.min_dbfs <= m.l90_dbfs <= m.median_dbfs <= m.max_dbfs
+        assert m.frame_count > 0
+    quiet_minute, loud_minute, _partial_minute = minutes
+    assert loud_minute.max_dbfs > quiet_minute.max_dbfs
+
+
 def test_calibration_persisted_and_reflected_in_report(tmp_path):
     db = tmp_path / "olive.db"
     config = Config(db_path=str(db))

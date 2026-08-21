@@ -313,6 +313,11 @@ class Config:
     status_path: str = ""
     ipc_socket: str = ""  # AF_UNIX path for the opt-in local automation feed ("" = disabled)
     tagging: bool = False  # compute a coarse bark-like/ambient hint per event (no audio)
+    # Ambient baseline ledger (EXP-01, opt-in). When true, persist a bounded per-minute
+    # summary (min/median/max/L90 dBFS) computed streaming from the same per-frame levels
+    # the detector already sees. Off by default: this is a privacy-budget increase (see
+    # docs/audits/derived-data-budget.md) that an operator must explicitly choose.
+    ambient_ledger: bool = False
     # Clock-integrity guard: flag a wall-vs-monotonic divergence larger than this many
     # seconds as a clock jump (important on RTC-less Pis where NTP sync lurches the clock).
     clock_jump_tolerance_s: float = 2.0

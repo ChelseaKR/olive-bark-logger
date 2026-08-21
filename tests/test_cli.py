@@ -6,6 +6,7 @@ import json
 
 import monitor.capture_live as capture_live
 import pytest
+from monitor import __version__
 from monitor.capture import LoudRegion, synthetic_session
 from monitor.config import Config
 from monitor.detector import Event
@@ -13,6 +14,22 @@ from monitor.service import main as monitor_main
 from report.charts import bar_chart
 from report.render import main as report_main
 from store import EventStore
+
+
+def test_monitor_main_version_flag_prints_and_exits(capsys):
+    # --version must short-circuit before any config/DB/device access, so this needs
+    # no --config at all and cannot hang or touch the filesystem.
+    with pytest.raises(SystemExit) as exc_info:
+        monitor_main(["--version"])
+    assert exc_info.value.code == 0
+    assert f"olive-monitor {__version__}" in capsys.readouterr().out
+
+
+def test_report_main_version_flag_prints_and_exits(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        report_main(["--version"])
+    assert exc_info.value.code == 0
+    assert f"olive-report {__version__}" in capsys.readouterr().out
 
 
 def test_monitor_main_runs_with_a_fake_source(tmp_path, monkeypatch, capsys):
