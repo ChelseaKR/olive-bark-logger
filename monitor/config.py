@@ -301,7 +301,10 @@ class Config:
     # Operator log output: "text" (human lines, the default) or "json"
     # (newline-delimited JSON for a log shipper). See monitor/log.py (GAP-OBS-1).
     log_format: str = "text"
-    retention_days: int = 0  # 0 = keep everything; >0 prunes events older than N days
+    # 0 = keep everything; >0 prunes, on monitor start, every time-keyed row older than
+    # N days: events, the ambient minute ledger, gaps, clock anomalies, and the sessions
+    # that explained them (store.EventStore.prune). Calibration history is kept.
+    retention_days: int = 0
     health_path: str = ""  # where the monitor writes its heartbeat JSON ("" = disabled)
     # How often (seconds) to refresh the heartbeat and persist session frame counters on
     # a wall-clock cadence, piggybacking on frame arrival. Without this, a silent night or

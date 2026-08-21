@@ -231,12 +231,20 @@ def _bootstrap_session(store: EventStore, config: Config, started_at: float) -> 
     )
     if config.retention_days > 0:
         removed = store.prune(before=started_at - config.retention_days * 86400)
-        if removed:
+        if removed.total:
+            # Named per table on purpose: "pruned 412 event(s)" used to be the whole
+            # line while the ambient ledger, gaps, anomalies, and sessions older than
+            # the horizon were kept forever. A retention line must say what retention
+            # reached, so a reader cannot take one table's count for the store's.
             emit(
                 config.log_format,
                 "retention_pruned",
-                f"Retention: pruned {removed} event(s) older than {config.retention_days} days.",
-                pruned=removed,
+                f"Retention: pruned {removed.events} event(s), "
+                f"{removed.minute_levels} ambient minute(s), {removed.gaps} gap(s), "
+                f"{removed.clock_anomalies} clock anomaly(ies), and "
+                f"{removed.sessions} session(s) older than {config.retention_days} days.",
+                pruned=removed.total,
+                pruned_by_table=removed.as_dict(),
                 retention_days=config.retention_days,
             )
     return store.start_session(

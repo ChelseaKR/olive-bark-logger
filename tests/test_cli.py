@@ -168,7 +168,10 @@ def test_monitor_main_prunes_per_retention(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(capture_live, "live_source", fake_live_source)
     monitor_main(["--config", str(cfg)], now=1_000_000.0)
-    assert "Retention: pruned 1" in capsys.readouterr().out
+    # The line names every table retention reaches, so one table's count can never be
+    # read as the store's (issue #51: it used to say "pruned 1 event(s)" and stop).
+    out = capsys.readouterr().out
+    assert "Retention: pruned 1 event(s), 0 ambient minute(s), 0 gap(s)" in out
 
     with EventStore(db) as store:
         starts = [e.start for e in store.events()]
