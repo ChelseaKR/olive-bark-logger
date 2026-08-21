@@ -9,6 +9,7 @@ import {
   COVER_CANNOT,
   COVER_HEADING,
   COVER_PRIVACY,
+  NO_EVENTS_VALUE,
   NO_VERDICT_NOTE,
   UNCALIBRATED_HEADLINE,
   buildReportHtml,
@@ -180,4 +181,26 @@ test("the cover is a comment preamble, so the data rows still parse", () => {
     assert.ok(data[0].startsWith("start_unix,"));
     assert.equal(data.length, 2); // header + 1 event
   }
+});
+
+test("an empty log does not print full scale (0.0 dBFS) as its loudest peak", () => {
+  // summarize() returns 0 for the empty case and 0 dBFS is digital full scale -- the
+  // loudest reading possible -- so a silent log must not read as maximum loudness.
+  const summary = summarize([], { tz: "UTC" });
+  assert.equal(summary.count, 0);
+  const html = buildReportHtml(summary, { generatedAt: "x", tz: "UTC" });
+  for (const label of ["Loudest peak (dBFS)", "Mean peak (dBFS)", "Longest event (s)"]) {
+    assert.ok(
+      html.includes(`<th scope="row">${label}</th><td>${NO_EVENTS_VALUE}</td>`),
+      `${label} should read "${NO_EVENTS_VALUE}" with no events`,
+    );
+    assert.ok(!html.includes(`<th scope="row">${label}</th><td>0.0</td>`));
+  }
+  // ...and a log with events still prints its real peak.
+  const withEvents = buildReportHtml(summarize([ev(T23, 2, -8)], { tz: "UTC" }), {
+    generatedAt: "x",
+    tz: "UTC",
+  });
+  assert.ok(withEvents.includes("<td>-8.0</td>"));
+  assert.ok(!withEvents.includes(NO_EVENTS_VALUE));
 });

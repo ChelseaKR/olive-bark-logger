@@ -15,6 +15,9 @@ export const RELATIVE_DBFS_NOTE =
   "Levels are measured in dBFS, which is relative to digital full scale, not absolute " +
   "sound pressure level (SPL) in dB. Without calibration against a reference meter, " +
   "treat the numbers as relative, not absolute.";
+// What a peak or duration figure reads when there were no events to take it from.
+export const NO_EVENTS_VALUE = "no events";
+
 export const NO_SOURCE_NOTE =
   "This tool measures sound levels only. It cannot prove what made a sound or where it " +
   "came from; it does not record or identify any voice or source.";
@@ -282,9 +285,13 @@ ${coverHtml()}
 ${table("Summary", ["Metric", "Value"], [
   ["Total events", summary.count],
   ["Total loud time (s)", summary.totalLoud.toFixed(1)],
-  ["Longest event (s)", summary.longest.toFixed(1)],
-  ["Loudest peak (dBFS)", summary.loudestPeak.toFixed(1)],
-  ["Mean peak (dBFS)", summary.meanPeak.toFixed(1)],
+  // With no events there is no peak to report. summarize() returns 0 for the empty
+  // case, and 0.0 dBFS is digital full scale -- the loudest reading possible -- so
+  // printing it would state that a silent log hit maximum loudness. Same rule as the
+  // Python report: absence is written as absence.
+  ["Longest event (s)", summary.count ? summary.longest.toFixed(1) : NO_EVENTS_VALUE],
+  ["Loudest peak (dBFS)", summary.count ? summary.loudestPeak.toFixed(1) : NO_EVENTS_VALUE],
+  ["Mean peak (dBFS)", summary.count ? summary.meanPeak.toFixed(1) : NO_EVENTS_VALUE],
   [`Events during quiet hours (${window})`, summary.quietCount],
 ])}
 <h2>Events by hour of day</h2>
