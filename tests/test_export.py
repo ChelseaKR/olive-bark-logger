@@ -41,6 +41,7 @@ def test_events_to_csv_writes_header_and_rows(tmp_path):
         "peak_dbfs",
         "avg_dbfs",
         "calibration_offset_db",
+        "calibration_basis",
         "monitored",
         "rise_time_s",
         "loud6_s",

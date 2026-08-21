@@ -412,6 +412,111 @@ def _per_event_offsets(
     return [config.calibration_offset] * len(events)
 
 
+# --- Calibration basis: was the offset a row carries in force when the row was measured?
+#
+# `_epoch_index_at` resolves a timestamp before the first calibration epoch to that first
+# epoch ("epoch 0 covers all historical rows"). That is a deliberate design choice: it
+# keeps every level in a report on one scale, and re-rendering a date range yields the same
+# numbers before and after a recalibration (ADR-0003). What was missing was any disclosure
+# that it happened. "Calibrate once, after a week or two of logging" is the ordinary way
+# this tool gets used, and until this was added that was exactly the case with no caveat:
+# a single-epoch report rendered the earlier events as calibrated SPL estimates, and the
+# exports stamped every row with the same offset, on the strength of a measurement taken
+# days after those events — with no marker of any kind. The basis travels with every row
+# and the report names the count, so a reader can tell a reading the calibration vouched
+# for from one it was extended back over.
+
+#: The epoch whose offset this row carries was in force when the row was measured.
+CALIBRATION_IN_FORCE = "in-force"
+#: The row predates the first calibration; the first epoch's offset was applied to it
+#: retroactively. The calibration postdates the measurement.
+CALIBRATION_BACK_APPLIED = "back-applied"
+#: No calibration history exists; the deprecated config bootstrap offset applies uniformly.
+CALIBRATION_BOOTSTRAP = "bootstrap-config"
+#: No calibration at all: the row is raw, relative dBFS.
+CALIBRATION_NONE = "none"
+#: The caller did not say. Exports default to this rather than guessing a basis.
+CALIBRATION_UNSTATED = "unstated"
+
+
+def _basis_at(history: list[CalibrationEpoch], ts: float, config: Config) -> str:
+    if history:
+        return CALIBRATION_BACK_APPLIED if ts < history[0].effective_from else CALIBRATION_IN_FORCE
+    return CALIBRATION_BOOTSTRAP if config.calibration_offset != 0.0 else CALIBRATION_NONE
+
+
+def _per_event_basis(
+    events: list[Event], history: list[CalibrationEpoch], config: Config
+) -> list[str]:
+    """For each event (parallel to `_per_event_offsets`), whether its offset was in force
+    when it was measured, back-applied from a later calibration, or not a calibration at
+    all. Attribution is by event start, the same rule the offsets use."""
+    return [_basis_at(history, ev.start, config) for ev in events]
+
+
+@dataclasses.dataclass(frozen=True)
+class BackApplied:
+    """How much of a report's data predates its first calibration.
+
+    `count` events (of `total`) and `minutes` ambient-ledger minutes started before the
+    first epoch took effect and carry its offset retroactively. `None` from
+    `back_applied_summary` means nothing was back-applied — including the legacy case
+    where the first epoch is the v2->v3 migration's epoch 0 at `effective_from = 0`,
+    which genuinely does cover everything and has its own caveat (ADR-0003).
+    """
+
+    count: int
+    total: int
+    minutes: int
+    effective_from: float
+    offset: float
+    reference_instrument: str | None
+
+
+def back_applied_summary(
+    events: list[Event],
+    history: list[CalibrationEpoch],
+    minutes: list[MinuteLevel] | None = None,
+) -> BackApplied | None:
+    if not history:
+        return None
+    first = history[0]
+    count = sum(1 for ev in events if ev.start < first.effective_from)
+    minute_count = sum(1 for m in (minutes or []) if m.minute_start < first.effective_from)
+    if count == 0 and minute_count == 0:
+        return None
+    return BackApplied(
+        count=count,
+        total=len(events),
+        minutes=minute_count,
+        effective_from=first.effective_from,
+        offset=first.offset,
+        reference_instrument=first.reference_instrument,
+    )
+
+
+def back_applied_sentence(ba: BackApplied, *, tz: tzinfo) -> str:
+    """The disclosure, in words a reader can act on: how many rows, which date, and what
+    the retroactive application assumes."""
+    when = datetime.fromtimestamp(ba.effective_from, tz=tz).strftime("%Y-%m-%d %H:%M %Z")
+    against = f" against {ba.reference_instrument}" if ba.reference_instrument else ""
+    parts = []
+    if ba.count:
+        parts.append(f"{ba.count} of {ba.total} events")
+    if ba.minutes:
+        parts.append(f"{ba.minutes} ambient-ledger minutes")
+    what = " and ".join(parts)
+    return (
+        f"{what} were recorded before the first calibration, which was taken on {when}"
+        f"{against}. The offset measured then ({ba.offset:+.1f} dB) has been applied to "
+        "them retroactively so every level here is on one scale, but for those readings "
+        "the calibration postdates the measurement: it assumes the microphone, its gain, "
+        "and its placement were unchanged in between, and nothing in this record can "
+        "confirm that. Each exported row says whether its offset was in force when it "
+        "was measured or back-applied."
+    )
+
+
 def _apply_offset_minute(minute: MinuteLevel, offset: float) -> MinuteLevel:
     """Return an ambient-ledger minute (EXP-01) with its four scalars shifted by a
     calibration offset. A dB offset is additive, so shifting min/median/max/L90 by the
@@ -444,8 +549,15 @@ def _fmt_effective_from(effective_from: float, tz: tzinfo) -> str:
     return datetime.fromtimestamp(effective_from, tz=tz).strftime("%Y-%m-%d %H:%M %Z")
 
 
-def _calibration_epochs_html(epochs: list[CalibrationEpoch], *, tz: tzinfo) -> str:
-    """A per-epoch offsets table plus a disclosure line, for a multi-epoch window."""
+def _calibration_epochs_html(
+    epochs: list[CalibrationEpoch], *, tz: tzinfo, back_applied_line: str = ""
+) -> str:
+    """A per-epoch offsets table plus a disclosure line, for a multi-epoch window.
+
+    `back_applied_line` (already HTML-escaped) is the pre-calibration disclosure; the
+    multi-epoch path needs it too, since rows before the *first* epoch are back-applied
+    here exactly as they are on the single-epoch path.
+    """
     rows = "".join(
         f'<tr><th scope="row">{escape(_fmt_effective_from(e.effective_from, tz))}</th>'
         f"<td>{e.offset:+.1f} dB</td>"
@@ -463,7 +575,8 @@ def _calibration_epochs_html(epochs: list[CalibrationEpoch], *, tz: tzinfo) -> s
         "when that upgrade happened, so affected rows are identifiable. "
         "The offsets applied are:"
         "</p>\n"
-        "<table><caption>Calibration offsets by epoch</caption>"
+        + (f"<p>{back_applied_line}</p>\n" if back_applied_line else "")
+        + "<table><caption>Calibration offsets by epoch</caption>"
         '<thead><tr><th scope="col">Effective from</th><th scope="col">Offset</th>'
         '<th scope="col">Reference instrument</th><th scope="col">Note</th></tr></thead>'
         f"<tbody>{rows}</tbody></table>"
@@ -485,9 +598,16 @@ def build_report(
     wall_clock_hours: float | None = None,
     clock_anomaly_lines: list[str] | None = None,
     ambient_days: list[AmbientDay] | None = None,
+    back_applied: BackApplied | None = None,
     title: str = "Olive's Bark Logger — Noise Report",
 ) -> str:
     """Render the full report as a single self-contained HTML string.
+
+    `back_applied` (see `back_applied_summary`) says how many rows predate the first
+    calibration and carry its offset retroactively; when given, the disclosure is
+    rendered in the calibration banner and the methodology line on *both* the
+    single-offset and the multi-epoch paths, because a report with one epoch is the
+    ordinary case and was the one with no caveat at all.
 
     When `calibration_epochs` holds more than one epoch, a per-epoch offsets table and a
     recalibration disclosure are rendered; otherwise the single-offset path is used and
@@ -567,13 +687,20 @@ def build_report(
     }
     stats_html = "".join(f"<dt>{escape(k)}</dt><dd>{escape(v)}</dd>" for k, v in stats.items())
 
+    back_applied_line = (
+        escape(back_applied_sentence(back_applied, tz=config.tzinfo()))
+        if back_applied is not None
+        else ""
+    )
     if multi_epoch:
         calib_line = (
             "Levels are adjusted for calibration at render time from an append-only "
             "history; because this window spans more than one calibration epoch, each "
             "event uses the offset in force when it was measured (see the table below)."
         )
-        calib_epochs_section = _calibration_epochs_html(epochs, tz=config.tzinfo())
+        calib_epochs_section = _calibration_epochs_html(
+            epochs, tz=config.tzinfo(), back_applied_line=back_applied_line
+        )
     else:
         calib_line = (
             f"A calibration offset of {offset:+.1f} dB is applied "
@@ -582,6 +709,8 @@ def build_report(
             else f"No calibration offset is applied ({escape(note)})."
         )
         calib_epochs_section = ""
+    if back_applied_line:
+        calib_line = f"{calib_line} {back_applied_line}"
 
     # R2 — unmissable calibration-honesty banner. Uncalibrated readings must never get to
     # look like dB(A)/SPL; when calibrated, the reference-instrument provenance (carried in
@@ -592,7 +721,12 @@ def build_report(
             f"<strong>Calibrated.</strong> An offset of {offset:+.1f} dB is applied "
             f"({escape(note)}). Readings approximate sound level (SPL) but remain estimates "
             "affected by microphone, placement, and room acoustics.\n"
-            "</aside>"
+            + (
+                f"<p><strong>Calibration postdates some readings.</strong> {back_applied_line}</p>\n"
+                if back_applied_line
+                else ""
+            )
+            + "</aside>"
         )
     else:
         banner_html = (
@@ -951,6 +1085,9 @@ def generate_report_from_db(
     offsets = _per_event_offsets(events, history, config)
     adjusted = [_apply_offset(ev, off) for ev, off in zip(events, offsets)]
     summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=tz)
+    # Rows that predate the first calibration carry its offset retroactively (by
+    # design); the report must say so, on every path, or "Calibrated." overclaims.
+    back_applied = back_applied_summary(events, history, minute_levels)
 
     # Ambient baseline (EXP-01): same render-time calibration resolution as events, then
     # rolled up to one row per day. Empty when the ledger was never enabled.
@@ -992,6 +1129,7 @@ def generate_report_from_db(
             wall_clock_hours=wall_clock_hours,
             clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
             ambient_days=ambient_days,
+            back_applied=back_applied,
         )
 
     # Single-offset path: the whole window is under one calibration (or none -> config).
@@ -1015,6 +1153,7 @@ def generate_report_from_db(
         wall_clock_hours=wall_clock_hours,
         clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
         ambient_days=ambient_days,
+        back_applied=back_applied,
     )
 
 
@@ -1124,6 +1263,17 @@ def main(argv: list[str] | None = None) -> int:
         # records the offset it received (raw = value - offset). The calibrated flag is
         # derived from the store's history, never from the deprecated config field.
         offsets = _per_event_offsets(raw_events, history, config)
+        # Parallel to `offsets`: whether each row's offset was in force when it was
+        # measured or back-applied from a later calibration. Every export carries it per
+        # row, and the violations HTML states the count, so a row the calibration did
+        # not vouch for cannot pass as one it did.
+        basis = _per_event_basis(raw_events, history, config)
+        back_applied = back_applied_summary(raw_events, history)
+        back_applied_note = (
+            back_applied_sentence(back_applied, tz=config.tzinfo())
+            if back_applied is not None
+            else None
+        )
         events = [_apply_offset(ev, off) for ev, off in zip(raw_events, offsets)]
         multi_epoch = len(set(offsets)) > 1
         if events:
@@ -1135,7 +1285,12 @@ def main(argv: list[str] | None = None) -> int:
             from report.export import events_to_csv
 
             rows = events_to_csv(
-                events, args.csv, tz=config.tzinfo(), offsets_db=offsets, gaps=gaps
+                events,
+                args.csv,
+                tz=config.tzinfo(),
+                offsets_db=offsets,
+                basis=basis,
+                gaps=gaps,
             )
             print(f"Wrote {args.csv} ({rows} rows).")
 
@@ -1158,6 +1313,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz=config.tzinfo(),
                     tz_name=config.tz,
                     offsets_db=offsets,
+                    basis=basis,
                     gaps=gaps,
                     sessions=export_sessions,
                 )
@@ -1169,6 +1325,7 @@ def main(argv: list[str] | None = None) -> int:
                     tz=config.tzinfo(),
                     tz_name=config.tz,
                     offsets_db=offsets,
+                    basis=basis,
                     gaps=gaps,
                     sessions=export_sessions,
                 )
@@ -1179,6 +1336,7 @@ def main(argv: list[str] | None = None) -> int:
                     generated_at=generated_at,
                     calibrated=calibrated,
                     multi_epoch=multi_epoch,
+                    back_applied_note=back_applied_note,
                 )
                 if args.violations_html is not None:
                     args.violations_html.write_text(vhtml, encoding="utf-8")

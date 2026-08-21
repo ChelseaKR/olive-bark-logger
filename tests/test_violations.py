@@ -127,6 +127,7 @@ def test_violations_csv_lists_all_events_flagged(tmp_path):
         "peak_dbfs",
         "avg_dbfs",
         "calibration_offset_db",
+        "calibration_basis",
         "rise_time_s",
         "loud6_s",
         "longest_run_s",

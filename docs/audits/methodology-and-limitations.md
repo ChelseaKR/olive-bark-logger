@@ -32,6 +32,14 @@ has been compared against a reference meter. With offset 0.0 (the default) readi
 purely relative, and the report says so explicitly. Even calibrated, readings remain
 estimates affected by mic quality, placement, and room acoustics.
 
+Calibration is an append-only history applied at render time; each reading uses the
+offset in force when it was measured. Readings recorded **before the first calibration**
+carry that first offset retroactively, so the whole report is on one scale — but for
+those readings the calibration postdates the measurement and assumes the microphone,
+gain, and placement were unchanged. The report says how many readings this applies to
+and when the calibration was taken, and every exported row carries a `calibration_basis`
+of `in-force` or `back-applied` so the two are never indistinguishable.
+
 ## Detection validation
 
 Detection is validated against a labeled session (`tests/test_eval.py`): a synthetic
