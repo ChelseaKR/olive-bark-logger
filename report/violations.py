@@ -6,6 +6,12 @@ data can support — the tool measures levels, never content, so it cannot and d
 to prove *what* made a sound or *who* is responsible. Every export carries that limitation
 in writing, consistent with docs/audits/methodology-and-limitations.md.
 
+Every export also states **how much of the window it observed**. A count is only readable
+against the time it was counted over: an outage during quiet hours removes events, so a
+monitor that dropped out for most of the night produces a low count that reads as a quiet
+night. The coverage figures and the recorded gaps therefore travel with the counts, and
+the renderer has no branch that prints counts without them.
+
 Like the rest of the report side this is pure stdlib (csv + datetime) and deterministic
 given its inputs: the same event log, quiet-hours window, and time zone always produce the
 same CSV bytes and the same HTML.
@@ -15,7 +21,7 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
 from html import escape
 from pathlib import Path
@@ -25,13 +31,15 @@ from monitor.config import QuietSchedule
 from monitor.detector import Event
 
 if TYPE_CHECKING:
-    from store import Gap
+    from store import Gap, Session
 
 from report.render import (
     _STYLE,
     NO_AUDIO_RATIONALE,
     NO_SOURCE_NOTE,
     RELATIVE_DBFS_NOTE,
+    _coverage_hours,
+    _coverage_window,
     _fmt_seconds,
     cover_html,
     cover_text_lines,
@@ -63,8 +71,25 @@ class ViolationRow:
 
 
 @dataclass(frozen=True)
+class GapWindow:
+    """One recorded stretch when the device was not listening, ready for display."""
+
+    start_iso: str
+    end_iso: str
+    seconds: float
+    reason: str
+
+
+@dataclass(frozen=True)
 class ViolationReport:
-    """Counts and per-event rows for the quiet-hours analysis of an event log."""
+    """Counts and per-event rows for the quiet-hours analysis of an event log.
+
+    The coverage fields are not decoration: a count is only meaningful against the time
+    it was counted over, so `monitored_hours` / `wall_clock_hours` travel with the counts
+    and the renderer states them. Both are `None` when the record cannot support the
+    figure at all (no session, no gap, no measurable event span) — that is a "cannot be
+    determined", which the report says out loud rather than omitting.
+    """
 
     window: str  # e.g. "22:00–08:00"  # noqa: RUF003 - intentional en dash
     tz_name: str
@@ -74,6 +99,18 @@ class ViolationReport:
     within_loud_seconds: float
     outside_loud_seconds: float
     rows: list[ViolationRow]
+    monitored_hours: float | None = None
+    wall_clock_hours: float | None = None
+    span_start_iso: str | None = None
+    span_end_iso: str | None = None
+    gaps: list[GapWindow] = field(default_factory=list)
+
+    @property
+    def unmonitored_hours(self) -> float | None:
+        """Wall-clock hours in the span the device was not listening, or None."""
+        if self.monitored_hours is None or self.wall_clock_hours is None:
+            return None
+        return max(0.0, self.wall_clock_hours - self.monitored_hours)
 
 
 def compute_violations(
@@ -84,6 +121,7 @@ def compute_violations(
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
     gaps: list[Gap] | None = None,
+    session: Session | None = None,
 ) -> ViolationReport:
     """Classify every event as within / outside the quiet-hours window by its start time.
 
@@ -93,7 +131,11 @@ def compute_violations(
 
     When `gaps` is given, each row also carries a `monitored` flag (False if the event
     overlaps a monitoring gap), so a reader can tell an event logged at the edge of an
-    outage from one logged with full coverage.
+    outage from one logged with full coverage. The gaps are also carried on the report
+    itself, together with the monitored-vs-wall-clock coverage figures computed by the
+    same `_coverage_hours()` the main report uses (`session` extends the observed span
+    the way it does there), so the exported document can state how much of the window it
+    actually saw instead of implying it saw all of it.
     """
     offs = list(offsets_db) if offsets_db is not None else [0.0] * len(events)
     if len(offs) != len(events):
@@ -132,6 +174,9 @@ def compute_violations(
                 calibration_offset_db=off,
             )
         )
+    coverage = _coverage_hours(events, gap_list, session)
+    span = _coverage_window(events, gap_list, session)
+    monitored_hours, wall_clock_hours = coverage if coverage else (None, None)
     return ViolationReport(
         window=quiet_hours.label(),
         tz_name=tz_name,
@@ -141,6 +186,19 @@ def compute_violations(
         within_loud_seconds=within_secs,
         outside_loud_seconds=outside_secs,
         rows=rows,
+        monitored_hours=monitored_hours,
+        wall_clock_hours=wall_clock_hours,
+        span_start_iso=(datetime.fromtimestamp(span[0], tz=tz).isoformat() if span else None),
+        span_end_iso=(datetime.fromtimestamp(span[1], tz=tz).isoformat() if span else None),
+        gaps=[
+            GapWindow(
+                start_iso=datetime.fromtimestamp(g.start, tz=tz).isoformat(),
+                end_iso=datetime.fromtimestamp(g.end, tz=tz).isoformat(),
+                seconds=max(0.0, g.end - g.start),
+                reason=g.reason,
+            )
+            for g in sorted(gap_list, key=lambda g: g.start)
+        ],
     )
 
 
@@ -169,6 +227,114 @@ def _anatomy_cell(value: float | None) -> str:
     return "" if value is None else f"{value:.1f}"
 
 
+# --- Coverage: how much of the window was actually observed ------------------------
+#
+# A count is only meaningful against the time it was counted over. An outage during
+# quiet hours removes events, so a monitor that dropped out for most of the night
+# produces a low count that reads as a quiet night. These strings are mandatory on
+# every quiet-hours artifact (HTML, PDF via the same HTML, and the CSV preamble); the
+# honesty gate in tests/test_report_content.py asserts they cannot go missing.
+
+COVERAGE_HEADING = "Monitoring coverage"
+
+COVERAGE_UNKNOWN_NOTE = (
+    "How much of this window the device actually monitored could not be determined from "
+    "this record: it carries no monitoring session, no recorded gap, and no measurable "
+    "span of events. Do not read the counts below as covering the whole window."
+)
+
+# Said whether or not any gap was recorded: a gap can only appear here if the monitor
+# was running and able to write it down.
+UNRECORDED_GAP_CAVEAT = (
+    "Coverage is measured from what the monitor recorded. An interruption the device "
+    "never got to write down — a power cut, a crash before the gap was saved, a period "
+    "before monitoring started or after it stopped — cannot appear here, so treat these "
+    "figures as an upper bound on how much was observed."
+)
+
+NO_RECORDED_GAPS_NOTE = "No monitoring gaps were recorded within this span."
+
+ABSENCE_NOTE = (
+    "Hours that were not monitored are not quiet hours: no event could be recorded then, "
+    "so the absence of an event in those hours is not evidence that no sound occurred."
+)
+
+
+def _coverage_sentence(report: ViolationReport) -> str:
+    """The one-line coverage claim, or the stated limit when it cannot be computed."""
+    monitored, wall = report.monitored_hours, report.wall_clock_hours
+    if monitored is None or wall is None:
+        return COVERAGE_UNKNOWN_NOTE
+    pct = (monitored / wall * 100.0) if wall else 0.0
+    span = ""
+    if report.span_start_iso and report.span_end_iso:
+        span = f" The recorded span runs {report.span_start_iso} to {report.span_end_iso}."
+    return (
+        f"Over this reporting window the device monitored {monitored:.1f} of {wall:.1f} "
+        f"wall-clock hours ({pct:.0f}%); the remaining {report.unmonitored_hours:.1f} "
+        f"hours are shown as not monitored rather than quiet.{span}"
+    )
+
+
+def coverage_text_lines(report: ViolationReport) -> list[str]:
+    """The coverage statement as plain-text lines, for the CSV comment preamble."""
+    lines = [COVERAGE_HEADING, "", _coverage_sentence(report), "", ABSENCE_NOTE, ""]
+    lines.append(UNRECORDED_GAP_CAVEAT)
+    if report.gaps:
+        lines += ["", "Recorded monitoring gaps (no data could be collected):"]
+        lines += [
+            f"  - {g.start_iso} to {g.end_iso} ({_fmt_seconds(g.seconds)}, {g.reason})"
+            for g in report.gaps
+        ]
+    else:
+        lines += ["", NO_RECORDED_GAPS_NOTE]
+    return lines
+
+
+def _coverage_cell(hours: float | None) -> str:
+    """An hours figure for the summary list, or an explicit not-determined marker."""
+    return "not determined" if hours is None else f"{hours:.1f} h"
+
+
+def coverage_html(report: ViolationReport) -> str:
+    """The coverage block: a prominent banner plus the recorded-gap detail.
+
+    Rendered unconditionally. When the figures exist it states them; when they do not it
+    states that they could not be determined. There is no branch in which the document
+    shows counts and says nothing about the time they were counted over.
+    """
+    known = report.monitored_hours is not None and report.wall_clock_hours is not None
+    banner_class = "banner" if not known or report.unmonitored_hours else "banner banner-ok"
+    banner = (
+        f'<aside class="{banner_class}" role="note" aria-label="{COVERAGE_HEADING}">\n'
+        f"<strong>{escape(COVERAGE_HEADING)}:</strong> {escape(_coverage_sentence(report))} "
+        f"{escape(ABSENCE_NOTE)}\n"
+        "</aside>"
+    )
+    if report.gaps:
+        gap_rows = "".join(
+            f'<tr><th scope="row">{escape(g.start_iso)}</th>'
+            f"<td>{escape(g.end_iso)}</td>"
+            f"<td>{_fmt_seconds(g.seconds)}</td>"
+            f"<td>{escape(g.reason)}</td></tr>"
+            for g in report.gaps
+        )
+        detail = (
+            "<table><caption>Recorded monitoring gaps — no data could be collected in "
+            'these periods</caption><thead><tr><th scope="col">Gap start</th>'
+            '<th scope="col">Gap end</th><th scope="col">Length</th>'
+            f'<th scope="col">Reason</th></tr></thead><tbody>{gap_rows}</tbody></table>'
+        )
+    else:
+        detail = f"<p>{escape(NO_RECORDED_GAPS_NOTE)}</p>"
+    return (
+        f"{banner}\n"
+        "<h3>Recorded monitoring gaps</h3>\n"
+        f"{detail}\n"
+        f'<div class="note"><p>{escape(UNRECORDED_GAP_CAVEAT)}</p></div>'
+    )
+
+
 def violations_to_csv(
     events: list[Event],
     path: str | Path,
@@ -178,6 +344,7 @@ def violations_to_csv(
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
     gaps: list[Gap] | None = None,
+    session: Session | None = None,
 ) -> int:
     """Write every event with a within/outside-quiet-hours flag. Returns rows written.
 
@@ -185,14 +352,21 @@ def violations_to_csv(
     ones, so a reader can see the full picture rather than a cherry-picked subset; each
     row records the calibration offset included in its levels (0.0 = raw dBFS) and a
     `monitored` column marking whether it fell in a period of confirmed coverage; and the
-    "what this can and cannot prove" cover block (R1) is written as a leading ``#`` comment
-    preamble so the caveat travels with the file; data rows below it are unchanged.
+    "what this can and cannot prove" cover block (R1) plus the monitoring-coverage
+    statement are written as a leading ``#`` comment preamble so both caveats travel with
+    the file; data rows below it are unchanged.
     """
     report = compute_violations(
-        events, quiet_hours=quiet_hours, tz=tz, tz_name=tz_name, offsets_db=offsets_db, gaps=gaps
+        events,
+        quiet_hours=quiet_hours,
+        tz=tz,
+        tz_name=tz_name,
+        offsets_db=offsets_db,
+        gaps=gaps,
+        session=session,
     )
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
-        for line in cover_text_lines():
+        for line in [*cover_text_lines(), "", *coverage_text_lines(report)]:
             fh.write(f"# {line}\n" if line else "#\n")
         writer = csv.writer(fh)
         writer.writerow(_CSV_HEADER)
@@ -244,7 +418,11 @@ def build_violation_report_html(
     """Render a standalone, accessible HTML quiet-hours violation report.
 
     Honest posture is mandatory and unconditional: the no-source and relative-dBFS
-    limitations and the scope note are always present, mirroring the main report.
+    limitations, the scope note, and the monitoring-coverage statement are always
+    present, mirroring the main report. Coverage is printed in the Summary block above
+    the counts, not buried in Limitations, because it is what makes the counts readable:
+    "1 event in quiet hours" over 1.5 monitored hours is a different claim from the same
+    count over 9.5.
     `calibrated` must reflect the calibration actually applied to the rows (the store's
     history, not a config field); `multi_epoch` discloses that more than one offset is
     in play across the window, in which case each row's own offset column governs.
@@ -253,6 +431,7 @@ def build_violation_report_html(
         body_rows = "".join(
             f'<tr><th scope="row">{escape(r.start_iso)}</th>'
             f"<td>{escape('yes' if r.within_quiet_hours else 'no')}</td>"
+            f"<td>{escape('yes' if r.monitored else 'no')}</td>"
             f"<td>{_fmt_seconds(r.duration_s)}</td>"
             f"<td>{r.peak_dbfs:.1f}</td><td>{r.avg_dbfs:.1f}</td>"
             f"<td>{r.calibration_offset_db:+.1f}</td>"
@@ -264,9 +443,12 @@ def build_violation_report_html(
         )
         table = (
             "<table><caption>Every logged event, flagged against the quiet-hours "
-            "window</caption><thead><tr>"
+            "window. “Monitored” is no when the event overlaps a recorded monitoring "
+            "gap, so a reading taken at the edge of an outage is marked as one."
+            "</caption><thead><tr>"
             '<th scope="col">Start (local)</th>'
             '<th scope="col">Within quiet hours</th>'
+            '<th scope="col">Monitored</th>'
             '<th scope="col">Duration</th>'
             '<th scope="col">Peak (dBFS)</th>'
             '<th scope="col">Avg (dBFS)</th>'
@@ -319,7 +501,11 @@ produce it.</p>
 your local ordinance, lease, or HOA rule before relying on the counts below.</p>
 
 <h2>Summary</h2>
+{coverage_html(report)}
 <dl class="stats">
+<dt>Monitored (wall-clock hours)</dt><dd>{_coverage_cell(report.monitored_hours)}</dd>
+<dt>Reporting window (wall-clock hours)</dt><dd>{_coverage_cell(report.wall_clock_hours)}</dd>
+<dt>Not monitored (wall-clock hours)</dt><dd>{_coverage_cell(report.unmonitored_hours)}</dd>
 <dt>Total events logged</dt><dd>{report.total_events}</dd>
 <dt>Events starting within quiet hours</dt><dd>{report.within_count}</dd>
 <dt>Events starting outside quiet hours</dt><dd>{report.outside_count}</dd>

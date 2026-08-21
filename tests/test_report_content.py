@@ -278,3 +278,221 @@ def test_reader_facing_no_audio_rationale_present():
     assert "<h2>Why there is deliberately no audio</h2>" in html
     assert "deliberate privacy choice, not missing data" in html
     assert "leaked, subpoenaed, or misused" in html
+
+
+# --- FIX-39: the handed-over quiet-hours report states its own coverage ------
+#
+# This file is the merge-blocking honesty gate, and until now it only covered
+# `build_report`. The violations renderer is the document the README points at for a
+# "neighbor/landlord/HOA submission", so it needs its gate here too -- and the gate is
+# written as the *absence of the overstatement*: there must be no rendering path that
+# prints counts while saying nothing about how much of the window was observed.
+def _violation_html(events=None, *, gaps=None, session=None):
+    from monitor.config import QuietHours
+    from report.violations import build_violation_report_html, compute_violations
+
+    report = compute_violations(
+        events or [],
+        quiet_hours=QuietHours(22, 8),
+        tz=timezone.utc,
+        gaps=gaps,
+        session=session,
+    )
+    return build_violation_report_html(
+        report,
+        threshold_dbfs=-35.0,
+        min_duration_s=0.4,
+        generated_at="2026-01-01 00:00 UTC",
+        calibrated=False,
+    )
+
+
+def _gap(start, end, reason="shutdown"):
+    from store import Gap
+
+    return Gap(id=1, session_id=None, start=start, end=end, reason=reason)
+
+
+def _quiet_hours_scenario():
+    """The issue's scenario: a ten-hour quiet window, one 60 s event at 22:10, and a
+    recorded monitoring gap covering eight of those hours."""
+    from store import Session
+
+    win_start = datetime(2026, 1, 1, 22, tzinfo=timezone.utc).timestamp()
+    ev_start = win_start + 600  # 22:10
+    event = Event(start=ev_start, end=ev_start + 60, duration=60.0, peak_level=-8, avg_level=-12)
+    gap = _gap(win_start + 5400, win_start + 34200)  # 23:30 -> 07:30, eight hours
+    session = Session(
+        id=1,
+        started_at=win_start,
+        ended_at=win_start + 36000,  # 08:00
+        device_label="pi-1",
+        mic_model="USB mic",
+        placement_note="by the wall",
+        tz="UTC",
+        calibration_offset=0.0,
+        calibration_note="x",
+        frames_seen=100,
+        frames_dropped=0,
+        app_version="0.1.0",
+    )
+    return [event], [gap], session
+
+
+def test_no_violation_report_shows_counts_without_stating_coverage():
+    """Every shape of quiet-hours report the code can produce -- empty, events only,
+    events plus gaps, and the full session case -- states its coverage next to the
+    counts. A count with no coverage line is the defect this gate exists to block."""
+    from report.violations import COVERAGE_HEADING
+
+    events, gaps, session = _quiet_hours_scenario()
+    base = datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp()
+    one = [Event(start=base, end=base + 5, duration=5.0, peak_level=-8, avg_level=-12)]
+    cases = {
+        "empty log": _violation_html(),
+        "events, no gaps": _violation_html(one),
+        "events and a gap": _violation_html(events, gaps=gaps),
+        "events, gap, session": _violation_html(events, gaps=gaps, session=session),
+    }
+    for name, html in cases.items():
+        assert "Total events logged" in html, f"{name}: counts missing from the report"
+        assert COVERAGE_HEADING in html, f"{name}: counts shown with no coverage statement"
+        # Either a real figure or an explicit "could not be determined" -- never silence.
+        assert "wall-clock hours" in html or "could not be determined" in html, (
+            f"{name}: coverage neither stated nor declared undeterminable"
+        )
+
+
+def test_coverage_is_stated_with_figures_and_above_the_counts():
+    events, gaps, session = _quiet_hours_scenario()
+    html = _violation_html(events, gaps=gaps, session=session)
+    # 10 wall-clock hours, 8 of them inside a recorded gap.
+    assert "monitored 2.0 of 10.0 wall-clock hours (20%)" in html
+    assert "the remaining 8.0 hours are shown as not monitored rather than quiet" in html
+    # Prominent and above the counts, not buried in Limitations.
+    assert html.index("Monitoring coverage") < html.index("Total events logged")
+    assert html.index("Monitoring coverage") < html.index("<h2>Limitations</h2>")
+    assert 'role="note"' in html
+
+
+def test_unmonitored_time_is_visible_not_absent():
+    """The gap itself is printed, and the report says an unmonitored hour is not a quiet
+    hour -- absence of a recorded event must never read as absence of the event."""
+    from report.violations import ABSENCE_NOTE
+
+    events, gaps, session = _quiet_hours_scenario()
+    html = _violation_html(events, gaps=gaps, session=session)
+    assert "Recorded monitoring gaps" in html
+    assert "not evidence that no sound occurred" in html
+    assert ABSENCE_NOTE in html
+    # The gap's own bounds are on the page, so the reader can see when the hole was.
+    assert "2026-01-01T23:30:00+00:00" in html and "2026-01-02T07:30:00+00:00" in html
+
+
+def test_coverage_declares_its_own_limit_when_it_cannot_be_computed():
+    from report.violations import COVERAGE_UNKNOWN_NOTE
+
+    html = _violation_html()  # nothing recorded at all: no events, no gaps, no session
+    assert COVERAGE_UNKNOWN_NOTE in html
+    assert "could not be determined" in html
+    assert "not determined" in html  # the summary cells say so too, rather than showing 0.0
+
+
+def test_coverage_never_claims_more_than_was_recorded():
+    """A gap the monitor never wrote down cannot appear, so the figure is an upper
+    bound and says so -- including on a log with no recorded gaps at all."""
+    from report.violations import NO_RECORDED_GAPS_NOTE, UNRECORDED_GAP_CAVEAT
+
+    base = datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp()
+    html = _violation_html([Event(base, base + 5, 5.0, -8, -12)])
+    assert UNRECORDED_GAP_CAVEAT in html
+    assert "upper bound" in html
+    assert NO_RECORDED_GAPS_NOTE in html  # stated, not left blank
+
+
+def test_monitored_flag_reaches_the_human_readable_table():
+    """The CSV has carried `monitored` all along; the HTML twin dropped it."""
+    events, gaps, session = _quiet_hours_scenario()
+    html = _violation_html(events, gaps=gaps, session=session)
+    assert '<th scope="col">Monitored</th>' in html
+    # The single event overlaps nothing, but the column must still render per row.
+    assert html.count("<td>") >= 1
+    inside_gap = [
+        Event(
+            start=gaps[0].start + 60,
+            end=gaps[0].start + 65,
+            duration=5.0,
+            peak_level=-8,
+            avg_level=-12,
+        )
+    ]
+    flagged = _violation_html(inside_gap, gaps=gaps, session=session)
+    assert '<th scope="col">Monitored</th>' in flagged
+    assert "recorded monitoring gap" in flagged
+
+
+def test_violations_csv_preamble_carries_the_coverage_statement(tmp_path):
+    from monitor.config import QuietHours
+    from report.violations import COVERAGE_HEADING, violations_to_csv
+
+    events, gaps, session = _quiet_hours_scenario()
+    out = tmp_path / "violations.csv"
+    violations_to_csv(
+        events,
+        out,
+        quiet_hours=QuietHours(22, 8),
+        tz=timezone.utc,
+        gaps=gaps,
+        session=session,
+    )
+    preamble = [ln for ln in out.read_text().splitlines() if ln.startswith("#")]
+    text = "\n".join(preamble)
+    assert COVERAGE_HEADING in text
+    assert "monitored 2.0 of 10.0 wall-clock hours" in text
+    assert "Recorded monitoring gaps" in text
+
+
+def test_report_cli_violations_html_states_coverage(tmp_path):
+    """End to end through the CLI, the path a tenant actually runs."""
+    import json
+
+    from monitor.config import Config
+    from report.render import main as report_main
+    from store import EventStore
+
+    events, gaps, _session = _quiet_hours_scenario()
+    db = tmp_path / "olive.db"
+    with EventStore(db) as store:
+        store.add_event(events[0])
+        store.add_gap(start=gaps[0].start, end=gaps[0].end, reason=gaps[0].reason)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"db_path": str(db), "tz": "UTC"}),
+        encoding="utf-8",
+    )
+    vhtml = tmp_path / "v.html"
+    vcsv = tmp_path / "v.csv"
+    rc = report_main(
+        [
+            "--config",
+            str(config_path),
+            "--db",
+            str(db),
+            "--out",
+            str(tmp_path / "r.html"),
+            "--violations-html",
+            str(vhtml),
+            "--violations-csv",
+            str(vcsv),
+            "--generated-at",
+            "2026-01-01 UTC",
+        ]
+    )
+    assert rc == 0
+    html = vhtml.read_text()
+    assert "Monitoring coverage" in html
+    assert "wall-clock hours" in html
+    assert "Recorded monitoring gaps" in html
+    assert "not monitored rather than quiet" in html
+    assert "Monitoring coverage" in vcsv.read_text()
+    assert Config.load(config_path) is not None
