@@ -222,8 +222,16 @@ class ClockAnomaly:
 class Gap:
     """One interval when the device was not listening. Metadata only — no audio.
 
-    `reason` is one of 'device-error' (a source outage caught by resilient_source),
-    'shutdown' (the monitor was not running), or 'clock-jump' (wall-clock discontinuity).
+    `reason` is one of 'device-error', 'shutdown', or 'clock-jump' (the schema CHECK
+    permits exactly those three). Only 'device-error' is ever written by the monitor,
+    from `resilient_source` catching a source outage during a run; the other two are
+    accepted values that no code path currently produces.
+
+    That is a real limit on what this ledger can be asked, not a to-do: a gap row can
+    only be written by a monitor that is *running*, so the ledger structurally cannot
+    record the monitor not running. Time with no monitor up is derived instead from the
+    holes between capture sessions — see `report.render.off_air_spans`, which is what
+    the coverage figures actually subtract.
     """
 
     id: int

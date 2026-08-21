@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
 from monitor.config import Config
 from monitor.detector import Event
 from report.aggregate import summarize
@@ -287,7 +288,7 @@ def test_reader_facing_no_audio_rationale_present():
 # "neighbor/landlord/HOA submission", so it needs its gate here too -- and the gate is
 # written as the *absence of the overstatement*: there must be no rendering path that
 # prints counts while saying nothing about how much of the window was observed.
-def _violation_html(events=None, *, gaps=None, session=None):
+def _violation_html(events=None, *, gaps=None, sessions=None):
     from monitor.config import QuietHours
     from report.violations import build_violation_report_html, compute_violations
 
@@ -296,7 +297,7 @@ def _violation_html(events=None, *, gaps=None, session=None):
         quiet_hours=QuietHours(22, 8),
         tz=timezone.utc,
         gaps=gaps,
-        session=session,
+        sessions=sessions,
     )
     return build_violation_report_html(
         report,
@@ -352,7 +353,7 @@ def test_no_violation_report_shows_counts_without_stating_coverage():
         "empty log": _violation_html(),
         "events, no gaps": _violation_html(one),
         "events and a gap": _violation_html(events, gaps=gaps),
-        "events, gap, session": _violation_html(events, gaps=gaps, session=session),
+        "events, gap, session": _violation_html(events, gaps=gaps, sessions=[session]),
     }
     for name, html in cases.items():
         assert "Total events logged" in html, f"{name}: counts missing from the report"
@@ -365,7 +366,7 @@ def test_no_violation_report_shows_counts_without_stating_coverage():
 
 def test_coverage_is_stated_with_figures_and_above_the_counts():
     events, gaps, session = _quiet_hours_scenario()
-    html = _violation_html(events, gaps=gaps, session=session)
+    html = _violation_html(events, gaps=gaps, sessions=[session])
     # 10 wall-clock hours, 8 of them inside a recorded gap.
     assert "monitored 2.0 of 10.0 wall-clock hours (20%)" in html
     assert "the remaining 8.0 hours are shown as not monitored rather than quiet" in html
@@ -381,7 +382,7 @@ def test_unmonitored_time_is_visible_not_absent():
     from report.violations import ABSENCE_NOTE
 
     events, gaps, session = _quiet_hours_scenario()
-    html = _violation_html(events, gaps=gaps, session=session)
+    html = _violation_html(events, gaps=gaps, sessions=[session])
     assert "Recorded monitoring gaps" in html
     assert "not evidence that no sound occurred" in html
     assert ABSENCE_NOTE in html
@@ -413,7 +414,7 @@ def test_coverage_never_claims_more_than_was_recorded():
 def test_monitored_flag_reaches_the_human_readable_table():
     """The CSV has carried `monitored` all along; the HTML twin dropped it."""
     events, gaps, session = _quiet_hours_scenario()
-    html = _violation_html(events, gaps=gaps, session=session)
+    html = _violation_html(events, gaps=gaps, sessions=[session])
     assert '<th scope="col">Monitored</th>' in html
     # The single event overlaps nothing, but the column must still render per row.
     assert html.count("<td>") >= 1
@@ -426,7 +427,7 @@ def test_monitored_flag_reaches_the_human_readable_table():
             avg_level=-12,
         )
     ]
-    flagged = _violation_html(inside_gap, gaps=gaps, session=session)
+    flagged = _violation_html(inside_gap, gaps=gaps, sessions=[session])
     assert '<th scope="col">Monitored</th>' in flagged
     assert "recorded monitoring gap" in flagged
 
@@ -443,7 +444,7 @@ def test_violations_csv_preamble_carries_the_coverage_statement(tmp_path):
         quiet_hours=QuietHours(22, 8),
         tz=timezone.utc,
         gaps=gaps,
-        session=session,
+        sessions=[session],
     )
     preamble = [ln for ln in out.read_text().splitlines() if ln.startswith("#")]
     text = "\n".join(preamble)
@@ -496,3 +497,277 @@ def test_report_cli_violations_html_states_coverage(tmp_path):
     assert "not monitored rather than quiet" in html
     assert "Monitoring coverage" in vcsv.read_text()
     assert Config.load(config_path) is not None
+
+
+# --- Off-air time: the monitor not running is not the same as a quiet hour ----------
+#
+# The gap ledger only ever receives 'device-error' rows, written by resilient_source
+# while the monitor is up. The far more common outage -- the monitor simply not running
+# (stopped, rebooted, power cut, crashed) -- leaves no gap row at all. It does leave two
+# session rows, so the store knows exactly when the device was off air. Coverage must
+# read those, or the handed-over report claims 100% coverage of a window it mostly slept
+# through.
+
+
+def _two_session_log(store):
+    """22:00-23:00 monitored, off air until 07:00, 07:00-08:00 monitored. One event each.
+
+    Returns nothing; writes straight into the store the way two real runs would.
+    """
+    day = datetime(2026, 3, 10, tzinfo=timezone.utc)
+
+    def at(hour, minute=0, next_day=False):
+        return day.timestamp() + (86400 if next_day else 0) + hour * 3600 + minute * 60
+
+    first = store.start_session(
+        started_at=at(22),
+        device_label="pi-1",
+        mic_model="USB mic",
+        placement_note="by the wall",
+        tz="UTC",
+        calibration_offset=0.0,
+        calibration_note="x",
+        app_version="0.1.0",
+    )
+    store.add_event(
+        Event(start=at(22, 30), end=at(22, 30) + 12, duration=12.0, peak_level=-20, avg_level=-25),
+        session_id=first,
+    )
+    store.update_session(first, frames_seen=36000, frames_dropped=0, ended_at=at(23))
+    # --- monitor off air 23:00 -> 07:00: no frames, no gap row, two session rows ---
+    second = store.start_session(
+        started_at=at(7, next_day=True),
+        device_label="pi-1",
+        mic_model="USB mic",
+        placement_note="by the wall",
+        tz="UTC",
+        calibration_offset=0.0,
+        calibration_note="x",
+        app_version="0.1.0",
+    )
+    store.add_event(
+        Event(
+            start=at(7, 30, next_day=True),
+            end=at(7, 30, next_day=True) + 9,
+            duration=9.0,
+            peak_level=-18,
+            avg_level=-24,
+        ),
+        session_id=second,
+    )
+    store.update_session(second, frames_seen=36000, frames_dropped=0, ended_at=at(8, next_day=True))
+
+
+def _render_two_session_artifacts(tmp_path):
+    import json
+
+    from report.render import main as report_main
+    from store import EventStore
+
+    db = tmp_path / "olive.db"
+    with EventStore(db) as store:
+        _two_session_log(store)
+        assert store.gaps() == []  # the ledger genuinely has nothing to say
+        assert len(store.sessions()) == 2  # but the session rows do
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"db_path": str(db), "tz": "UTC"}), encoding="utf-8")
+    main_html, vhtml, vcsv = tmp_path / "r.html", tmp_path / "v.html", tmp_path / "v.csv"
+    rc = report_main(
+        [
+            "--config",
+            str(config_path),
+            "--db",
+            str(db),
+            "--out",
+            str(main_html),
+            "--violations-html",
+            str(vhtml),
+            "--violations-csv",
+            str(vcsv),
+            "--generated-at",
+            "2026-03-11 UTC",
+        ]
+    )
+    assert rc == 0
+    return main_html.read_text(), vhtml.read_text(), vcsv.read_text()
+
+
+def test_quiet_hours_coverage_excludes_time_the_monitor_was_not_running(tmp_path):
+    """The headline: eight of these ten hours had no monitor running at all.
+
+    Before the fix the export read "monitored 9.5 of 9.5 wall-clock hours (100%)" --
+    a full-coverage claim over a night the device slept through, in the document the
+    README points at for a landlord submission.
+    """
+    _main, html, csv_text = _render_two_session_artifacts(tmp_path)
+    assert "monitored 2.0 of 10.0 wall-clock hours (20%)" in html
+    assert "the remaining 8.0 hours are shown as not monitored rather than quiet" in html
+    assert "(100%)" not in html
+    # The CSV preamble travels with the same figure.
+    assert "monitored 2.0 of 10.0 wall-clock hours" in csv_text
+
+
+def test_off_air_stretch_is_disclosed_not_just_subtracted(tmp_path):
+    """A reader must be able to see *when* the device was off, not only that hours are
+    missing -- otherwise "no monitoring gaps were recorded" reads as "nothing was wrong"
+    directly under a 20% coverage figure."""
+    from report.violations import OFF_AIR_HEADING
+
+    _main, html, csv_text = _render_two_session_artifacts(tmp_path)
+    assert OFF_AIR_HEADING in html
+    assert "2026-03-10T23:00:00+00:00" in html and "2026-03-11T07:00:00+00:00" in html
+    assert OFF_AIR_HEADING in csv_text
+
+
+def test_main_report_marks_off_air_hours_as_not_monitored(tmp_path):
+    """The calendar heatmap's third state exists for exactly this; it was reachable only
+    from a device-error gap, so an off-air night rendered as a row of quiet zeros."""
+    main_html, _v, _c = _render_two_session_artifacts(tmp_path)
+    assert "monitored 2.0 of 10.0 wall-clock hours" in main_html
+    assert "not monitored" in main_html
+    # 2026-03-11 01:00 is inside the off-air stretch and holds no events.
+    assert "2026-03-11 01:00 — not monitored" in main_html
+
+
+def test_coverage_falls_back_when_the_log_has_no_sessions(tmp_path):
+    """A pre-session (legacy) log cannot support an off-air claim in either direction, so
+    the old whole-span-minus-gaps figure stands and the report says why."""
+    from report.violations import OFF_AIR_UNKNOWN_NOTE
+
+    events, gaps, _session = _quiet_hours_scenario()
+    html = _violation_html(events, gaps=gaps)
+    assert OFF_AIR_UNKNOWN_NOTE in html
+    assert "wall-clock hours" in html
+
+
+def test_overlapping_recorded_gaps_are_not_double_counted():
+    """Two gaps covering the same minute are one hole, not two.
+
+    The old arithmetic summed each gap's overlap with the window independently, so an
+    overlapping pair subtracted the shared seconds twice and understated coverage --
+    the mirror image of the off-air overstatement, and just as wrong.
+    """
+    from report.render import _coverage_hours
+
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+    events = [Event(start=base, end=base + 10, duration=10.0, peak_level=-8, avg_level=-12)]
+    gaps = [
+        _gap(base + 3600, base + 3600 * 5),  # 01:00 -> 05:00
+        _gap(base + 3600 * 3, base + 3600 * 7),  # 03:00 -> 07:00, overlapping the first
+    ]
+    events.append(
+        Event(
+            start=base + 3600 * 10,
+            end=base + 3600 * 10 + 5,
+            duration=5.0,
+            peak_level=-8,
+            avg_level=-12,
+        )
+    )
+    monitored, wall = _coverage_hours(events, gaps, [])
+    assert wall == pytest.approx(10.0, abs=0.01)  # 00:00 -> just past 10:00
+    # The union of the two gaps is 01:00 -> 07:00, six hours. Summing them separately
+    # would have subtracted eight and reported ~2.0 monitored hours instead.
+    assert monitored == pytest.approx(wall - 6.0, abs=0.01)
+
+
+def _coverage_session(started_at, ended_at, *, frames_seen=0, framing=True):
+    from store import Session
+
+    return Session(
+        id=1,
+        started_at=started_at,
+        ended_at=ended_at,
+        device_label="pi-1",
+        mic_model="",
+        placement_note="",
+        tz="UTC",
+        calibration_offset=0.0,
+        calibration_note="x",
+        frames_seen=frames_seen,
+        frames_dropped=0,
+        app_version="0.1.0",
+        sample_rate=16000 if framing else None,
+        frame_size=1600 if framing else None,
+    )
+
+
+def test_a_crashed_session_is_credited_only_for_the_frames_it_recorded():
+    """`ended_at` stays NULL when a run dies before its shutdown path -- a power cut,
+    the very outage this fix is about. Crediting it to the end of the window would
+    quietly restore the bug: the dead monitor would read as listening until the next run.
+
+    The frame counters are checkpointed on a wall-clock cadence, so they bound it: 36000
+    frames of 1600 samples at 16 kHz is one hour of capture, and not a second more.
+    """
+    from report.render import _coverage_hours
+
+    base = datetime(2026, 1, 1, 22, tzinfo=timezone.utc).timestamp()
+    crashed = _coverage_session(
+        base, None, frames_seen=36000
+    )  # 22:00, an hour of frames, then dead
+    later = _coverage_session(base + 3600 * 9, base + 3600 * 10)  # 07:00 -> 08:00 the next morning
+    monitored, wall = _coverage_hours([], [], [crashed, later])
+    assert wall == pytest.approx(10.0, abs=0.01)
+    assert monitored == pytest.approx(2.0, abs=0.01)
+
+
+def test_a_running_session_counts_as_far_as_its_checkpointed_frames_prove():
+    """The live case rides the same rule, losing at most one checkpoint interval."""
+    from report.render import _coverage_hours
+
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+    running = _coverage_session(base, None, frames_seen=36000 * 4)  # four hours of frames, still up
+    events = [
+        Event(
+            start=base + 3600 * 4 - 60,
+            end=base + 3600 * 4 - 55,
+            duration=5.0,
+            peak_level=-8,
+            avg_level=-12,
+        )
+    ]
+    monitored, wall = _coverage_hours(events, [], [running])
+    # The window ends at the last event, just short of the four hours of frames.
+    assert wall == pytest.approx(3.98, abs=0.01)
+    assert monitored == pytest.approx(wall)  # every second of it is vouched for
+
+
+def test_a_legacy_session_row_vouches_for_nothing_past_its_own_start():
+    """No end time and no framing columns (a pre-v4 row): the record cannot prove the
+    monitor stayed up, so it is not assumed to have."""
+    from report.render import _coverage_hours
+
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+    legacy = _coverage_session(base, None, frames_seen=999, framing=False)
+    events = [
+        Event(
+            start=base + 3600 * 2,
+            end=base + 3600 * 2 + 5,
+            duration=5.0,
+            peak_level=-8,
+            avg_level=-12,
+        )
+    ]
+    monitored, wall = _coverage_hours(events, [], [legacy])
+    assert wall == pytest.approx(2.0, abs=0.01)
+    assert monitored == pytest.approx(0.0, abs=0.01)  # only the event's own five seconds
+
+
+def test_interval_helpers_handle_holes_outside_the_base_span():
+    """The coverage figure is interval arithmetic, so the arithmetic gets its own test.
+
+    Both the "hole entirely before this span" and "hole entirely after it" branches are
+    live in real logs: gaps from an earlier run precede a later session, and gaps from a
+    later run follow an earlier one.
+    """
+    from report.render import _merge_spans, _subtract_spans
+
+    assert _merge_spans([(10.0, 20.0), (15.0, 18.0), (30.0, 25.0)]) == [(10.0, 20.0)]
+    assert _merge_spans([(0.0, 5.0), (5.0, 9.0)]) == [(0.0, 9.0)]  # touching spans join
+    base = [(100.0, 200.0)]
+    holes = [(0.0, 50.0), (120.0, 140.0), (500.0, 600.0)]
+    # The hole before the span is skipped, the hole after it stops the scan.
+    assert _subtract_spans(base, holes) == [(100.0, 120.0), (140.0, 200.0)]
+    # A hole swallowing the whole span leaves nothing.
+    assert _subtract_spans(base, [(50.0, 250.0)]) == []
