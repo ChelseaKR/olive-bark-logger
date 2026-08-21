@@ -12,6 +12,12 @@ monitor that dropped out for most of the night produces a low count that reads a
 night. The coverage figures and the recorded gaps therefore travel with the counts, and
 the renderer has no branch that prints counts without them.
 
+"Observed" is measured against the capture-session ledger, not the gap ledger. A gap row
+is written by a *running* monitor catching its own source failure, so the commonest
+outage of all — no monitor running at all — leaves no gap behind and would otherwise be
+counted as monitored time. The sessions record it as the hole between one run's end and
+the next one's start, and those stretches are both subtracted and listed by date.
+
 Like the rest of the report side this is pure stdlib (csv + datetime) and deterministic
 given its inputs: the same event log, quiet-hours window, and time zone always produce the
 same CSV bytes and the same HTML.
@@ -43,6 +49,7 @@ from report.render import (
     _fmt_seconds,
     cover_html,
     cover_text_lines,
+    off_air_spans,
 )
 
 
@@ -104,6 +111,11 @@ class ViolationReport:
     span_start_iso: str | None = None
     span_end_iso: str | None = None
     gaps: list[GapWindow] = field(default_factory=list)
+    # Stretches of the span with no monitor running at all. `None` means the record
+    # cannot say (a log with no capture sessions); an empty list means it can, and the
+    # monitor was up throughout. The distinction is load-bearing: "we do not know" and
+    # "there was none" must not render as the same sentence.
+    off_air: list[GapWindow] | None = None
 
     @property
     def unmonitored_hours(self) -> float | None:
@@ -111,6 +123,13 @@ class ViolationReport:
         if self.monitored_hours is None or self.wall_clock_hours is None:
             return None
         return max(0.0, self.wall_clock_hours - self.monitored_hours)
+
+    @property
+    def off_air_hours(self) -> float | None:
+        """Wall-clock hours in the span with no monitor running, or None if unknown."""
+        if self.off_air is None:
+            return None
+        return sum(g.seconds for g in self.off_air) / 3600.0
 
 
 def compute_violations(
@@ -121,7 +140,7 @@ def compute_violations(
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
     gaps: list[Gap] | None = None,
-    session: Session | None = None,
+    sessions: Sequence[Session] | None = None,
 ) -> ViolationReport:
     """Classify every event as within / outside the quiet-hours window by its start time.
 
@@ -133,9 +152,15 @@ def compute_violations(
     overlaps a monitoring gap), so a reader can tell an event logged at the edge of an
     outage from one logged with full coverage. The gaps are also carried on the report
     itself, together with the monitored-vs-wall-clock coverage figures computed by the
-    same `_coverage_hours()` the main report uses (`session` extends the observed span
+    same `_coverage_hours()` the main report uses (`sessions` extends the observed span
     the way it does there), so the exported document can state how much of the window it
     actually saw instead of implying it saw all of it.
+
+    `sessions` is the *whole* capture-session ledger, not just the latest run: the
+    stretches between runs are time when no monitor was listening, and no gap row can
+    exist for them because writing one requires a running monitor. Passing a single
+    session, or none, is still valid — the coverage figures then say only what that
+    record can support.
     """
     offs = list(offsets_db) if offsets_db is not None else [0.0] * len(events)
     if len(offs) != len(events):
@@ -174,9 +199,11 @@ def compute_violations(
                 calibration_offset_db=off,
             )
         )
-    coverage = _coverage_hours(events, gap_list, session)
-    span = _coverage_window(events, gap_list, session)
+    session_list = list(sessions) if sessions is not None else []
+    coverage = _coverage_hours(events, gap_list, session_list)
+    span = _coverage_window(events, gap_list, session_list)
     monitored_hours, wall_clock_hours = coverage if coverage else (None, None)
+    off_air = off_air_spans(events, gap_list, session_list)
     return ViolationReport(
         window=quiet_hours.label(),
         tz_name=tz_name,
@@ -199,6 +226,19 @@ def compute_violations(
             )
             for g in sorted(gap_list, key=lambda g: g.start)
         ],
+        off_air=(
+            None
+            if off_air is None
+            else [
+                GapWindow(
+                    start_iso=datetime.fromtimestamp(start, tz=tz).isoformat(),
+                    end_iso=datetime.fromtimestamp(end, tz=tz).isoformat(),
+                    seconds=max(0.0, end - start),
+                    reason=OFF_AIR_REASON,
+                )
+                for start, end in off_air
+            ]
+        ),
     )
 
 
@@ -243,12 +283,15 @@ COVERAGE_UNKNOWN_NOTE = (
     "span of events. Do not read the counts below as covering the whole window."
 )
 
-# Said whether or not any gap was recorded: a gap can only appear here if the monitor
-# was running and able to write it down.
+# Said whether or not any gap was recorded: a gap row can only appear here if the
+# monitor was running and able to write it down. Time with no monitor running is now
+# subtracted from the capture-session ledger instead, so this caveat names what is
+# genuinely still invisible rather than over-claiming that every outage is missing.
 UNRECORDED_GAP_CAVEAT = (
-    "Coverage is measured from what the monitor recorded. An interruption the device "
-    "never got to write down — a power cut, a crash before the gap was saved, a period "
-    "before monitoring started or after it stopped — cannot appear here, so treat these "
+    "Coverage is measured from what the record contains. Stretches with no monitor "
+    "running are subtracted when the capture-session ledger shows them, but an "
+    "interruption inside a run that the device never got to write down cannot appear "
+    "here, and neither can time before the first run or after the last. Treat these "
     "figures as an upper bound on how much was observed."
 )
 
@@ -257,6 +300,33 @@ NO_RECORDED_GAPS_NOTE = "No monitoring gaps were recorded within this span."
 ABSENCE_NOTE = (
     "Hours that were not monitored are not quiet hours: no event could be recorded then, "
     "so the absence of an event in those hours is not evidence that no sound occurred."
+)
+
+# --- Off air: the monitor was not running at all -----------------------------------
+#
+# A gap row is written by the *running* monitor when its audio source fails. The most
+# ordinary outage of all leaves no gap row: the monitor was simply not running (stopped
+# for the day, rebooted, crashed, power cut). The capture-session ledger records it
+# anyway, as a hole between one session's end and the next one's start, so these periods
+# are named and dated here rather than quietly counted as monitored time.
+
+OFF_AIR_REASON = "monitor not running"
+
+OFF_AIR_HEADING = "Time the monitor was not running"
+
+OFF_AIR_NOTE = (
+    "In these periods no monitor was running, so nothing could be measured. They are "
+    "counted as not monitored, not as quiet. No monitoring gap is recorded for them: "
+    "writing one down requires a running monitor, and there was none."
+)
+
+NO_OFF_AIR_NOTE = "The capture-session record shows a monitor running for the whole of this span."
+
+OFF_AIR_UNKNOWN_NOTE = (
+    "This record carries no capture sessions, so periods when no monitor was running "
+    "cannot be identified from it and are not subtracted below. The coverage figure "
+    "therefore assumes the device was listening whenever no gap was recorded, which is "
+    "the most generous reading the record allows."
 )
 
 
@@ -276,6 +346,16 @@ def _coverage_sentence(report: ViolationReport) -> str:
     )
 
 
+def _off_air_sentence(report: ViolationReport) -> str:
+    """What the record can say about time with no monitor running."""
+    if report.off_air is None:
+        return OFF_AIR_UNKNOWN_NOTE
+    if not report.off_air:
+        return NO_OFF_AIR_NOTE
+    hours = report.off_air_hours or 0.0
+    return f"No monitor was running for {hours:.1f} of these hours. {OFF_AIR_NOTE}"
+
+
 def coverage_text_lines(report: ViolationReport) -> list[str]:
     """The coverage statement as plain-text lines, for the CSV comment preamble."""
     lines = [COVERAGE_HEADING, "", _coverage_sentence(report), "", ABSENCE_NOTE, ""]
@@ -288,6 +368,11 @@ def coverage_text_lines(report: ViolationReport) -> list[str]:
         ]
     else:
         lines += ["", NO_RECORDED_GAPS_NOTE]
+    lines += ["", OFF_AIR_HEADING, "", _off_air_sentence(report)]
+    lines += [
+        f"  - {g.start_iso} to {g.end_iso} ({_fmt_seconds(g.seconds)})"
+        for g in report.off_air or []
+    ]
     return lines
 
 
@@ -331,7 +416,37 @@ def coverage_html(report: ViolationReport) -> str:
         f"{banner}\n"
         "<h3>Recorded monitoring gaps</h3>\n"
         f"{detail}\n"
-        f'<div class="note"><p>{escape(UNRECORDED_GAP_CAVEAT)}</p></div>'
+        f'<div class="note"><p>{escape(UNRECORDED_GAP_CAVEAT)}</p></div>\n'
+        f"{_off_air_html(report)}"
+    )
+
+
+def _off_air_html(report: ViolationReport) -> str:
+    """The off-air block: when no monitor was running, or why that cannot be said.
+
+    Rendered unconditionally alongside the gap ledger, and kept separate from it: a
+    recorded gap and an unrun monitor are different facts, and "no monitoring gaps were
+    recorded" sitting alone under a 20% coverage figure reads as "nothing was wrong".
+    """
+    if report.off_air:
+        rows = "".join(
+            f'<tr><th scope="row">{escape(g.start_iso)}</th>'
+            f"<td>{escape(g.end_iso)}</td>"
+            f"<td>{_fmt_seconds(g.seconds)}</td></tr>"
+            for g in report.off_air
+        )
+        detail = (
+            "<table><caption>Periods with no monitor running — nothing could be "
+            'measured</caption><thead><tr><th scope="col">Off air from</th>'
+            '<th scope="col">Off air until</th><th scope="col">Length</th>'
+            f"</tr></thead><tbody>{rows}</tbody></table>"
+        )
+    else:
+        detail = ""
+    return (
+        f"<h3>{escape(OFF_AIR_HEADING)}</h3>\n"
+        f'<div class="note"><p>{escape(_off_air_sentence(report))}</p></div>\n'
+        f"{detail}"
     )
 
 
@@ -344,7 +459,7 @@ def violations_to_csv(
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
     gaps: list[Gap] | None = None,
-    session: Session | None = None,
+    sessions: Sequence[Session] | None = None,
 ) -> int:
     """Write every event with a within/outside-quiet-hours flag. Returns rows written.
 
@@ -363,7 +478,7 @@ def violations_to_csv(
         tz_name=tz_name,
         offsets_db=offsets_db,
         gaps=gaps,
-        session=session,
+        sessions=sessions,
     )
     with Path(path).open("w", newline="", encoding="utf-8") as fh:
         for line in [*cover_text_lines(), "", *coverage_text_lines(report)]:

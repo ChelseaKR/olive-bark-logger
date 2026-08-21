@@ -16,6 +16,26 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **Monitoring coverage no longer counts time when no monitor was running.** The
+  coverage figure was the reporting span minus the recorded gap ledger, and a gap row is
+  only ever written by a *running* monitor catching its own audio-source failure
+  (`resilient_source`, reason `device-error`). The most ordinary outage there is — the
+  monitor simply not running, after a stop, a reboot, a crash, or a power cut — writes
+  no gap row at all, so every hour of it was counted as monitored. A log of two runs
+  with eight hours off air between them reported "the device monitored 9.5 of 9.5
+  wall-clock hours (100%)", in green, in the document the README points at for a
+  neighbor/landlord/HOA submission. Coverage is now derived from the capture-session
+  ledger, which does record those hours as the hole between one session's end and the
+  next one's start: the same log now reports 2.0 of 10.0 hours (20%), lists the off-air
+  stretch with its bounds and length under a new "Time the monitor was not running"
+  heading in both the HTML and the CSV preamble, and hatches those hours as *not
+  monitored* in the calendar heatmap (a third state that was previously reachable only
+  from a `device-error` gap). A log with no capture sessions at all cannot support the
+  claim in either direction, so it keeps the old whole-span-minus-gaps figure and says
+  in writing that it is the most generous reading the record allows. Also fixed in the
+  same arithmetic: two *overlapping* recorded gaps were subtracted twice, understating
+  coverage. Gated in `tests/test_report_content.py`.
+
 - The quiet-hours violation report (`--violations-html`, `--violations-csv`, and the
   `--violations-pdf` rendered from the same HTML) now states **how much of the window
   the device actually monitored**, in the Summary block above the counts: monitored vs
