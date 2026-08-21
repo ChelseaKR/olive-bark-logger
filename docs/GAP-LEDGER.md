@@ -1,6 +1,12 @@
 # Gap Ledger
 
-**Last verified: 2026-07-05 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+**Last verified: 2026-08-15 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+
+> An entry that describes a gap the code has since closed is as wrong as one that hides a
+> gap — gentler, but the same defect: a document about the code that stopped tracking the
+> code. `tests/test_gap_ledger.py` reads this file and the README against a small set of
+> code facts, so a stale entry fails a build rather than ageing quietly. Add an assertion
+> there whenever an entry here makes a claim a test could check.
 
 This is the durable, in-repo tracking mechanism the README's
 [Standards Conformance table](../README.md#standards-conformance) points to for every
@@ -55,25 +61,61 @@ block-mode still open), SEC-08, SEC-19, SEC-27, SEC-29, SEC-35..38.
   OpenSSF Scorecard workflow/report.
 Plan: REMEDIATION.md P1-2, P1-3, P1-4, P1-6, P2-1.
 
-## GAP-CICD-1 — CI/CD: apply the branch ruleset, add zizmor + CodeQL-actions
-**Status: Open (2026-07-05).** Controls: CICD-11, CICD-13, CICD-14, CICD-15, CICD-16,
-CICD-19, CICD-20.
-`.github/CODEOWNERS` and `.github/rulesets/main.json` are committed (this pass; see
-P0-2 in the remediation plan), but the ruleset has not been **applied** — that's a live
-GitHub UI/API action outside this session's scope (see README Standards Conformance
-table, CI/CD row, for the exact command). No zizmor workflow-linter step; no CodeQL
-`language: actions` workflow.
-Plan: REMEDIATION.md P0-2 (activation step), P1-2, P1-6 (revisit required-check list
-after these land).
+## GAP-CICD-1 — CI/CD: reconcile the live branch ruleset with the committed one, add zizmor + CodeQL-actions
+**Status: Partially open (updated 2026-08-15).** Controls: CICD-11, CICD-13, CICD-14,
+CICD-15, CICD-16, CICD-19, CICD-20.
 
-## GAP-A11Y-1 — Accessibility: scan the PWA, Lighthouse CI, regenerate the stale walkthrough, ACR/VPAT
-**Status: Open (2026-07-05).** Controls: A11Y-01/02/03/05/06 (PWA-surface half),
-A11Y-11/12 (stale since `8a9f1eb`, 2026-06-29), A11Y-14, A11Y-18.
-`pwa/index.html` is never scanned by pa11y/axe or Lighthouse; the committed manual
-walkthrough (`docs/a11y/STATEMENT.md`, moved this pass from
-`docs/audits/accessibility-2026-06-05.md`) predates the calendar-heatmap +
-violations-export template change and has not been regenerated; no ACR/VPAT artifact
-exists; no NVDA or iOS VoiceOver pass.
+Correction to this entry as written on 2026-07-05: it said the ruleset "has not been
+**applied**". **A ruleset has been active on `main` since 2026-07-09** — `protect-main`
+(id 18752850, `enforcement: active`). This entry, `.github/rulesets/README.md`, and the
+README's CI/CD row all kept saying otherwise for over a month, while `ci.yml`'s
+`test-matrix-macos-nightly-notice` job existed precisely because the ruleset *is* live.
+The stated way to confirm it (`--jq '.[] | select(.name=="main")'`) selected on a name
+the live ruleset does not have, printed nothing, and exited 0 — so the check could only
+ever return "not applied". Replaced by `make ruleset-check`
+(`scripts/check_ruleset.py`), which selects by target rather than name, prints every
+difference, and exits 2 with `CANNOT VERIFY` rather than 0 when it cannot read the live
+configuration.
+
+**Enforced today:** deletion, non-fast-forward, and eleven required status checks — of
+which five are the always-green macOS twin job, so the real strength is six.
+
+**Still open:**
+- The live ruleset is weaker than the committed definition in four ways (verified
+  2026-08-15): `strict_required_status_checks_policy` is `false`, `required_signatures`
+  is absent, the whole `pull_request` rule is absent, and one bypass actor
+  (`ChelseaKR`, `bypass_mode: pull_request`) exists where the file says `[]`. Closing
+  this means either applying the file (commit signing must be set up first) or amending
+  the file to reality as a decision — both are live/human actions, enumerated in
+  `.github/rulesets/README.md`.
+- No zizmor workflow-linter step; no CodeQL `language: actions` workflow.
+
+Plan: REMEDIATION.md P0-2 (now a reconciliation, not an activation), P1-2, P1-6
+(revisit required-check list after these land).
+
+## GAP-A11Y-1 — Accessibility: Lighthouse CI, regenerate the stale walkthrough, ACR/VPAT, AT pass
+**Status: Partially open (updated 2026-08-15).** Controls: A11Y-01/02/03/05/06 (PWA-surface
+half — automated scan **closed**, manual pass still open), A11Y-11/12 (stale since
+`8a9f1eb`, 2026-06-29), A11Y-14, A11Y-18.
+
+Correction to this entry as written on 2026-07-05: its opening sentence claimed the PWA
+page had no pa11y/axe or Lighthouse coverage at all. **The axe half closed on
+2026-07-11** (`8858c45`, #17): `.github/workflows/ci.yml:113–116` runs
+`npx pa11y --runner axe ./pwa/index.html` on every push and pull request, in the `verify`
+job, which is a required status check. That was six days after this entry was written and
+it stayed stale for a month; the clause that reads as the headline was the wrong one.
+
+Still open, unchanged:
+- **No Lighthouse CI accessibility score** for either surface.
+- **The manual walkthrough is stale.** `docs/a11y/STATEMENT.md` (moved this pass from
+  `docs/audits/accessibility-2026-06-05.md`) predates the calendar-heatmap +
+  violations-export template change and has not been regenerated.
+- **No manual pass on the PWA surface** — keyboard / screen-reader / zoom / reflow. The
+  axe scan is automated coverage, which is not the same claim.
+- **No ACR/VPAT artifact.**
+- **No NVDA+Firefox/Chrome or iOS VoiceOver pass** (VoiceOver/macOS only, on the report).
+- **No target-size (WCAG 2.5.8) check** for the PWA's real buttons and inputs.
+
 Plan: REMEDIATION.md P1-7, P2-2.
 
 ## GAP-REL-1 — Release & Versioning: the release/supply-chain pipeline is still absent
