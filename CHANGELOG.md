@@ -16,6 +16,22 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **Two documents described gaps the code had already closed.** `README.md` called
+  opt-in `--log-format json` "not implemented yet" and "planned" in two places; it
+  shipped 2026-07-14 (`9a8dd4b`, #31) and the README was edited twice afterwards
+  without catching it. `GAP-A11Y-1`'s headline clause said `pwa/index.html` was never
+  scanned by pa11y/axe; CI has run `npx pa11y --runner axe ./pwa/index.html` on every
+  push and PR since 2026-07-11 (`8858c45`, #17), in the required `verify` job. Both
+  corrected, and the rest of GAP-A11Y-1 — no Lighthouse, stale walkthrough, no manual
+  PWA pass, no ACR/VPAT, no NVDA/iOS VoiceOver — deliberately left open, because an
+  automated scan is not a human walkthrough.
+- `docs/a11y/STATEMENT.md`, the canonical accessibility declaration, carried the same
+  stale "never scanned" claim in two places and is corrected with it.
+- **The ledger is now readable by a test.** `tests/test_gap_ledger.py` pairs each
+  closed-gap claim with the code fact that closed it (does `monitor/log.py` implement
+  the JSON emitter; does `ci.yml` scan `pwa/index.html`) and fails when any document
+  still describes it as open. Each check fires only while the capability is genuinely
+  present, so removing a feature relaxes the check rather than breaking it.
 - **Monitoring coverage no longer counts time when no monitor was running.** The
   coverage figure was the reporting span minus the recorded gap ledger, and a gap row is
   only ever written by a *running* monitor catching its own audio-source failure
