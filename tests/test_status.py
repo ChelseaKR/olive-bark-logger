@@ -13,6 +13,7 @@ from monitor.detector import Event
 from monitor.service import _write_status_page
 from report.aggregate import summarize
 from report.status import (
+    FRAME_COVERAGE_NOT_YET_STARTED,
     GAP_UNAVAILABLE_NOTE,
     StatusAggregates,
     collect_status_aggregates,
@@ -90,6 +91,32 @@ def test_live_stats_show_level_coverage_and_frames():
     assert "-12.3 dBFS" in html  # most recent level from the payload
     assert "90.0%" in html  # frame coverage 0.9
     assert "900" in html and "100" in html  # frames seen / dropped
+
+
+# --- absence-as-value: frame coverage before any frames are processed ----------
+#
+# `CaptureStats.coverage` (monitor/health.py) returns 1.0 -- "nothing dropped" -- when
+# no frames have been seen or dropped yet, and monitor/service.py publishes the very
+# first heartbeat before the capture loop reads its first frame. Left alone, every
+# run's first status page would claim "Frame coverage: 100.0%" for a device that has
+# not yet been asked for a single frame -- the same defect class as the empty-log
+# "Loudest peak: 0.0 dBFS" bug fixed in tests/test_absence_as_value.py.
+
+
+def test_frame_coverage_not_claimed_before_any_frames_processed():
+    payload = _payload(frames_seen=0, frames_dropped=0, frame_coverage=1.0)
+    html = render_status(payload, _aggregates(_events()), now=START)
+    assert "100.0%" not in html
+    assert FRAME_COVERAGE_NOT_YET_STARTED in html
+
+
+def test_frame_coverage_still_shown_once_frames_are_dropped_with_none_seen():
+    """0 seen, some dropped is a real (if bad) 0% coverage, not an absence -- the
+    guard is on "nothing observed at all", not on "nothing seen"."""
+    payload = _payload(frames_seen=0, frames_dropped=5, frame_coverage=0.0)
+    html = render_status(payload, _aggregates(_events()), now=START)
+    assert "0.0%" in html
+    assert FRAME_COVERAGE_NOT_YET_STARTED not in html
 
 
 def test_last_night_summary_present():

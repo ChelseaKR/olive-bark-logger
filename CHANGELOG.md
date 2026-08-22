@@ -44,6 +44,16 @@ release" defect this file's absence let stand.
   GAP-NN", which is what the link actually resolves to. No gap changed state.
 
 ### Fixed
+- **The status page claimed 100% frame coverage before the monitor had read a single
+  frame.** `CaptureStats.coverage` (monitor/health.py) returns `1.0` — a reasonable
+  "nothing dropped" identity — when no frames have been seen or dropped yet, and
+  `monitor/service.py` publishes the very first heartbeat before the capture loop reads
+  its first frame. Every run's first `status.html` therefore showed "Frame coverage:
+  100.0%" for a device that had not yet been asked for one. The main report's
+  measurement-conditions paragraph already guarded this correctly (it omits the
+  coverage sentence entirely when no frames have been counted); the status page's Live
+  Capture table did not. It now reads "not yet started, no frames processed yet" until
+  at least one frame has been seen or dropped. Gated in `tests/test_status.py`.
 - **Three more places where "no data" rendered as a confident value.** (1) A log with
   no events printed "Loudest peak: 0.0 dBFS" — digital full scale, the loudest reading
   the device can produce — in both the Python report and the browser edition; those

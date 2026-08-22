@@ -44,6 +44,14 @@ GAP_UNAVAILABLE_NOTE = (
     "whether captured frames were dropped while the monitor was running."
 )
 
+# `CaptureStats.coverage` (monitor/health.py) returns 1.0 when no frames have been seen
+# or dropped yet -- a reasonable "nothing was dropped" identity for that property, but
+# the very first heartbeat is published before the pipeline reads its first frame
+# (monitor/service.py calls `heartbeat()` ahead of the capture loop), so every run's
+# first status page would otherwise claim 100% frame coverage for a device that has not
+# yet been asked for a single frame. Absence is written as absence here too.
+FRAME_COVERAGE_NOT_YET_STARTED = "not yet started, no frames processed yet"
+
 
 @dataclass(frozen=True)
 class StatusAggregates:
@@ -178,16 +186,22 @@ def render_status(
     # --- live capture stats ---
     level = payload.get("last_level_dbfs")
     level_str = f"{float(level):.1f} dBFS" if isinstance(level, (int, float)) else "not reported"
-    coverage = _get_float(payload, "frame_coverage", 1.0)
     frames_seen = _get_int(payload, "frames_seen", 0)
     frames_dropped = _get_int(payload, "frames_dropped", 0)
+    # A coverage ratio is only a claim about frames actually offered to the pipeline.
+    # With none yet, `frame_coverage` reads back as 1.0 (see the constant's note above)
+    # -- state absence honestly instead of printing a false "100.0%".
+    if frames_seen + frames_dropped == 0:
+        coverage_str = FRAME_COVERAGE_NOT_YET_STARTED
+    else:
+        coverage_str = f"{_get_float(payload, 'frame_coverage', 1.0):.1%}"
     uptime_s = _get_float(payload, "uptime_s", 0.0)
     live_rows = _rows(
         [
             ("Most recent level", level_str),
             ("Frames seen", f"{frames_seen:,}"),
             ("Frames dropped", f"{frames_dropped:,}"),
-            ("Frame coverage", f"{coverage:.1%}"),
+            ("Frame coverage", coverage_str),
             ("Uptime", _fmt_age(uptime_s).replace(" ago", "")),
             ("Heartbeat", _fmt_age(age_s)),
             ("Status", _get_str(payload, "status", "unknown")),
