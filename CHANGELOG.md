@@ -16,6 +16,20 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Changed
+- **The live branch ruleset and the committed definition now match** (maintainer
+  decision, 2026-08-21). Live `protect-main` was brought up to
+  `.github/rulesets/main.json` for the `pull_request` rule (approvals 0 per ADR-0001,
+  stale-review dismissal, thread resolution, code-owner routing), strict required
+  status checks (stale branches cannot merge), and `bypass_actors: []` (the
+  maintainer's former `pull_request` bypass is gone — no one merges past the checks).
+  `main.json` was amended the other way for one rule: `required_signatures` is dropped
+  with a reasoned note in `.github/rulesets/README.md` — commits here are routinely
+  made by delegated agents without commit signing configured, so the rule would reject
+  every push; release tags are signed elsewhere in the portfolio, and commit signing
+  remains a separate future decision. The file also takes the live ruleset's name.
+  `make ruleset-check` exits 0 against the live API, and
+  `tests/test_ruleset_check.py` pins recorded before/after fixtures so both the
+  historical divergence and the reconciled state stay tested offline.
 - The README standards-conformance table now declares all fifteen standards.
   Performance, Incident Response, Data Governance, and AI Development
   Measurement were absent from it, so none of the four was recorded as met, as

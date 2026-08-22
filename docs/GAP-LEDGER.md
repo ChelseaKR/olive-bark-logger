@@ -80,14 +80,17 @@ configuration.
 **Enforced today:** deletion, non-fast-forward, and eleven required status checks — of
 which five are the always-green macOS twin job, so the real strength is six.
 
+Update 2026-08-21: **the ruleset divergence is closed.** The live `protect-main` was
+brought up to `main.json` for the `pull_request` rule (approvals 0 per ADR-0001),
+`strict_required_status_checks_policy: true`, and `bypass_actors: []` (the maintainer's
+former `pull_request` bypass is gone); `main.json` was amended to drop
+`required_signatures` as a decision (delegated agents commit unsigned; release tags are
+signed elsewhere in the portfolio; commit signing is a separate future decision — see
+`.github/rulesets/README.md`) and to carry the live name. `make ruleset-check` exits 0
+against the live API, and `tests/test_ruleset_check.py` pins a recorded copy of the
+reconciled live ruleset.
+
 **Still open:**
-- The live ruleset is weaker than the committed definition in four ways (verified
-  2026-08-15): `strict_required_status_checks_policy` is `false`, `required_signatures`
-  is absent, the whole `pull_request` rule is absent, and one bypass actor
-  (`ChelseaKR`, `bypass_mode: pull_request`) exists where the file says `[]`. Closing
-  this means either applying the file (commit signing must be set up first) or amending
-  the file to reality as a decision — both are live/human actions, enumerated in
-  `.github/rulesets/README.md`.
 - No zizmor workflow-linter step; no CodeQL `language: actions` workflow.
 
 Plan: REMEDIATION.md P0-2 (now a reconciliation, not an activation), P1-2, P1-6

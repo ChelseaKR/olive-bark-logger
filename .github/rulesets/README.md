@@ -1,8 +1,11 @@
-# Branch ruleset — what is live, and how this file differs from it
+# Branch ruleset — what is live, and that this file now matches it
 
-**A ruleset has been active on `main` since 2026-07-09.** It is named `protect-main`
-(id `18752850`, last updated 2026-07-19, `enforcement: active`), and it is **not** this
-file. Verified 2026-08-15 with `make ruleset-check`.
+**A ruleset has been active on `main` since 2026-07-09**: `protect-main`
+(id `18752850`, `enforcement: active`). **On 2026-08-21 the live ruleset and this file
+were reconciled** — the live configuration was brought up to `main.json` for the
+`pull_request` rule, strict required status checks, and `bypass_actors: []`, and
+`main.json` was amended to drop `required_signatures` (decision note below) and to carry
+the live ruleset's name. `make ruleset-check` exits 0 against the live API.
 
 This document used to say the opposite — that nothing had been applied, and that "until a
 ruleset like this is active, every merge-blocking gate in `.github/workflows/ci.yml` is
@@ -13,6 +16,15 @@ ruleset requires five macOS contexts, and its comment says so.
 ## What is actually enforced on `main` right now
 
 - **Deletion** and **non-fast-forward** (force-push) are blocked.
+- **A pull request is required** — no direct pushes to `main` by anyone. Approvals
+  required: 0 (solo-maintainer posture, ADR-0001); stale reviews are dismissed on push;
+  review threads must be resolved; `CODEOWNERS` routing is on for any future second
+  contributor.
+- **Stale branches cannot merge** (`strict_required_status_checks_policy: true`): the
+  branch must be up to date with `main` before merging.
+- **No bypass actors.** No one — including the repository owner — merges past these
+  rules. (Until 2026-08-21 the live ruleset granted the maintainer a `pull_request`
+  bypass; it was removed in the reconciliation.)
 - **Eleven required status checks** must report green: `verify`, five
   `test-matrix (ubuntu-latest, 3.9–3.13)`, and five `test-matrix (macos-latest, 3.9–3.13)`.
 
@@ -23,27 +35,25 @@ ruleset requires five macOS contexts, and its comment says so.
   merge. That arrangement is deliberate and documented in `ci.yml`; the point here is
   that "eleven required checks" would overstate it.
 
-## How the live ruleset is weaker than this file
+## The 2026-08-21 reconciliation, and the one rule deliberately dropped
 
-`main.json` is the **intended** definition, kept here as the target. It is not a record
-of the live state. Four differences, all of them things the live configuration lacks:
+Before 2026-08-21 the live ruleset was weaker than this file in four named ways
+(`strict` false, `required_signatures` absent, no `pull_request` rule, one bypass
+actor). Three were closed by bringing the live configuration up to the file. The fourth
+went the other way, as a decision:
 
-| | committed `main.json` | live `protect-main` |
-|---|---|---|
-| name | `main` | `protect-main` |
-| `deletion`, `non_fast_forward` | yes | yes |
-| `required_status_checks` | 11 contexts | same 11 contexts |
-| `strict_required_status_checks_policy` | `true` | **`false`** — a stale branch can merge |
-| `required_signatures` | yes | **absent** |
-| `pull_request` rule (dismiss stale reviews, code-owner review, thread resolution) | yes | **absent** |
-| `bypass_actors` | `[]` | **one user (`ChelseaKR`), `bypass_mode: pull_request`** |
+**`required_signatures` was removed from `main.json` rather than applied.** Commits in
+this portfolio are routinely made by delegated agents on the maintainer's machines
+without GPG/SSH *commit* signing configured, so requiring signed commits would reject
+every push, including the maintainer's own. Release *tags* are signed elsewhere in the
+portfolio (a dedicated release-signing key with committed `allowed_signers`
+verification), which covers the artifact-provenance half of the intent. Turning commit
+signing on remains a separate future decision: set up signing locally first, then add
+the `required_signatures` rule back to `main.json` *and* the live ruleset in the same
+change.
 
-The bypass is the one to weigh: `bypass_mode: pull_request` does not permit a direct push
-to `main`, but it does let the maintainer merge a pull request past the required checks —
-the specific thing `bypass_actors: []` was written to prevent.
-
-Nothing in this list was chosen against the design notes below; the live ruleset was
-created separately and the two were never reconciled.
+The committed file also now carries the live ruleset's name, `protect-main`, so the two
+agree on identity as well as content.
 
 ## Checking it
 
@@ -75,30 +85,20 @@ that returns the same answer whether or not the thing exists is not a check.
 authenticated `gh` with permission to read repository administration, neither of which
 `verify` may assume. Run it when the ruleset or `ci.yml`'s job names change.
 
-## Closing the gap
+## Changing the ruleset from here on
 
-Two ways, and they are not equivalent:
+`main.json` is the record; the live ruleset must match it. To change the posture: amend
+`main.json` in a PR (with the design note that justifies it), then apply the same change
+live:
 
-1. **Bring the live ruleset up to this file** (the stronger posture). Adding
-   `required_signatures` means setting up commit signing *first* — see the design note
-   below — or every future push is rejected, including the maintainer's own. Applying
-   the rest is a live API call, a deliberate human action, not something an automated
-   pass should perform:
+```bash
+gh api --method PUT repos/ChelseaKR/olive-bark-logger/rulesets/18752850 \
+  -H "Accept: application/vnd.github+json" \
+  --input .github/rulesets/main.json
+```
 
-   ```bash
-   gh api --method PUT repos/ChelseaKR/olive-bark-logger/rulesets/18752850 \
-     -H "Accept: application/vnd.github+json" \
-     --input .github/rulesets/main.json
-   ```
-
-   Then `make ruleset-check` should print a match.
-
-2. **Accept the live posture** and amend `main.json` to it, rewriting the design notes
-   that no longer describe anything. Honest, but it drops signed commits and the
-   no-bypass stance, both of which were written down on purpose. Do this only as a
-   decision, not as a way to make the checker green.
-
-Either way, rename one so the two agree.
+Then `make ruleset-check` must print a match. Never change one side without the other:
+the divergence this file spent a month documenting started exactly that way.
 
 ## Design notes (these describe `main.json`, the target)
 
@@ -108,18 +108,16 @@ Either way, rename one so the two agree.
   meaningless bypass. `require_code_owner_review: true` still routes any *future*
   second contributor's changes through `CODEOWNERS`. See
   `docs/adr/0001-single-maintainer-review-posture.md` for the full reasoning and the
-  trigger for revisiting this (a second maintainer joins). **Not live today.**
-- **`required_signatures`.** Requires signed commits. Set up local commit signing
-  (`git config commit.gpgsign true` with a GPG key, or SSH signing) *before* activating
-  this rule, or every future push will be rejected, including the maintainer's own.
-  **Not live today.**
+  trigger for revisiting this (a second maintainer joins). **Live since 2026-08-21.**
+- **`required_signatures` — intentionally absent** since 2026-08-21; see the decision
+  note above. Re-adding it requires commit signing to be configured first, or every
+  push is rejected.
 - **`required_status_checks` contexts** list the current CI job names
   (`.github/workflows/ci.yml`: `verify` + all ten `test-matrix` legs). Update this list
   whenever a job is renamed or a new required job is added (e.g. once
   `docs/GAP-LEDGER.md#gap-sec-1` / `#gap-cicd-1` land CodeQL, zizmor, or Scorecard as
-  separate jobs). **Live, and matching** — this is the one rule the two agree on.
+  separate jobs). **Live, and matching.**
 - **`bypass_actors: []`.** No one — including repository admins — bypasses these rules.
   This was written as the direct fix for commit `74e6b8f` (2026-07-02), a direct-to-main
-  push with no PR reference. **Not live today:** the live ruleset grants the maintainer a
-  `pull_request` bypass. Direct pushes to `main` are blocked regardless, since that
-  bypass mode does not cover them.
+  push with no PR reference. **Live since 2026-08-21** — the maintainer's former
+  `pull_request` bypass was removed in the reconciliation.

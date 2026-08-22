@@ -36,6 +36,56 @@ from check_ruleset import main as check_main
 
 COMMITTED = json.loads((ROOT / ".github" / "rulesets" / "main.json").read_text(encoding="utf-8"))
 
+# The committed definition as it stood before the 2026-08-21 reconciliation: named
+# "main", carrying required_signatures. Recorded so the historical-differences test keeps
+# testing the defect it was written for after main.json was amended to match the live
+# ruleset (required_signatures dropped as a decision, name aligned).
+COMMITTED_2026_08_15 = {
+    **COMMITTED,
+    "name": "main",
+    "rules": [{"type": "required_signatures"}, *COMMITTED["rules"]],
+}
+
+# The live ruleset as returned by the API after the 2026-08-21 reconciliation (trimmed to
+# the fields the check reads). The offline twin of `make ruleset-check` exiting 0.
+LIVE_2026_08_21 = {
+    "id": 18752850,
+    "name": "protect-main",
+    "target": "branch",
+    "enforcement": "active",
+    "conditions": {"ref_name": {"exclude": [], "include": ["refs/heads/main"]}},
+    "rules": [
+        {"type": "non_fast_forward"},
+        {"type": "deletion"},
+        {
+            "type": "pull_request",
+            "parameters": {
+                "required_approving_review_count": 0,
+                "dismiss_stale_reviews_on_push": True,
+                "require_code_owner_review": True,
+                "require_last_push_approval": False,
+                "required_review_thread_resolution": True,
+            },
+        },
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "strict_required_status_checks_policy": True,
+                "do_not_enforce_on_create": False,
+                "required_status_checks": [
+                    {"context": "verify"},
+                    *(
+                        {"context": f"test-matrix ({os_}, {py})"}
+                        for os_ in ("ubuntu-latest", "macos-latest")
+                        for py in ("3.9", "3.10", "3.11", "3.12", "3.13")
+                    ),
+                ],
+            },
+        },
+    ],
+    "bypass_actors": [],
+}
+
 # The live ruleset as returned by the API on 2026-08-15, trimmed to the fields the check
 # reads. Recorded rather than fetched so this test is offline and deterministic; the
 # live-vs-file question is answered by `make ruleset-check`, not by the test suite.
@@ -84,8 +134,11 @@ def test_the_check_sees_the_live_ruleset_despite_the_different_name(tmp_path, ca
 
 
 def test_every_documented_difference_is_reported():
-    """The four the issue enumerated, plus the name. Each named, not just counted."""
-    differences = "\n".join(diff_ruleset(COMMITTED, LIVE_2026_08_15))
+    """The four the issue enumerated, plus the name — against the definitions as they
+    stood on 2026-08-15. Each named, not just counted. Pinned to the recorded committed
+    definition of that date, because the current main.json was reconciled on 2026-08-21
+    and no longer differs from the live ruleset."""
+    differences = "\n".join(diff_ruleset(COMMITTED_2026_08_15, LIVE_2026_08_15))
     assert "name" in differences and "protect-main" in differences
     assert "required_signatures" in differences
     assert "pull_request" in differences
@@ -100,6 +153,16 @@ def test_a_matching_ruleset_is_reported_as_a_match(tmp_path, capsys):
     assert "matches" in capsys.readouterr().out
 
 
+def test_the_reconciled_live_ruleset_matches_the_committed_definition(tmp_path, capsys):
+    """The 2026-08-21 reconciliation, held offline: the recorded post-reconciliation
+    live ruleset and the current main.json agree. If either drifts, this fails before
+    anyone needs the network to notice."""
+    rc = check_main(["--live-json", str(_write(tmp_path, LIVE_2026_08_21))])
+    assert rc == 0
+    assert "matches" in capsys.readouterr().out
+    assert diff_ruleset(COMMITTED, LIVE_2026_08_21) == []
+
+
 def test_a_weakened_ruleset_never_passes(tmp_path):
     """Each weakening on its own is caught -- not only the full set together."""
     for weakened in (
@@ -108,11 +171,22 @@ def test_a_weakened_ruleset_never_passes(tmp_path):
             **COMMITTED,
             "bypass_actors": [{"actor_id": 1, "actor_type": "User", "bypass_mode": "always"}],
         },
+        {**COMMITTED, "rules": [r for r in COMMITTED["rules"] if r["type"] != "pull_request"]},
         {
             **COMMITTED,
-            "rules": [r for r in COMMITTED["rules"] if r["type"] != "required_signatures"],
+            "rules": [
+                {
+                    **r,
+                    "parameters": {
+                        **r.get("parameters", {}),
+                        "strict_required_status_checks_policy": False,
+                    },
+                }
+                if r["type"] == "required_status_checks"
+                else r
+                for r in COMMITTED["rules"]
+            ],
         },
-        {**COMMITTED, "rules": [r for r in COMMITTED["rules"] if r["type"] != "pull_request"]},
     ):
         assert diff_ruleset(COMMITTED, weakened), (
             f"weakening not detected: {weakened.get('enforcement')}"
@@ -221,7 +295,9 @@ def test_the_docs_no_longer_claim_the_ruleset_is_unapplied():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     cicd_row = next(line for line in readme.splitlines() if line.startswith("| CI/CD |"))
     assert "not yet applied" not in cicd_row
-    assert "is** active" in cicd_row or "**is** active" in cicd_row
+    # Either shape is honest: "a ruleset is active" (2026-08-15 wording) or, since the
+    # 2026-08-21 reconciliation, "the live ruleset matches the committed definition".
+    assert "is** active" in cicd_row or "**is** active" in cicd_row or "**matches**" in cicd_row
 
     ledger = (ROOT / "docs" / "GAP-LEDGER.md").read_text(encoding="utf-8")
     cicd_entry = ledger.split("## GAP-CICD-1")[1].split("## GAP-A11Y-1")[0]
