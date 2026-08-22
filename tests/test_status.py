@@ -15,6 +15,9 @@ from report.aggregate import summarize
 from report.status import (
     FRAME_COVERAGE_NOT_YET_STARTED,
     GAP_UNAVAILABLE_NOTE,
+    NO_OFF_AIR_NOTE,
+    OFF_AIR_NOTE,
+    OFF_AIR_UNAVAILABLE_NOTE,
     StatusAggregates,
     collect_status_aggregates,
     render_status,
@@ -82,7 +85,12 @@ def _html(**overrides: object) -> str:
 
 def test_renders_all_required_sections():
     html = _html()
-    for heading in ("Live capture", "Monitoring gaps", "Last night"):
+    for heading in (
+        "Live capture",
+        "Monitoring gaps",
+        "Time the monitor was not running",
+        "Last night",
+    ):
         assert f"<h2>{heading}</h2>" in html
 
 
@@ -139,6 +147,42 @@ def test_gap_ledger_present_lists_gaps():
     )
     assert "monitor down" in html
     assert GAP_UNAVAILABLE_NOTE not in html
+
+
+# --- absence-as-value: time the monitor was not running --------------------------
+#
+# A monitoring-gap row is written only by a *running* monitor catching its own source
+# failure (store.Gap), so the commonest outage -- the monitor simply not running, after
+# a stop, a crash, or a power cut -- leaves no gap row at all. Left alone, the status
+# page's "No monitoring gaps recorded in this window" sits next to "Events: 0" and reads
+# as a quiet, fully-monitored night whether or not anything was listening. See the same
+# defect class fixed for the main report's calendar heatmap and the violations export's
+# off-air section in tests/test_absence_as_value.py.
+
+
+def test_off_air_unavailable_when_no_session_record():
+    """Default aggregates carry no session data (off_air=None): say so, don't imply
+    full coverage just because no gap happened to be recorded either."""
+    html = _html()
+    assert OFF_AIR_UNAVAILABLE_NOTE in html
+
+
+def test_off_air_lists_periods_the_monitor_was_not_running():
+    html = render_status(
+        _payload(),
+        _aggregates(_events(), off_air=["2026-01-01 02:00–04:00 (2.0 h)"]),  # noqa: RUF001
+        now=START,
+    )
+    assert "2026-01-01 02:00" in html
+    assert OFF_AIR_NOTE in html
+    assert OFF_AIR_UNAVAILABLE_NOTE not in html
+    assert NO_OFF_AIR_NOTE not in html
+
+
+def test_no_off_air_when_session_record_covers_the_whole_window():
+    html = render_status(_payload(), _aggregates(_events(), off_air=[]), now=START)
+    assert NO_OFF_AIR_NOTE in html
+    assert OFF_AIR_UNAVAILABLE_NOTE not in html
 
 
 def test_level_not_reported_when_absent():
@@ -199,6 +243,55 @@ def test_collect_status_aggregates_lists_recorded_gaps(tmp_path):
     assert agg.gaps is not None and len(agg.gaps) == 1
     assert "5 min" in agg.gaps[0]
     assert "device error" in agg.gaps[0]
+
+
+def _start_session(store: EventStore, *, started_at: float) -> int:
+    return store.start_session(
+        started_at=started_at,
+        device_label="pi-1",
+        mic_model="m",
+        placement_note="p",
+        tz="UTC",
+        calibration_offset=0.0,
+        calibration_note="x",
+        app_version="0.1.0",
+    )
+
+
+def test_collect_status_aggregates_off_air_when_monitor_never_restarted(tmp_path):
+    """A session ran for an hour, then stopped -- and never restarted before the status
+    page was generated two hours later. No device-error gap exists to record: the
+    monitor was not running, not erroring, so there is nothing for that ledger to catch.
+    `agg.gaps` is correctly empty; the session ledger is the only record that shows the
+    last two hours went unmonitored, and the status page must surface it there instead
+    of leaving "No monitoring gaps recorded" to imply full coverage on its own."""
+    config = Config(db_path=str(tmp_path / "olive.db"))
+    with EventStore(config.db_path) as store:
+        sid = _start_session(store, started_at=START)
+        store.update_session(sid, frames_seen=3600, frames_dropped=0, ended_at=START + 3600)
+        # window_hours=3 scopes the status window to exactly [START, START+3h), i.e.
+        # session start to "now" -- so the only off-air time in scope is the two hours
+        # after the session ended, not also whatever came before the device ever ran.
+        agg = collect_status_aggregates(store, config, now=START + 3 * 3600, window_hours=3)
+    assert agg.gaps == []
+    assert agg.off_air is not None and len(agg.off_air) == 1
+    assert "2.0 h" in agg.off_air[0]
+    html = render_status(_payload(), agg, now=START + 3 * 3600)
+    assert "No monitoring gaps recorded in this window." in html
+    assert OFF_AIR_NOTE in html
+    assert NO_OFF_AIR_NOTE not in html
+
+
+def test_collect_status_aggregates_no_off_air_when_session_spans_the_window(tmp_path):
+    """A session comfortably covers the whole status window: off_air is the empty list
+    (a real, checked answer), not None ("cannot say") and not a false positive."""
+    config = Config(db_path=str(tmp_path / "olive.db"))
+    with EventStore(config.db_path) as store:
+        sid = _start_session(store, started_at=START - 7200)
+        store.update_session(sid, frames_seen=1, frames_dropped=0, ended_at=START + 7200)
+        agg = collect_status_aggregates(store, config, now=START, window_hours=1)
+    assert agg.off_air == []
+    assert NO_OFF_AIR_NOTE in render_status(_payload(), agg, now=START)
 
 
 def test_status_page_can_be_enabled_without_health_file(tmp_path):

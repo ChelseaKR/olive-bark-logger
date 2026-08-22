@@ -25,8 +25,14 @@ from report.aggregate import Summary, summarize
 
 # Reuse the report's stylesheet verbatim so the status page inherits the same
 # reduced-motion, focus-visible, print and color-scheme handling (and stays a single
-# source of truth for the look).
-from report.render import _STYLE
+# source of truth for the look). `on_air_spans`/`_subtract_spans` are the same
+# capture-session arithmetic the main report's calendar heatmap and the violations
+# export use, so the three surfaces cannot disagree about what "the monitor was not
+# running" means. Called with this page's own `[since, now)` window explicitly
+# (rather than `off_air_spans`'s derived window) so a monitor that never restarted
+# inside the window -- its last session ended before `since` -- still reads as
+# off-air for the whole window instead of clipping away to nothing.
+from report.render import _STYLE, _subtract_spans, on_air_spans
 
 if TYPE_CHECKING:
     from monitor.config import Config
@@ -42,6 +48,33 @@ DEFAULT_HEARTBEAT_INTERVAL_S = 60.0
 GAP_UNAVAILABLE_NOTE = (
     "Gap data unavailable for this status source. Frame coverage below still shows "
     "whether captured frames were dropped while the monitor was running."
+)
+
+# A monitoring-gap row is written by a *running* monitor catching its own source
+# failure (see store.Gap's docstring), so the commonest outage of all -- no monitor
+# running at all, after a stop, a reboot, a crash, or a power cut -- leaves no gap
+# behind. "No monitoring gaps recorded" next to zero events therefore reads as "a
+# quiet night" whether or not anything was actually listening. The capture-session
+# ledger is the only record that can tell the two apart (the hole between one
+# session's end and the next one's start), which is the same session arithmetic the
+# main report's calendar heatmap and the violations export's off-air section already
+# use for this (`report.render.on_air_spans` / `off_air_spans`). Absence of a gap is
+# not evidence of coverage.
+OFF_AIR_HEADING = "Time the monitor was not running"
+
+OFF_AIR_UNAVAILABLE_NOTE = (
+    "Whether the monitor was running for the whole of this window cannot be "
+    "determined for this status source: it carries no capture-session record. The "
+    "monitoring-gaps note above means only that no in-run device error was logged, "
+    "not that the monitor was listening the whole time."
+)
+
+NO_OFF_AIR_NOTE = "The capture-session record shows a monitor running for the whole of this window."
+
+OFF_AIR_NOTE = (
+    "In these periods no monitor was running, so nothing could be measured. They are "
+    "not monitoring gaps (writing one down requires a running monitor) and they are "
+    "not quiet time -- no event could have been recorded either way."
 )
 
 # `CaptureStats.coverage` (monitor/health.py) returns 1.0 when no frames have been seen
@@ -70,6 +103,11 @@ class StatusAggregates:
     # None means the caller could not supply gap data. An empty list means the ledger
     # was queried and no gaps overlapped the status window.
     gaps: list[str] | None = None
+    # None means the record carries no capture sessions, so time with no monitor
+    # running cannot be identified (the same "cannot say" as `gaps=None`, for a
+    # different ledger). An empty list means the session ledger was queried and shows
+    # a monitor running for the whole of the status window.
+    off_air: list[str] | None = None
 
 
 def collect_status_aggregates(
@@ -92,6 +130,20 @@ def collect_status_aggregates(
         f"({_fmt_duration(gap.duration)}, {gap.reason.replace('-', ' ')})"
         for gap in store.gaps(since=since, until=now)
     ]
+    # None (no session record at all) means "cannot say"; otherwise on_air_spans
+    # clips every session's and event's span to this page's own [since, now) window,
+    # so a session that ended before `since` correctly contributes nothing on-air
+    # here rather than stretching the window back to when it started.
+    on_air = on_air_spans(events, store.sessions(), (since, now))
+    off_air = (
+        None
+        if on_air is None
+        else [
+            f"{_fmt_ts(start, tz)}–{_fmt_ts(end, tz)} "  # noqa: RUF001 - range dash
+            f"({_fmt_duration(end - start)})"
+            for start, end in _subtract_spans([(since, now)], on_air)
+        ]
+    )
     return StatusAggregates(
         summary=summary,
         quiet_window=config.quiet_hours.label(),
@@ -100,6 +152,7 @@ def collect_status_aggregates(
         window_hours=window_hours,
         busiest_hour=busiest_hour,
         gaps=gaps,
+        off_air=off_air,
     )
 
 
@@ -222,6 +275,19 @@ def render_status(
         items = "".join(f"<li>{escape(g)}</li>" for g in aggregates.gaps)
         gaps_section = f"<ul>{items}</ul>"
 
+    # --- time the monitor was not running ---
+    # Kept as its own section rather than folded into "Monitoring gaps": a recorded
+    # gap and an unrun monitor are different facts, and "no monitoring gaps recorded"
+    # sitting alone above a quiet-looking night reads as "nothing was wrong" (see the
+    # module-level note next to OFF_AIR_HEADING).
+    if aggregates.off_air is None:
+        off_air_section = f'<p class="note">{escape(OFF_AIR_UNAVAILABLE_NOTE)}</p>'
+    elif not aggregates.off_air:
+        off_air_section = f"<p>{escape(NO_OFF_AIR_NOTE)}</p>"
+    else:
+        items = "".join(f"<li>{escape(o)}</li>" for o in aggregates.off_air)
+        off_air_section = f'<p class="note">{escape(OFF_AIR_NOTE)}</p>\n<ul>{items}</ul>'
+
     # --- last night ---
     minutes_with_events = summary.total_loud_seconds / 60.0
     if aggregates.busiest_hour is None:
@@ -275,6 +341,9 @@ rewrites in place; open it directly from disk. No server, no network, no audio.<
 
 <h2>Monitoring gaps</h2>
 {gaps_section}
+
+<h2>{escape(OFF_AIR_HEADING)}</h2>
+{off_air_section}
 
 <h2>Last night</h2>
 <p>Summary of the most recent {aggregates.window_hours} hours of logged events. Counts

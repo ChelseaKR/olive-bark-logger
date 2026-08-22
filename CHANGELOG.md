@@ -44,6 +44,20 @@ release" defect this file's absence let stand.
   GAP-NN", which is what the link actually resolves to. No gap changed state.
 
 ### Fixed
+- **The status page's "No monitoring gaps recorded" implied full coverage even when
+  the monitor had not been running at all.** A monitoring-gap row (`store.Gap`) is
+  written only by a *running* monitor catching its own source failure, so the
+  commonest outage of all — the monitor simply not running, after a stop, a crash, or
+  a power cut — leaves no gap row to find. `report/status.py`'s "Monitoring gaps"
+  section only ever queried that ledger, so a status page generated after the monitor
+  stopped and never restarted showed "No monitoring gaps recorded in this window"
+  next to "Events: 0", reading as a fully-monitored quiet night. The main report's
+  calendar heatmap and the violations export's off-air section already draw this
+  distinction from the capture-session ledger (`report.render.on_air_spans`); the
+  status page now does too, in its own "Time the monitor was not running" section,
+  scoped to the page's own reporting window (a session that ended before the window
+  began correctly reads as off-air for the whole window, not clipped away to
+  nothing). Gated in `tests/test_status.py`.
 - **The status page claimed 100% frame coverage before the monitor had read a single
   frame.** `CaptureStats.coverage` (monitor/health.py) returns `1.0` — a reasonable
   "nothing dropped" identity — when no frames have been seen or dropped yet, and
