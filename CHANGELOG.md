@@ -15,6 +15,13 @@ release" defect this file's absence let stand.
 
 ## [Unreleased]
 
+### Fixed
+- **PWA offline precache includes `./clock.js`** (fixes #65). `pwa/sw.js` previously
+  omitted `./clock.js` from `ASSETS`, breaking full offline functionality when
+  `app.js` imported `computeAnchor` and `toEpochSeconds`. Added a regression test
+  in `pwa/clock.test.mjs` ensuring all local modules statically imported by
+  `app.js` are present in `sw.js` precache assets.
+
 ### Changed
 - **The live branch ruleset and the committed definition now match** (maintainer
   decision, 2026-08-21). Live `protect-main` was brought up to

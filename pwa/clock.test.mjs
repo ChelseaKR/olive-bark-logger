@@ -1,6 +1,9 @@
 // Node test for the PWA clock mapping and gap-record handling. Run: node --test pwa/
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { computeAnchor, toEpochSeconds } from "./clock.js";
 import { eventsToCsv, summarize, violationsToCsv } from "./report.js";
 
@@ -54,4 +57,28 @@ test("gap records are excluded from event counts and both CSVs", () => {
 
   const violationLines = dataRows(violationsToCsv([real, gap], { tz: "UTC" }));
   assert.equal(violationLines.length, 2); // header + 1 real event only
+});
+
+test("sw.js precaches all local modules imported by app.js", () => {
+  const pwaDir = dirname(fileURLToPath(import.meta.url));
+  const appSrc = readFileSync(join(pwaDir, "app.js"), "utf8");
+  const swSrc = readFileSync(join(pwaDir, "sw.js"), "utf8");
+
+  // Extract static import specifiers from app.js (e.g. from "./clock.js")
+  const importRegex = /from\s+["'](\.\/[^"']+)["']/g;
+  const importedFiles = [];
+  let match;
+  while ((match = importRegex.exec(appSrc)) !== null) {
+    importedFiles.push(match[1]);
+  }
+
+  assert.ok(importedFiles.length > 0, "app.js should have relative module imports");
+
+  // Verify each imported relative module is listed in sw.js ASSETS
+  for (const mod of importedFiles) {
+    assert.ok(
+      swSrc.includes(`"${mod}"`) || swSrc.includes(`'${mod}'`),
+      `sw.js ASSETS precache list missing imported module: ${mod}`,
+    );
+  }
 });
