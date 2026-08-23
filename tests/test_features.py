@@ -62,3 +62,31 @@ def test_tagging_off_leaves_tag_none():
     frames.append((1.0, [0.0] * 10))
     events = list(run_pipeline(_source(frames), config))
     assert events[0].coarse_tag is None
+
+
+def test_tagger_buffer_does_not_grow_during_quiet():
+    """Regression test for #63: feats buffer must not accumulate frames during quiet stretches."""
+    from monitor.service import _TaggerSink
+
+    config = Config(threshold_dbfs=-35.0, min_duration_s=0.2, debounce_s=0.3, tagging=True)
+    sink = _TaggerSink(config, None, None)
+    for i in range(100):
+        sink.push_frame(i * 0.1, [0.0] * 10, relevant=False)
+    assert len(sink._feats) == 0
+
+    # Pushing loud frames records them
+    for i in range(5):
+        sink.push_frame(10.0 + i * 0.1, _loud(alternating=True), relevant=True)
+    assert len(sink._feats) == 5
+
+    # A quiet frame when an event is done clears
+    sink.push_frame(11.0, [0.0] * 10, relevant=False)
+    assert len(sink._feats) == 0
+
+    # End-to-end pipeline run with a long quiet stretch
+    quiet_frames = [(i * 0.1, [0.0] * 10) for i in range(100)]
+    loud_frames = [(10.0 + i * 0.1, _loud(alternating=True)) for i in range(6)]
+    closing_quiet = [(11.0, [0.0] * 10)]
+    events = list(run_pipeline(_source(quiet_frames + loud_frames + closing_quiet), config))
+    assert len(events) == 1
+    assert events[0].coarse_tag == BARK_LIKE

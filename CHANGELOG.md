@@ -16,6 +16,13 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **Per-event feature buffer in `run_pipeline` bounded during quiet stretches**
+  (fixes #63). When coarse tagging was enabled (`config.tagging = True`),
+  `run_pipeline` appended zero-crossing rates for every incoming frame into `feats`,
+  pruning only when an event closed. Across long quiet stretches without events, the
+  buffer grew unbounded. Feature extraction and event tagging are now encapsulated in
+  `_TaggerSink`, and `Detector` exposes `is_active` so features are only captured
+  for frames associated with active/starting events and cleared when inactive.
 - **PWA offline precache includes `./clock.js`** (fixes #65). `pwa/sw.js` previously
   omitted `./clock.js` from `ASSETS`, breaking full offline functionality when
   `app.js` imported `computeAnchor` and `toEpochSeconds`. Added a regression test

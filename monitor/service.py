@@ -65,15 +65,8 @@ def run_pipeline(
     # When tagging is on, keep (t, zcr) for recent frames so a closing event can be
     # classified over its own time window. The buffer is pruned past each event's end,
     # so it never holds more than one event's worth of frame features (numbers, no audio).
-    feats: list[tuple[float, float]] = []
+    tagger = _TaggerSink(config, store, session_id)
     ambient = _AmbientSink(config, store, session_id)
-
-    def finish(ev: Event) -> Event:
-        if config.tagging:
-            ev = _attach_tag(ev, feats)
-        if store is not None:
-            store.add_event(ev, session_id=session_id)
-        return ev
 
     for t, frame in source:
         if stats is not None:
@@ -81,17 +74,15 @@ def run_pipeline(
         # Store the raw dBFS level; the calibration offset is applied at render time so
         # the threshold and every persisted row are defined against the same raw scale.
         level = dbfs(frame)
-        if config.tagging:
-            feats.append((t, zero_crossing_rate(frame)))
+        tagger.push_frame(t, frame, detector.is_active or level >= config.threshold_dbfs)
         ambient.push(t, level)
         # `frame` is not referenced again; it is dropped on the next iteration.
         event = detector.push(t, level)
         if event is not None:
-            yield finish(event)
-            feats = [f for f in feats if f[0] > event.end]
+            yield tagger.finish(event)
     final = detector.flush()
     if final is not None:
-        yield finish(final)
+        yield tagger.finish(final)
     ambient.flush()
 
 
@@ -119,6 +110,39 @@ def checkpointed(
         if clock() - last >= interval_s:
             checkpoint()
             last = clock()
+
+
+class _TaggerSink:
+    """Buffers zero-crossing rates for active events and classifies closing events.
+
+    Wraps the tagging enabled/disabled branching in one place so run_pipeline stays
+    clean and low-complexity. When tagging is disabled (default), all methods are no-ops.
+    When tagging is enabled, frames are only recorded when an event is open or starting,
+    and buffered features are pruned on event completion, ensuring memory usage is O(1)
+    relative to quiet periods.
+    """
+
+    def __init__(self, config: Config, store: EventStore | None, session_id: int | None) -> None:
+        self._enabled = config.tagging
+        self._store = store
+        self._session_id = session_id
+        self._feats: list[tuple[float, float]] = []
+
+    def push_frame(self, t: float, frame: list[float], relevant: bool) -> None:
+        if not self._enabled:
+            return
+        if relevant:
+            self._feats.append((t, zero_crossing_rate(frame)))
+        elif self._feats:
+            self._feats.clear()
+
+    def finish(self, ev: Event) -> Event:
+        if self._enabled:
+            ev = _attach_tag(ev, self._feats)
+            self._feats = [f for f in self._feats if f[0] > ev.end]
+        if self._store is not None:
+            self._store.add_event(ev, session_id=self._session_id)
+        return ev
 
 
 class _AmbientSink:

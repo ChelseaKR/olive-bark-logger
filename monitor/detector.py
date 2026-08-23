@@ -72,6 +72,11 @@ class Detector:
         self._run_start = 0.0  # start timestamp of the current run
         self._best_run = 0.0  # longest run seen so far
 
+    @property
+    def is_active(self) -> bool:
+        """True while an event is open (between opening reading and close)."""
+        return self._active
+
     def push(self, t: float, level: float) -> Event | None:
         """Feed one reading. Returns an Event if a previously open one just closed."""
         above = level >= self.threshold
