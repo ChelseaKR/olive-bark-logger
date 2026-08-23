@@ -21,6 +21,13 @@ release" defect this file's absence let stand.
   `app.js` imported `computeAnchor` and `toEpochSeconds`. Added a regression test
   in `pwa/clock.test.mjs` ensuring all local modules statically imported by
   `app.js` are present in `sw.js` precache assets.
+- **The #65 regression test itself checked the whole file, not the precache list.**
+  It asserted an imported module's path appeared anywhere in `sw.js`'s source text,
+  so a stray comment mentioning the same string (rather than a real `ASSETS` entry)
+  would have made it pass while the module stayed genuinely missing from the
+  precache. It now extracts and checks membership in `ASSETS` specifically, with two
+  canary tests (against a synthetic fixture, not the real files) proving it actually
+  fails on both a real omission and a decoy mention outside the array.
 
 ### Changed
 - **The live branch ruleset and the committed definition now match** (maintainer
