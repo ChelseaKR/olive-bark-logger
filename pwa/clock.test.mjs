@@ -74,11 +74,69 @@ test("sw.js precaches all local modules imported by app.js", () => {
 
   assert.ok(importedFiles.length > 0, "app.js should have relative module imports");
 
-  // Verify each imported relative module is listed in sw.js ASSETS
+  // Extract only the ASSETS array's own contents, not the whole file: a
+  // stray comment or unrelated string elsewhere in sw.js that happens to
+  // mention a module's path must not satisfy this check. If ASSETS itself
+  // is ever renamed or restructured, this fails loudly rather than passing
+  // vacuously.
+  const assetsMatch = swSrc.match(/const ASSETS\s*=\s*\[([\s\S]*?)\]/);
+  assert.ok(assetsMatch, "sw.js should declare a const ASSETS = [...] precache list");
+  const assetsSrc = assetsMatch[1];
+
+  // Verify each imported relative module is an actual element of ASSETS.
   for (const mod of importedFiles) {
     assert.ok(
-      swSrc.includes(`"${mod}"`) || swSrc.includes(`'${mod}'`),
+      assetsSrc.includes(`"${mod}"`) || assetsSrc.includes(`'${mod}'`),
       `sw.js ASSETS precache list missing imported module: ${mod}`,
     );
   }
+});
+
+test("sw.js precache-completeness check actually fails on a real omission", () => {
+  // A canary proving the check above can go red, not just green: this is
+  // exactly the shape of the bug that motivated it (a module app.js
+  // imports, silently missing from ASSETS) — reproduced against a
+  // deliberately mismatched fixture pair, not the real sw.js/app.js.
+  const fakeAppSrc = 'import { x } from "./missing-module.js";\n';
+  const fakeSwSrc = 'const ASSETS = [\n  "./",\n  "./index.html",\n];\n';
+
+  const importRegex = /from\s+["'](\.\/[^"']+)["']/g;
+  const importedFiles = [];
+  let match;
+  while ((match = importRegex.exec(fakeAppSrc)) !== null) {
+    importedFiles.push(match[1]);
+  }
+  const assetsSrc = fakeSwSrc.match(/const ASSETS\s*=\s*\[([\s\S]*?)\]/)[1];
+
+  const missing = importedFiles.filter(
+    (mod) => !assetsSrc.includes(`"${mod}"`) && !assetsSrc.includes(`'${mod}'`),
+  );
+  assert.deepEqual(missing, ["./missing-module.js"]);
+});
+
+test("sw.js precache-completeness check is not fooled by a stray mention outside ASSETS", () => {
+  // The bug this test itself guards against: matching anywhere in the file
+  // text, rather than inside the ASSETS array specifically, would let a
+  // leftover comment mask a real omission. Confirms that no longer happens.
+  const fakeAppSrc = 'import { x } from "./missing-module.js";\n';
+  const fakeSwSrc =
+    'const ASSETS = [\n  "./",\n  "./index.html",\n];\n' +
+    '// TODO: keep "./missing-module.js" in sync with app.js\n';
+
+  const importRegex = /from\s+["'](\.\/[^"']+)["']/g;
+  const importedFiles = [];
+  let match;
+  while ((match = importRegex.exec(fakeAppSrc)) !== null) {
+    importedFiles.push(match[1]);
+  }
+  const assetsSrc = fakeSwSrc.match(/const ASSETS\s*=\s*\[([\s\S]*?)\]/)[1];
+
+  const missing = importedFiles.filter(
+    (mod) => !assetsSrc.includes(`"${mod}"`) && !assetsSrc.includes(`'${mod}'`),
+  );
+  assert.deepEqual(
+    missing,
+    ["./missing-module.js"],
+    "a mention of the module outside the ASSETS array must not count as precached",
+  );
 });
