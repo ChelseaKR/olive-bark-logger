@@ -13,7 +13,22 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE).then(async (c) => {
+      await Promise.allSettled(
+        ASSETS.map(async (asset) => {
+          try {
+            const res = await fetch(asset);
+            if (res.ok) {
+              await c.put(asset, res);
+            }
+          } catch {
+            // Individual fetch failure during install should not abort caching other assets
+          }
+        }),
+      );
+    }),
+  );
 });
 
 self.addEventListener("activate", (e) => {

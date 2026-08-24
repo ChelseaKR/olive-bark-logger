@@ -64,8 +64,10 @@ test("sw.js precaches all local modules imported by app.js", () => {
   const appSrc = readFileSync(join(pwaDir, "app.js"), "utf8");
   const swSrc = readFileSync(join(pwaDir, "sw.js"), "utf8");
 
-  // Extract static import specifiers from app.js (e.g. from "./clock.js")
-  const importRegex = /from\s+["'](\.\/[^"']+)["']/g;
+  // Extract static import specifiers from app.js (e.g. import ... from "./clock.js")
+  // Syntax-anchored to import/export statements so comments like "// ported from './legacy.js'"
+  // are not falsely matched as imports.
+  const importRegex = /^\s*(?:import|export)\b[\s\S]*?from\s+["'](\.\/[^"']+)["']/gm;
   const importedFiles = [];
   let match;
   while ((match = importRegex.exec(appSrc)) !== null) {
@@ -100,7 +102,7 @@ test("sw.js precache-completeness check actually fails on a real omission", () =
   const fakeAppSrc = 'import { x } from "./missing-module.js";\n';
   const fakeSwSrc = 'const ASSETS = [\n  "./",\n  "./index.html",\n];\n';
 
-  const importRegex = /from\s+["'](\.\/[^"']+)["']/g;
+  const importRegex = /^\s*(?:import|export)\b[\s\S]*?from\s+["'](\.\/[^"']+)["']/gm;
   const importedFiles = [];
   let match;
   while ((match = importRegex.exec(fakeAppSrc)) !== null) {
@@ -123,7 +125,7 @@ test("sw.js precache-completeness check is not fooled by a stray mention outside
     'const ASSETS = [\n  "./",\n  "./index.html",\n];\n' +
     '// TODO: keep "./missing-module.js" in sync with app.js\n';
 
-  const importRegex = /from\s+["'](\.\/[^"']+)["']/g;
+  const importRegex = /^\s*(?:import|export)\b[\s\S]*?from\s+["'](\.\/[^"']+)["']/gm;
   const importedFiles = [];
   let match;
   while ((match = importRegex.exec(fakeAppSrc)) !== null) {
