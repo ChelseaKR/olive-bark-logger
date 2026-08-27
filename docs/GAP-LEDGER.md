@@ -77,8 +77,38 @@ ever return "not applied". Replaced by `make ruleset-check`
 difference, and exits 2 with `CANNOT VERIFY` rather than 0 when it cannot read the live
 configuration.
 
-**Enforced today:** deletion, non-fast-forward, and eleven required status checks — of
-which five are the always-green macOS twin job, so the real strength is six.
+**Enforced today (2026-08-26):** deletion, non-fast-forward, a required pull request,
+and **six** required status checks — `verify` and five `test-matrix (ubuntu-latest, X)`
+legs. Count and strength are now the same number.
+
+Update 2026-08-26: **five of the eleven required checks could not fail, and are gone.**
+`test-matrix (macos-latest, 3.9–3.13)` were required to merge and were reported by
+`test-matrix-macos-nightly-notice`, a job that renamed itself to those five context names
+and ran one `echo`. The live API, read that day for `ci.yml` run 32648677865 on `main`:
+`labels: ["ubuntu-latest"]`, steps `["Set up job", "Run echo …", "Complete job"]`, four
+seconds, `conclusion: success`. The previous version of this entry conceded the point in
+prose ("the real strength is six") and left the fake checks required, which is the whole
+lesson: a documented placeholder gate is still a placeholder gate.
+
+The five contexts were removed from `main.json` and from the live ruleset, and the notice
+job was deleted. **No stand-in replaced it.** CI-CD-STANDARD §11b forbids `macos-*` on
+PR CI, so two checks that read real results were added *inside* the already-required
+`verify` job instead — no new required context name, because adding one is how this got
+in:
+
+- `scripts/check_nightly_macos.py` (`make nightly-check`) fails unless the nightly macOS
+  sweep ran on `main`, on runners the API labels `macos-*`, within 7 days, and passed.
+- `scripts/check_ruleset.py --scope public` fails unless the live ruleset still matches
+  `main.json`. That check existed, was correct, and ran nowhere; a PR rewriting the
+  committed ruleset merged green.
+
+Two limits, recorded rather than glossed: the macOS gate is **lagging** (a macOS-only
+regression merges, and blocks every merge after the next nightly catches it — nothing
+respecting §11b can do better), and CI's ruleset check runs `--scope public` because the
+Actions `GITHUB_TOKEN` cannot read repository administration, so **it does not check
+bypass actors**; `make ruleset-check` with a maintainer token is the only thing that
+does. A related defect was fixed in the same pass: `.get("bypass_actors", [])` had been
+reading the reduced payload's *absent* field as "[] — no one bypasses".
 
 Update 2026-08-21: **the ruleset divergence is closed.** The live `protect-main` was
 brought up to `main.json` for the `pull_request` rule (approvals 0 per ADR-0001),

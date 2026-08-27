@@ -16,6 +16,38 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **Five of the eleven required status checks on `main` were satisfied by an `echo`.**
+  The `protect-main` ruleset required `test-matrix (macos-latest, 3.9–3.13)` to merge.
+  Nothing on a pull request ran macOS; what reported those five contexts was
+  `test-matrix-macos-nightly-notice` in `ci.yml`, a job that renamed itself to the five
+  context names and whose entire body was one `echo`. The live API for `ci.yml` run
+  32648677865 on `main`: `labels: ["ubuntu-latest"]`, three steps, four seconds,
+  `conclusion: success`, every time. The ruleset read as eleven checks and enforced six.
+  The five contexts are removed from `.github/rulesets/main.json` **and from the live
+  ruleset**, and the notice job is deleted with no stand-in — a required context whose
+  job cannot fail is worse than an absent one, because it reads as coverage.
+- **The nightly macOS sweep now has consequences.** CI-CD-STANDARD §11b forbids
+  `macos-*` runners on PR CI, so no honest per-PR macOS gate exists here. New
+  `scripts/check_nightly_macos.py` (`make nightly-check`) fails unless the nightly sweep
+  ran on `main`, on runners the API labels `macos-*`, within 7 days, and passed — the
+  runner-label assertion being the specific defence against a repeat. It runs as a step
+  inside the already-required `verify` job, so it gained teeth without adding a required
+  check name. It is a **lagging** gate and says so on every run, pass or fail: a
+  macOS-only regression still merges, then blocks every merge after the next nightly
+  catches it.
+- **`make ruleset-check` existed, was correct, could fail, and ran nowhere.** A PR that
+  rewrote `.github/rulesets/main.json` merged green, because nothing compared the file
+  to the live ruleset except a human choosing to run the command. It now runs inside
+  `verify` as `scripts/check_ruleset.py --scope public`.
+- **`check_ruleset.py` reported a pass from a field it had never read.** The rulesets
+  endpoint answers any caller on a public repository, but the reduced payload omits
+  `bypass_actors` entirely; `.get("bypass_actors", [])` turned that omission into
+  "[] — no one bypasses". An absent field is now `CANNOT VERIFY` under `--scope full`,
+  and the new `--scope public` (what CI uses, since the Actions `GITHUB_TOKEN` cannot be
+  granted `administration`) prints "NOT CHECKED in this run: bypass actors" on the
+  passing path as well as the failing one. The same pass added comparison of the
+  `pull_request` rule's parameters, which had never been diffed at all:
+  `require_code_owner_review` flipping to `false` live was invisible.
 - **PWA offline precache includes `./clock.js`** (fixes #65). `pwa/sw.js` previously
   omitted `./clock.js` from `ASSETS`, breaking full offline functionality when
   `app.js` imported `computeAnchor` and `toEpochSeconds`. Added a regression test

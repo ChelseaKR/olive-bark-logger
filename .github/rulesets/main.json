@@ -49,21 +49,6 @@
           },
           {
             "context": "test-matrix (ubuntu-latest, 3.13)"
-          },
-          {
-            "context": "test-matrix (macos-latest, 3.9)"
-          },
-          {
-            "context": "test-matrix (macos-latest, 3.10)"
-          },
-          {
-            "context": "test-matrix (macos-latest, 3.11)"
-          },
-          {
-            "context": "test-matrix (macos-latest, 3.12)"
-          },
-          {
-            "context": "test-matrix (macos-latest, 3.13)"
           }
         ]
       }
