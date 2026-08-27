@@ -6,10 +6,10 @@ RUFF ?= .venv/bin/ruff
 MYPY ?= .venv/bin/mypy
 UV ?= uv
 
-.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check verify clean
+.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check nightly-check verify clean
 
 help:
-	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check verify clean"
+	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check nightly-check verify clean"
 
 venv:
 	@command -v $(UV) >/dev/null 2>&1 || { echo "uv not installed — see CONTRIBUTING.md#prerequisites"; exit 1; }
@@ -148,10 +148,20 @@ i18n:
 ruleset-check:
 	$(PY) scripts/check_ruleset.py
 
+# Fail unless the nightly macOS sweep (nightly.yml) actually ran on macOS runners,
+# recently, and passed. CI runs this inside the `verify` job, where it is merge-blocking;
+# this target is the local twin. Same network/auth caveat as ruleset-check, so it is not
+# part of `verify` either. It replaced five required status checks that an `echo` on an
+# ubuntu runner satisfied -- see .github/rulesets/README.md.
+nightly-check:
+	$(PY) scripts/check_nightly_macos.py
+
 verify: lint type cov security a11y pwa-test i18n
 	@echo "All local gates passed."
-	@echo "Note: 'make ruleset-check' is separate (needs network + gh auth) and is the"
-	@echo "only thing that can tell you whether the live branch ruleset matches the repo."
+	@echo "Note: 'make ruleset-check' and 'make nightly-check' are separate (they need"
+	@echo "network + gh auth). CI runs both inside the required 'verify' job; locally"
+	@echo "they are the only things that can tell you whether the live branch ruleset"
+	@echo "still matches the repo and whether the nightly macOS sweep is actually green."
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .coverage htmlcov report.html demo.db

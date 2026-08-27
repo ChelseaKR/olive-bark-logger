@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from check_ruleset import (
     CANNOT_VERIFY,
     CannotVerify,
+    bypass_is_visible,
     diff_ruleset,
     fetch_live_ruleset,
 )
@@ -36,14 +37,41 @@ from check_ruleset import main as check_main
 
 COMMITTED = json.loads((ROOT / ".github" / "rulesets" / "main.json").read_text(encoding="utf-8"))
 
+# The eleven contexts required from 2026-07-09 through 2026-08-26, five of which were
+# `test-matrix (macos-latest, X)` and were reported by an `echo` on an ubuntu runner.
+# Recorded rather than derived from main.json, because main.json no longer lists them
+# and the tests below are about the transition away from them.
+_CONTEXTS_THROUGH_2026_08_26 = [
+    {"context": "verify"},
+    *(
+        {"context": f"test-matrix ({os_}, {py})"}
+        for os_ in ("ubuntu-latest", "macos-latest")
+        for py in ("3.9", "3.10", "3.11", "3.12", "3.13")
+    ),
+]
+
+
+def _with_contexts(ruleset: dict, contexts: list[dict]) -> dict:
+    """A copy of `ruleset` whose required_status_checks rule lists exactly `contexts`."""
+    copied = json.loads(json.dumps(ruleset))
+    for rule in copied["rules"]:
+        if rule["type"] == "required_status_checks":
+            rule["parameters"]["required_status_checks"] = json.loads(json.dumps(contexts))
+    return copied
+
+
 # The committed definition as it stood before the 2026-08-21 reconciliation: named
-# "main", carrying required_signatures. Recorded so the historical-differences test keeps
-# testing the defect it was written for after main.json was amended to match the live
-# ruleset (required_signatures dropped as a decision, name aligned).
+# "main", carrying required_signatures, and still listing all eleven contexts. Recorded
+# so the historical-differences test keeps testing the defect it was written for after
+# main.json was amended (required_signatures dropped as a decision, name aligned, and on
+# 2026-08-26 the five placeholder macOS contexts removed).
 COMMITTED_2026_08_15 = {
-    **COMMITTED,
+    **_with_contexts(COMMITTED, _CONTEXTS_THROUGH_2026_08_26),
     "name": "main",
-    "rules": [{"type": "required_signatures"}, *COMMITTED["rules"]],
+    "rules": [
+        {"type": "required_signatures"},
+        *_with_contexts(COMMITTED, _CONTEXTS_THROUGH_2026_08_26)["rules"],
+    ],
 }
 
 # The live ruleset as returned by the API after the 2026-08-21 reconciliation (trimmed to
@@ -85,6 +113,19 @@ LIVE_2026_08_21 = {
     ],
     "bypass_actors": [],
 }
+
+# The live ruleset after the 2026-08-26 change: identical to the 2026-08-21 one except
+# that the five `test-matrix (macos-latest, X)` contexts are no longer required. That is
+# the whole diff, so it is expressed as the whole diff rather than retyped. The offline
+# twin of `make ruleset-check` exiting 0 today.
+LIVE_2026_08_26 = _with_contexts(
+    LIVE_2026_08_21,
+    [{"context": "verify"}]
+    + [
+        {"context": f"test-matrix (ubuntu-latest, {py})"}
+        for py in ("3.9", "3.10", "3.11", "3.12", "3.13")
+    ],
+)
 
 # The live ruleset as returned by the API on 2026-08-15, trimmed to the fields the check
 # reads. Recorded rather than fetched so this test is offline and deterministic; the
@@ -153,14 +194,53 @@ def test_a_matching_ruleset_is_reported_as_a_match(tmp_path, capsys):
     assert "matches" in capsys.readouterr().out
 
 
-def test_the_reconciled_live_ruleset_matches_the_committed_definition(tmp_path, capsys):
-    """The 2026-08-21 reconciliation, held offline: the recorded post-reconciliation
-    live ruleset and the current main.json agree. If either drifts, this fails before
-    anyone needs the network to notice."""
-    rc = check_main(["--live-json", str(_write(tmp_path, LIVE_2026_08_21))])
+def test_the_current_live_ruleset_matches_the_committed_definition(tmp_path, capsys):
+    """The 2026-08-26 change, held offline: the recorded live ruleset and the current
+    main.json agree. If either drifts, this fails before anyone needs the network to
+    notice."""
+    rc = check_main(["--live-json", str(_write(tmp_path, LIVE_2026_08_26))])
     assert rc == 0
     assert "matches" in capsys.readouterr().out
-    assert diff_ruleset(COMMITTED, LIVE_2026_08_21) == []
+    assert diff_ruleset(COMMITTED, LIVE_2026_08_26) == []
+
+
+def test_the_placeholder_macos_contexts_are_no_longer_required():
+    """The 2026-08-26 change itself, pinned so it cannot be quietly undone.
+
+    Five required contexts -- `test-matrix (macos-latest, 3.9 .. 3.13)` -- were reported
+    by `test-matrix-macos-nightly-notice`, a job whose only step was an `echo` and whose
+    runner label was `ubuntu-latest`. They are gone from main.json, and putting any of
+    them back without a job that can fail is the regression this test names.
+    """
+    contexts = {
+        c["context"]
+        for rule in COMMITTED["rules"]
+        if rule["type"] == "required_status_checks"
+        for c in rule["parameters"]["required_status_checks"]
+    }
+    placeholders = {c for c in contexts if "macos" in c}
+    assert not placeholders, (
+        "these contexts are required to merge again: "
+        + ", ".join(sorted(placeholders))
+        + ". CI-CD-STANDARD §11b forbids macos runners on PR CI, so nothing on a PR can "
+        "report them honestly; the last job that did reported an echo. The nightly "
+        "sweep is gated by `verify`'s check_nightly_macos.py step instead."
+    )
+    assert contexts, "a ruleset that requires nothing is not a gate either"
+    # And the change is a removal, not a swap: the real legs are still required.
+    assert "test-matrix (ubuntu-latest, 3.13)" in contexts
+    assert "verify" in contexts
+
+
+def test_the_2026_08_21_ruleset_no_longer_matches_the_file():
+    """The witness for the change: the eleven-context ruleset that was live until
+    2026-08-26 now differs from the committed definition, and the check names each of
+    the five contexts that went away. A check that could not tell those two apart would
+    be the same shape of defect as the job it removed."""
+    differences = "\n".join(diff_ruleset(COMMITTED, LIVE_2026_08_21))
+    for py in ("3.9", "3.10", "3.11", "3.12", "3.13"):
+        assert f"test-matrix (macos-latest, {py})" in differences
+    assert "required live, not in the committed definition" in differences
 
 
 def test_a_weakened_ruleset_never_passes(tmp_path):
@@ -203,6 +283,81 @@ def test_a_dropped_required_check_is_caught(tmp_path):
     assert "not required live" in differences
 
 
+# --- The reduced, publicly readable view of a ruleset ---------------------------------
+#
+# `GET /repos/{owner}/{repo}/rulesets/{id}` answers anyone on a public repository, and
+# the Actions GITHUB_TOKEN is one of those anyones: GitHub has no `administration`
+# permission a workflow can request. That reduced payload omits `bypass_actors`
+# altogether (verified against the live API, 2026-08-26), and `.get("bypass_actors", [])`
+# read the omission as "[] -- no one bypasses". A pass drawn from a field that was never
+# read is the exact shape this whole script exists to refuse.
+
+
+def _without_bypass(ruleset: dict) -> dict:
+    reduced = json.loads(json.dumps(ruleset))
+    reduced.pop("bypass_actors", None)
+    return reduced
+
+
+def test_an_absent_bypass_field_is_not_an_empty_one():
+    assert bypass_is_visible(LIVE_2026_08_26)
+    assert bypass_is_visible({"bypass_actors": [{"actor_id": 1}]})
+    assert not bypass_is_visible(_without_bypass(LIVE_2026_08_26))
+
+
+def test_full_scope_refuses_to_pass_a_ruleset_whose_bypass_actors_it_cannot_see(tmp_path, capsys):
+    """The hole this closes: before, this input exited 0 and read as a full match."""
+    rc = check_main(["--live-json", str(_write(tmp_path, _without_bypass(LIVE_2026_08_26)))])
+    out = capsys.readouterr().out
+    assert rc == CANNOT_VERIFY
+    assert "CANNOT VERIFY" in out
+    assert "bypass_actors" in out
+    assert "An absent field is not an empty one" in out
+
+
+def test_public_scope_passes_but_says_what_it_did_not_check(tmp_path, capsys):
+    """CI's mode. It may pass -- and it may never imply it checked bypass actors."""
+    rc = check_main(
+        [
+            "--scope",
+            "public",
+            "--live-json",
+            str(_write(tmp_path, _without_bypass(LIVE_2026_08_26))),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "matches" in out
+    assert "NOT CHECKED in this run: bypass actors" in out
+
+
+def test_public_scope_still_catches_every_other_weakening(tmp_path, capsys):
+    """Narrowing the claim must not narrow the teeth: the drift CI exists to catch is
+    still caught, and the disclaimer rides along with the failure too."""
+    drifted = _without_bypass(_with_contexts(LIVE_2026_08_26, [{"context": "verify"}]))
+    rc = check_main(["--scope", "public", "--live-json", str(_write(tmp_path, drifted))])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "test-matrix (ubuntu-latest, 3.13)" in out
+    assert "NOT CHECKED in this run: bypass actors" in out
+
+
+def test_the_pull_request_rule_parameters_are_compared(tmp_path):
+    """`require_code_owner_review` flipping off live was invisible until 2026-08-26:
+    only the presence of the `pull_request` rule was compared, never its parameters."""
+    for key, weaker in (
+        ("require_code_owner_review", False),
+        ("required_review_thread_resolution", False),
+        ("dismiss_stale_reviews_on_push", False),
+    ):
+        weakened = json.loads(json.dumps(LIVE_2026_08_26))
+        for rule in weakened["rules"]:
+            if rule["type"] == "pull_request":
+                rule["parameters"][key] = weaker
+        differences = "\n".join(diff_ruleset(COMMITTED, weakened))
+        assert f"pull_request.{key}" in differences, f"{key} weakened live, not reported"
+
+
 def test_unreadable_live_config_says_so_instead_of_passing(monkeypatch, capsys):
     """The rule the whole issue turns on: an unreadable configuration is not a matching
     one. Every failure mode exits 2 with CANNOT VERIFY, never 0."""
@@ -238,7 +393,7 @@ def test_an_empty_ruleset_list_is_cannot_verify_not_a_match(monkeypatch):
     """Empty output is what the old command produced. It must never read as agreement."""
     import check_ruleset
 
-    monkeypatch.setattr(check_ruleset, "_run_gh", lambda _args: [])
+    monkeypatch.setattr(check_ruleset, "run_gh", lambda _args: [])
     with pytest.raises(CannotVerify, match="no ruleset exists"):
         fetch_live_ruleset("owner/repo")
 
@@ -255,7 +410,7 @@ def test_a_ruleset_that_does_not_cover_main_is_cannot_verify(monkeypatch):
             "conditions": {"ref_name": {"include": ["refs/heads/dev"]}},
         }
 
-    monkeypatch.setattr(check_ruleset, "_run_gh", _fake)
+    monkeypatch.setattr(check_ruleset, "run_gh", _fake)
     with pytest.raises(CannotVerify, match="none covers"):
         fetch_live_ruleset("owner/repo")
 
@@ -273,7 +428,7 @@ def test_selection_is_by_target_so_a_rename_cannot_hide_it(monkeypatch):
             "rules": [],
         }
 
-    monkeypatch.setattr(check_ruleset, "_run_gh", _fake)
+    monkeypatch.setattr(check_ruleset, "run_gh", _fake)
     assert fetch_live_ruleset("owner/repo")["name"] == "renamed-again"
 
 

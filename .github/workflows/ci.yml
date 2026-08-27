@@ -13,9 +13,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Fast, single-version gate: lint, types, security, accessibility, container.
+  # Fast, single-version gate: lint, types, security, accessibility, container, and
+  # (since 2026-08-26) the integrity of the merge gate itself — see steps 9a/9b.
   verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Step 9b reads the nightly workflow's runs and their jobs. `administration` is
+      # deliberately absent and cannot be requested here at all, which is why step 9a
+      # runs `--scope public` and says out loud what that leaves unchecked.
+      actions: read
     steps:
       # 0. egress monitoring (SEC-04). AUDIT mode: logs, does not block yet — this
       #    repo's actual outbound needs (pypi.org, files.pythonhosted.org, npm for
@@ -137,11 +144,41 @@ jobs:
       # 7. responsible-tech checks are the no-audio / no-egress / report-content tests,
       #    run in the matrix test job below (merge-blocking).
 
+      # 9. The merge gate checks itself. Both of these live inside `verify` on purpose:
+      #    `verify` is already a required context, so they gain teeth without adding a
+      #    required check name, and adding a name is how the defect they exist to
+      #    prevent got in. Both are seconds on the default runner (§11b).
+      #
+      # 9a. The live branch ruleset still matches the reviewed file. Nothing enforced
+      #     this before: `make ruleset-check` existed, was correct, could fail, and ran
+      #     nowhere. A PR that quietly rewrote .github/rulesets/main.json merged green.
+      #     `--scope public` because the Actions GITHUB_TOKEN cannot be granted the
+      #     `administration` permission, so it cannot see bypass actors; the step prints
+      #     that limit itself rather than implying full coverage.
+      - name: Branch ruleset matches the committed definition
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .venv/bin/python scripts/check_ruleset.py --scope public
+
+      # 9b. The nightly macOS sweep really ran, on real macOS runners, and passed. This
+      #     replaces the five `test-matrix (macos-latest, X)` contexts that the ruleset
+      #     used to require and that `test-matrix-macos-nightly-notice` satisfied with an
+      #     `echo` on an ubuntu runner (labels: ["ubuntu-latest"], 4 seconds, always
+      #     green). It is a strictly weaker claim than those five implied, and a real
+      #     one: it can go red, and the script says exactly what it does not cover.
+      - name: Nightly macOS sweep ran, on macOS, and passed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .venv/bin/python scripts/check_nightly_macos.py
+
   # Compatibility matrix: tests + coverage across supported Python versions.
-  # macOS legs (10x minutes, CI-CD-STANDARD §11b) moved to the nightly schedule
-  # in nightly.yml; the ruleset-required macos contexts are satisfied by the
-  # always-green twin job below (§11h pattern) so PRs stay mergeable. The
-  # 2026-07-08 trim broke mergeability precisely because it lacked that twin.
+  # macOS legs (10x minutes, CI-CD-STANDARD §11b) run on the nightly schedule in
+  # nightly.yml. Until 2026-08-26 a twin job here reported the five ruleset-required
+  # `test-matrix (macos-latest, X)` contexts green from an `echo` on an ubuntu runner.
+  # Those five contexts are no longer required (.github/rulesets/main.json) and the twin
+  # is deleted; the nightly sweep is now held to account by `verify`'s step 9b instead.
+  # Do not reintroduce a stand-in job: a required context whose job cannot fail is worse
+  # than an absent one, because it reads as coverage.
   test-matrix:
     strategy:
       fail-fast: false
@@ -170,21 +207,3 @@ jobs:
         run: uv sync --locked --group dev --python "${{ matrix.python-version }}"
       - name: Tests & coverage
         run: .venv/bin/pytest --cov --cov-report=term-missing --cov-fail-under=85
-
-  # §11h twin for the ruleset-required macOS contexts: the branch ruleset requires
-  # all five "test-matrix (macos-latest, X)" checks, so removing the macOS legs
-  # outright would leave every PR stuck "Expected — waiting". This job reports the
-  # same context names green in seconds on an ubuntu runner; the REAL macOS test
-  # sweep runs nightly in nightly.yml (§11b: macos-* is 10x minutes, forbidden on
-  # per-push/PR CI). NOTE: nightly macOS failures do not block merges — if macOS
-  # coverage should be merge-blocking again, drop these five contexts from the
-  # ruleset's required checks and delete this job in the same motion.
-  test-matrix-macos-nightly-notice:
-    name: test-matrix (${{ matrix.os }}, ${{ matrix.python-version }})
-    strategy:
-      matrix:
-        os: [macos-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "macOS legs run on the nightly schedule (nightly.yml) per CI-CD-STANDARD §11b"
