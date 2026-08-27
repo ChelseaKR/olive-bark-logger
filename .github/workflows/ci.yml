@@ -207,3 +207,14 @@ jobs:
         run: uv sync --locked --group dev --python "${{ matrix.python-version }}"
       - name: Tests & coverage
         run: .venv/bin/pytest --cov --cov-report=term-missing --cov-fail-under=85
+
+  # REVERTED FOR PROOF ONLY -- this is the job PR #71 deleted, put back verbatim.
+  test-matrix-macos-nightly-notice:
+    name: test-matrix (${{ matrix.os }}, ${{ matrix.python-version }})
+    strategy:
+      matrix:
+        os: [macos-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "macOS legs run on the nightly schedule (nightly.yml) per CI-CD-STANDARD 11b"
