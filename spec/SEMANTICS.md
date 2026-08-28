@@ -84,6 +84,23 @@ force parity on them:
   handling); this is noted in the FIX-06 roadmap entry and is *not* a detector
   concern, so it is out of scope for `spec/detector/`.
 
+## Shared: the monitoring-coverage block
+
+`spec/report/cover.json`'s `coverage` object is replayed against both ports the way the
+cover block is. It carries the heading, the not-monitored-is-not-quiet note, the
+undeterminable-coverage note, and the sentence template both sides format their own
+numbers into. Python builds it in `report/violations.py`; the browser in `pwa/report.js`
+(`coverageSentence` / `coverageTextLines`). The arithmetic is ported too --
+`coverageWindow` / `coverageHours` mirror `report/render.py`'s `_coverage_window`,
+`on_air_spans` and `_coverage_hours` -- so the two answer the same question the same way:
+the window is the earliest to latest moment across events, gaps and sessions; monitored
+time is the union of session runs and event spans minus recorded gaps; a record with no
+sessions falls back to window-minus-gaps and says that it did.
+
+Python appends a further sentence naming the recorded span, and renders an off-air
+section the browser does not; the shared claim is therefore the sentence prefix, which
+the vector states rather than leaving to be discovered.
+
 ## Extension point: quiet-hours / summarize parity
 
 Both `report/aggregate.py` (Python) and `pwa/report.js` (`summarize`, JS) have

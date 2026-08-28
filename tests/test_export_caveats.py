@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 import csv
+import dataclasses
 import json
 import re
 from datetime import datetime, timezone
@@ -43,7 +44,15 @@ from report.render import (
     build_report,
     cover_text_lines,
 )
-from report.violations import build_violation_report_html, compute_violations, violations_to_csv
+from report.violations import (
+    ABSENCE_NOTE,
+    COVERAGE_HEADING,
+    COVERAGE_UNKNOWN_NOTE,
+    _coverage_sentence,
+    build_violation_report_html,
+    compute_violations,
+    violations_to_csv,
+)
 
 from conftest import ROOT
 
@@ -151,6 +160,45 @@ def test_browser_cover_constants_match_the_shared_spec():
     assert not missing, f"pwa/report.js is missing shared strings: {[s[:60] for s in missing]}"
     assert SPEC["uncalibrated_headline"] in flattened
     assert COVER["heading"] in flattened
+
+
+# --- the coverage block is shared too (issue #64) -------------------------------------
+#
+# The Python side has carried monitored-vs-wall-clock hours since #39. The browser
+# edition made the same "honest ... submission" claim about its quiet-hours CSV while
+# stating a gap total with no denominator, because its store held no record of when
+# observation began or ended. Sessions closed that; these assertions are what stops the
+# two wordings drifting apart again, the same way the block above stops the cover
+# drifting.
+
+COVERAGE = SPEC["coverage"]
+
+
+def test_python_coverage_constants_match_the_shared_spec():
+    assert COVERAGE["heading"] == COVERAGE_HEADING
+    assert COVERAGE["absence_note"] == ABSENCE_NOTE
+    assert COVERAGE["unknown_note"] == COVERAGE_UNKNOWN_NOTE
+
+
+def test_the_python_coverage_sentence_matches_the_shared_template():
+    """Both ports format the numbers themselves; the sentence they build must be one
+    sentence. Python appends a further clause naming the recorded span, so the shared
+    claim is the prefix -- stated in the vector rather than discovered here."""
+    report = compute_violations(_events(), quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    report = dataclasses.replace(report, monitored_hours=7.0, wall_clock_hours=10.0)
+    expected = COVERAGE["sentence_template"].format(
+        monitored="7.0", wall="10.0", pct="70", unmonitored="3.0"
+    )
+    assert _coverage_sentence(report).startswith(expected)
+
+
+def test_browser_coverage_strings_match_the_shared_spec():
+    """Same source-level check as the cover block, for the same reason: it holds without
+    a Node runtime, and pwa/report.test.mjs replays it against the live module."""
+    js = (ROOT / "pwa" / "report.js").read_text(encoding="utf-8")
+    flattened = re.sub(r'"\s*\+\s*\n?\s*"', "", js)
+    for key in ("heading", "absence_note", "unknown_note"):
+        assert COVERAGE[key] in flattened, f"pwa/report.js is missing coverage.{key}"
 
 
 # --- 1. content: every export path's output carries the caveats ----------------------

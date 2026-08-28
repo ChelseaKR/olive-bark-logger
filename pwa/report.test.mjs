@@ -5,14 +5,21 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
+  COVERAGE_ABSENCE_NOTE,
+  COVERAGE_HEADING,
+  COVERAGE_UNKNOWN_NOTE,
   COVER_CAN,
   COVER_CANNOT,
   COVER_HEADING,
   COVER_PRIVACY,
   NO_EVENTS_VALUE,
+  NO_SESSION_RECORD_NOTE,
   NO_VERDICT_NOTE,
   UNCALIBRATED_HEADLINE,
   buildReportHtml,
+  countEvents,
+  coverageSentence,
+  coverageTextLines,
   eventsToCsv,
   summarize,
   violationsToCsv,
@@ -203,4 +210,111 @@ test("an empty log does not print full scale (0.0 dBFS) as its loudest peak", ()
   });
   assert.ok(withEvents.includes("<td>-8.0</td>"));
   assert.ok(!withEvents.includes(NO_EVENTS_VALUE));
+});
+
+// --- Monitoring coverage (issue #64) -------------------------------------------------
+//
+// The browser edition made pwa/README.md's "honest ... submission" claim about its
+// quiet-hours CSV while stating a gap total with no denominator. #39 had already
+// established, for the Python side, that a count is only readable against the time it
+// was counted over. These tests hold the browser to the same strings, from the same
+// shared vector, and to the same arithmetic.
+
+const COV = SPEC.coverage;
+const HOUR = 3600;
+const T0 = Date.UTC(2026, 2, 1, 20) / 1000; // 20:00 UTC
+
+const session = (start, end) => ({ kind: "session", start, end });
+const gap = (start, end) => ({ kind: "gap", start, end });
+
+test("the coverage strings are the shared vector's, verbatim", () => {
+  assert.equal(COVERAGE_HEADING, COV.heading);
+  assert.equal(COVERAGE_ABSENCE_NOTE, COV.absence_note);
+  assert.equal(COVERAGE_UNKNOWN_NOTE, COV.unknown_note);
+});
+
+test("the coverage sentence matches the shared template exactly", () => {
+  // 10 wall-clock hours, one 8-hour run, one 1-hour gap inside it: 7 monitored.
+  const records = [session(T0, T0 + 8 * HOUR), gap(T0 + HOUR, T0 + 2 * HOUR), ev(T0 + 3 * HOUR)];
+  const s = summarize([...records, { kind: "gap", start: T0 + 10 * HOUR - 1, end: T0 + 10 * HOUR }], {
+    tz: "UTC",
+  });
+  const expected = COV.sentence_template
+    .replace("{monitored}", s.monitoredHours.toFixed(1))
+    .replace("{wall}", s.wallClockHours.toFixed(1))
+    .replace("{pct}", ((s.monitoredHours / s.wallClockHours) * 100).toFixed(0))
+    .replace("{unmonitored}", (s.wallClockHours - s.monitoredHours).toFixed(1));
+  assert.equal(coverageSentence(s), expected);
+});
+
+test("a session record is not counted as a loud event", () => {
+  // The hazard introducing sessions creates: `!isGap(r)` would have made every session
+  // record an event, inflating the very counts this file exists to keep honest.
+  const s = summarize([ev(T0), session(T0, T0 + HOUR), gap(T0 + 10, T0 + 20)], { tz: "UTC" });
+  assert.equal(s.count, 1);
+  assert.equal(s.sessionCount, 1);
+  assert.equal(s.gapCount, 1);
+  assert.equal(countEvents([ev(T0), session(T0, T0 + HOUR), gap(T0 + 10, T0 + 20)]), 1);
+});
+
+test("time with no run in progress is not monitored, and not quiet", () => {
+  // Two one-hour runs three hours apart. The middle stretch left no gap record -- the
+  // app was not running to write one -- and is exactly what #64 said was invisible.
+  const records = [session(T0, T0 + HOUR), session(T0 + 3 * HOUR, T0 + 4 * HOUR)];
+  const s = summarize(records, { tz: "UTC" });
+  assert.equal(s.wallClockHours, 4);
+  assert.equal(s.monitoredHours, 2);
+  assert.match(coverageSentence(s), /monitored 2\.0 of 4\.0 wall-clock hours \(50%\)/);
+});
+
+test("a recorded gap inside a run is subtracted from monitored time", () => {
+  const records = [session(T0, T0 + 4 * HOUR), gap(T0 + HOUR, T0 + 2 * HOUR)];
+  const s = summarize(records, { tz: "UTC" });
+  assert.equal(s.wallClockHours, 4);
+  assert.equal(s.monitoredHours, 3);
+});
+
+test("a record with no sessions says so instead of assuming full coverage", () => {
+  // Data captured before session tracking. The fallback (window minus recorded gaps) is
+  // the most generous reading available, so the export names it as an assumption.
+  const s = summarize([ev(T0), ev(T0 + 2 * HOUR)], { tz: "UTC" });
+  assert.equal(s.sessionsKnown, false);
+  const lines = coverageTextLines(s).join("\n");
+  assert.ok(lines.includes(NO_SESSION_RECORD_NOTE));
+  assert.ok(lines.includes(COV.absence_note));
+});
+
+test("a record with nothing in it says coverage is undeterminable, not zero", () => {
+  const s = summarize([], { tz: "UTC" });
+  assert.equal(s.monitoredHours, null);
+  assert.equal(s.wallClockHours, null);
+  assert.equal(coverageSentence(s), COV.unknown_note);
+});
+
+test("every quiet-hours export states its coverage, not just its gaps", () => {
+  // The defect in one assertion: a gap total is a numerator. #64's report was that the
+  // browser shipped one with no denominator anywhere in the artifact.
+  const records = [ev(T0), session(T0 - HOUR, T0 + HOUR), gap(T0 + 100, T0 + 200)];
+  const s = summarize(records, { startHour: 22, endHour: 8, tz: "UTC" });
+  const artifacts = {
+    "violations CSV": violationsToCsv(records, { startHour: 22, endHour: 8, tz: "UTC" }),
+    "events CSV": eventsToCsv(records, "UTC"),
+    "report HTML": buildReportHtml(s, { generatedAt: "now", tz: "UTC", startHour: 22, endHour: 8 }),
+  };
+  for (const [name, text] of Object.entries(artifacts)) {
+    assert.ok(text.includes(COV.heading), `${name} omits the coverage heading`);
+    assert.ok(text.includes(COV.absence_note), `${name} omits the not-monitored-is-not-quiet note`);
+    assert.ok(
+      text.includes("wall-clock hours") || text.includes(COV.unknown_note),
+      `${name} states no monitored-vs-wall-clock figure`,
+    );
+  }
+});
+
+test("the violations CSV's coverage lines are comment lines, so data rows still parse", () => {
+  const records = [ev(T0), session(T0 - HOUR, T0 + HOUR)];
+  const csv = violationsToCsv(records, { tz: "UTC" });
+  const dataRows = csv.split("\n").filter((l) => !l.startsWith("#"));
+  assert.equal(dataRows.length, 2); // header + the one real event
+  assert.ok(csv.split("\n").some((l) => l.startsWith("# ") && l.includes("wall-clock hours")));
 });

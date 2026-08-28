@@ -111,6 +111,215 @@ export function gapPreambleLines(gaps) {
   return lines;
 }
 
+// --- Monitoring coverage: how much of the window was actually observed ---------------
+//
+// Issue #39 established, for the Python side, that a quiet-hours document is only honest
+// if it says how much of the window it observed: an outage during quiet hours removes
+// events, so a monitor that dropped out for most of the night produces a low count that
+// reads as a quiet night. `report/violations.py` carries monitored-vs-wall-clock hours
+// and a mandatory banner. The browser edition -- which pwa/README.md offers for the same
+// "honest ... submission" -- shipped a gap total with no denominator: "37s of gap" that
+// a reader cannot place against a 30-minute test run or a 10-hour night (issue #64).
+//
+// It could not have done better before now: there was nothing to compute a figure from.
+// The store held events and gap records only, and a gap is written by the *running* app
+// on a visibilitychange, so the most ordinary outage of all -- the tab closed, the
+// browser restarted, the laptop shut -- left no trace whatsoever. Session records
+// (pwa/app.js) are what changed; this is the arithmetic over them, ported from
+// report/render.py's _coverage_window / on_air_spans / _coverage_hours so the two
+// implementations answer the same question the same way.
+//
+// The exact strings live in spec/report/cover.json, replayed by both test suites.
+
+export const COVERAGE_HEADING = "Monitoring coverage";
+
+export const COVERAGE_ABSENCE_NOTE =
+  "Hours that were not monitored are not quiet hours: no event could be recorded then, " +
+  "so the absence of an event in those hours is not evidence that no sound occurred.";
+
+export const COVERAGE_UNKNOWN_NOTE =
+  "How much of this window the device actually monitored could not be determined from " +
+  "this record: it carries no monitoring session, no recorded gap, and no measurable " +
+  "span of events. Do not read the counts below as covering the whole window.";
+
+// Said whether or not the figure is good news, and said in the browser's own terms: the
+// upper-bound caveat is stronger here than on the Pi, because a tab can be killed
+// between checkpoints and a session's last seconds go unrecorded.
+export const COVERAGE_UPPER_BOUND_CAVEAT =
+  "Coverage is measured from what the record contains. Time with no run in progress is " +
+  "subtracted from the session record, and interruptions the app noticed are subtracted " +
+  "as gaps, but an interruption it never got to write down cannot appear here -- a tab " +
+  "killed outright ends its run at the last checkpoint, not at the true moment. Treat " +
+  "these figures as an upper bound on how much was observed.";
+
+const NOT_MONITORED_IS_NOT_QUIET =
+  "Time outside a monitoring run is reported as not monitored, never as quiet.";
+
+// -- span arithmetic (unix seconds; identical shape to report/render.py's helpers) -----
+
+function clipSpans(spans, [winStart, winEnd]) {
+  const out = [];
+  for (const [s, e] of spans) {
+    const start = Math.max(s, winStart);
+    const end = Math.min(e, winEnd);
+    if (end > start) out.push([start, end]);
+  }
+  return mergeSpans(out);
+}
+
+function mergeSpans(spans) {
+  const sorted = [...spans].sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const [s, e] of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+    else merged.push([s, e]);
+  }
+  return merged;
+}
+
+function subtractSpans(spans, holes) {
+  let out = spans.map((s) => [...s]);
+  for (const [hs, he] of holes) {
+    const next = [];
+    for (const [s, e] of out) {
+      if (he <= s || hs >= e) next.push([s, e]);
+      else {
+        if (s < hs) next.push([s, hs]);
+        if (he < e) next.push([he, e]);
+      }
+    }
+    out = next;
+  }
+  return out;
+}
+
+const spanSeconds = (spans) => spans.reduce((acc, [s, e]) => acc + Math.max(0, e - s), 0);
+
+/**
+ * The observed reporting span, as [start, end] unix seconds, or null.
+ *
+ * Earliest observed moment to latest, across events, gaps AND every session -- not the
+ * most recent session, or a record whose app was restarted would report a window
+ * starting at whichever event happened to come first. One definition of "the window", so
+ * the report and the CSV cannot disagree about what they are covering.
+ */
+export function coverageWindow(records) {
+  const starts = [];
+  const ends = [];
+  for (const r of records) {
+    if (typeof r.start === "number") starts.push(r.start);
+    if (typeof r.end === "number") ends.push(r.end);
+  }
+  if (!starts.length || !ends.length) return null;
+  const winStart = Math.min(...starts);
+  const winEnd = Math.max(...ends);
+  return winEnd - winStart > 0 ? [winStart, winEnd] : null;
+}
+
+/**
+ * Monitored vs wall-clock hours over the window, or null when undeterminable.
+ *
+ * Monitored time is the union of the session runs (plus each event's own span -- a
+ * logged event proves the app was listening at that moment, whatever the session records
+ * say), minus any recorded gap inside them.
+ *
+ * With no session records at all -- data captured before sessions existed -- this falls
+ * back to whole-window-minus-recorded-gaps, exactly as the Python side does, because
+ * such a record genuinely cannot say more. That is the most generous reading the record
+ * allows, and the report says so rather than presenting it as measured.
+ */
+export function coverageHours(records) {
+  const window = coverageWindow(records);
+  if (!window) return null;
+  const [winStart, winEnd] = window;
+  const span = winEnd - winStart;
+  const holes = clipSpans(
+    onlyGaps(records).map((g) => [g.start, g.end]),
+    window,
+  );
+  const sessions = onlySessions(records);
+  let monitored;
+  if (!sessions.length) {
+    monitored = Math.max(0, span - spanSeconds(holes));
+  } else {
+    const onAir = clipSpans(
+      [
+        ...sessions.map((s) => [s.start, typeof s.end === "number" ? s.end : s.start]),
+        ...onlyEvents(records).map((e) => [e.start, e.end]),
+      ],
+      window,
+    );
+    monitored = spanSeconds(subtractSpans(onAir, holes));
+  }
+  return {
+    monitoredHours: monitored / 3600,
+    wallClockHours: span / 3600,
+    sessionsKnown: sessions.length > 0,
+  };
+}
+
+/** The one-line coverage claim, or the stated limit when it cannot be computed. */
+export function coverageSentence(summary) {
+  const { monitoredHours: monitored, wallClockHours: wall } = summary;
+  if (monitored === null || wall === null) return COVERAGE_UNKNOWN_NOTE;
+  const pct = wall ? (monitored / wall) * 100 : 0;
+  const unmonitored = Math.max(0, wall - monitored);
+  return (
+    `Over this reporting window the device monitored ${monitored.toFixed(1)} of ` +
+    `${wall.toFixed(1)} wall-clock hours (${pct.toFixed(0)}%); the remaining ` +
+    `${unmonitored.toFixed(1)} hours are shown as not monitored rather than quiet.`
+  );
+}
+
+/** The coverage statement as plain-text lines, for a CSV comment preamble. */
+export function coverageTextLines(summary) {
+  const lines = [
+    COVERAGE_HEADING,
+    "",
+    coverageSentence(summary),
+    "",
+    COVERAGE_ABSENCE_NOTE,
+    "",
+    COVERAGE_UPPER_BOUND_CAVEAT,
+  ];
+  if (summary.wallClockHours !== null && !summary.sessionsKnown) {
+    lines.push("", NO_SESSION_RECORD_NOTE);
+  }
+  return lines;
+}
+
+// A record from before session tracking cannot show time with nothing running, so the
+// figure above assumes the app was listening whenever no gap was recorded. That is the
+// most generous reading available, and naming it is the difference between a measurement
+// and an assumption presented as one.
+export const NO_SESSION_RECORD_NOTE =
+  "This record carries no monitoring sessions, so periods when nothing was running " +
+  "cannot be identified from it and are not subtracted above. The coverage figure " +
+  "therefore assumes the app was listening whenever no gap was recorded, which is the " +
+  "most generous reading the record allows.";
+
+function coverageHtml(summary) {
+  const cell = (h) => (h === null ? "not determined" : `${h.toFixed(1)} h`);
+  const unmonitored =
+    summary.wallClockHours === null
+      ? null
+      : Math.max(0, summary.wallClockHours - summary.monitoredHours);
+  const ok = summary.wallClockHours !== null && unmonitored !== null && unmonitored < 0.05;
+  const extra = summary.wallClockHours !== null && !summary.sessionsKnown ? NO_SESSION_RECORD_NOTE : "";
+  return `<section class="${ok ? "banner banner-ok" : "banner"}" role="note" aria-label="Monitoring coverage">
+<p><strong>${esc(COVERAGE_HEADING)}:</strong> ${esc(coverageSentence(summary))}</p>
+<p>${esc(COVERAGE_ABSENCE_NOTE)}</p>
+<p class="note">${esc(COVERAGE_UPPER_BOUND_CAVEAT)}</p>
+${extra ? `<p class="note">${esc(extra)}</p>` : ""}
+${table("Monitoring coverage", ["Measure", "Hours"], [
+  ["Monitored (wall-clock hours)", cell(summary.monitoredHours)],
+  ["Reporting window (wall-clock hours)", cell(summary.wallClockHours)],
+  ["Not monitored (wall-clock hours)", cell(unmonitored)],
+])}
+</section>`;
+}
+
 function partsInTz(ms, tz) {
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
@@ -129,16 +338,33 @@ function inQuietHours(hour, startHour, endHour) {
   return hour >= startHour || hour < endHour; // wraps midnight
 }
 
-// Gap records ({ kind: 'gap', start, end }) are written when the tab was backgrounded
-// or locked and could not monitor. They are coverage holes, not loud events, so every
-// aggregation and export filters them out of the event set (and surfaces them apart).
+// The store holds three kinds of record, distinguished by a `kind` field that detected
+// events deliberately do not carry:
+//
+//   (no kind)                          a detected event
+//   { kind: 'gap',     start, end }    the tab was backgrounded or locked: a coverage
+//                                      hole inside a run, written by the running app
+//   { kind: 'session', start, end }    one observation run, start() to stop()
+//
+// Events are therefore selected as "records with no kind", not as "not a gap". The
+// difference is the whole of issue #64's first hazard: `(r) => !isGap(r)` would have
+// counted every session record as a loud event the moment sessions were introduced,
+// inflating every count in the document this file exists to keep honest.
 const isGap = (r) => r && r.kind === "gap";
-const onlyEvents = (records) => records.filter((r) => !isGap(r));
+const isSession = (r) => r && r.kind === "session";
+const onlyEvents = (records) => records.filter((r) => r && !r.kind);
 const onlyGaps = (records) => records.filter(isGap);
+const onlySessions = (records) => records.filter(isSession);
+
+/** How many of these records are detected events, as opposed to gaps or sessions. */
+export function countEvents(records) {
+  return onlyEvents(records).length;
+}
 
 export function summarize(records, { startHour = 22, endHour = 8, tz = "UTC" } = {}) {
   const events = onlyEvents(records);
   const gaps = onlyGaps(records);
+  const cov = coverageHours(records);
   let gapSeconds = 0;
   for (const g of gaps) gapSeconds += Math.max(0, (g.end || 0) - (g.start || 0));
   const byHour = {};
@@ -191,6 +417,14 @@ export function summarize(records, { startHour = 22, endHour = 8, tz = "UTC" } =
     gapCount: gaps.length,
     gapSeconds,
     gaps,
+    // Coverage travels with the counts rather than being computed per export path: a
+    // count is only meaningful against the time it was counted over, and two exports
+    // disagreeing about the denominator would be its own defect. null means the record
+    // cannot say, which is a different statement from "0 hours" and is rendered as one.
+    ...(cov
+      ? { monitoredHours: cov.monitoredHours, wallClockHours: cov.wallClockHours, sessionsKnown: cov.sessionsKnown }
+      : { monitoredHours: null, wallClockHours: null, sessionsKnown: false }),
+    sessionCount: onlySessions(records).length,
   };
 }
 
@@ -281,6 +515,8 @@ ${coverHtml()}
 <aside class="banner" role="note" aria-label="Calibration status">
 <strong>${esc(UNCALIBRATED_HEADLINE)}</strong> ${esc(UNCALIBRATED_NOTE)}
 </aside>
+<h2>Monitoring coverage</h2>
+${coverageHtml(summary)}
 <h2>Summary</h2>
 ${table("Summary", ["Metric", "Value"], [
   ["Total events", summary.count],
@@ -304,7 +540,8 @@ ${tagsSection}
 ${gapsSection}
 <h2>Quiet hours</h2>
 <p>Window <strong>${window}</strong> in time zone <strong>${esc(tz)}</strong>. Of ${summary.count} events, <strong>${summary.quietCount}</strong> began within quiet hours and <strong>${summary.outsideCount}</strong> outside them. An event counts as within quiet hours by its start time; this flags a level threshold being crossed, not the source of a sound.</p>
-<div class="note"><p>${esc(NO_VERDICT_NOTE)} Compare these counts against your own local ordinance, lease, or HOA rule.</p></div>
+<div class="note"><p>${esc(NO_VERDICT_NOTE)} Compare these counts against your own local ordinance, lease, or HOA rule.</p>
+<p>${esc(coverageSentence(summary))} ${esc(NOT_MONITORED_IS_NOT_QUIET)}</p></div>
 <h2>Methodology</h2>
 <p>Each audio frame is reduced in memory to one RMS level in dBFS and then discarded. An event is recorded when the level stays above the threshold for at least the minimum duration; brief dips shorter than the debounce do not split it. Only six numbers per event are stored — never audio.</p>
 <h2>Limitations</h2>
@@ -319,7 +556,7 @@ export function eventsToCsv(records, tz = "UTC") {
   const iso = (s) => new Date(s * 1000).toISOString();
   // The cover travels as a leading "#" comment preamble, the way report/export.py writes
   // it. Spreadsheets and csv parsers skip "#" lines; a person reading the file does not.
-  const lines = [csvPreamble(), header.join(",")];
+  const lines = [csvPreamble(coverageTextLines(summarize(records, { tz }))), header.join(",")];
   for (const ev of events) {
     lines.push([
       ev.start.toFixed(3),
@@ -351,7 +588,16 @@ export function violationsToCsv(records, { startHour = 22, endHour = 8, tz = "UT
     "duration_s", "peak_dbfs", "avg_dbfs", "within_quiet_hours", "quiet_window", "coarse_tag",
   ];
   const iso = (s) => new Date(s * 1000).toISOString();
-  const notes = [NO_VERDICT_NOTE, "", ...gapPreambleLines(gaps)];
+  // Coverage before the gap list, deliberately. A gap total is a numerator; without the
+  // denominator above it, "37s of gap" cannot be placed against a 30-minute test run or
+  // a ten-hour night, which was the whole of issue #64.
+  const notes = [
+    NO_VERDICT_NOTE,
+    "",
+    ...coverageTextLines(summarize(records, { startHour, endHour, tz })),
+    "",
+    ...gapPreambleLines(gaps),
+  ];
   const lines = [csvPreamble(notes), header.join(",")];
   for (const ev of events) {
     const { hour } = partsInTz(ev.start * 1000, tz);
