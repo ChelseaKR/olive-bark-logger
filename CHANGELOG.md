@@ -121,6 +121,37 @@ release" defect this file's absence let stand.
   `_coverage_hours`.
 
 ### Changed
+- **The coverage sentence has one definition, and the generator that publishes it is
+  now checked against what it published.** The claim both editions make -- *"the device
+  monitored X of Y wall-clock hours (Z%); the remaining N hours are shown as not
+  monitored rather than quiet"* -- existed three times: an f-string in
+  `report/violations.py`, a template literal in `pwa/report.js`, and a hand-maintained
+  copy in `spec/report/cover.json`. The two suites compared the *rendered* sentence
+  against the vector, which caught a reworded sentence but not the arrangement that let
+  it happen. It is now `COVERAGE_SENTENCE_TEMPLATE` in `report/violations.py`;
+  `scripts/gen_cover_spec.py` imports that constant and builds the whole vector from it;
+  `pwa/report.js` holds the shape once, as its own `COVERAGE_SENTENCE_TEMPLATE`, and
+  formats its numbers into it (an unfilled placeholder now throws rather than shipping a
+  literal `{wall}` to a reader as though it were a measurement).
+- **`spec/report/cover.json` is gated against its generator.** The generator wrote the
+  file and nothing read it back, so the vector had drifted into a superset of what
+  `scripts/gen_cover_spec.py` produced: running it would have silently deleted the entire
+  `coverage` block that ten assertions across both suites replay.
+  `tests/test_export_caveats.py` now fails unless the committed JSON is byte-identical to
+  `render()`, in either direction -- a Python constant changed without regenerating, or
+  the JSON edited by hand into something no constant says. The gate reads only; it never
+  regenerates, because a gate that repairs drift is how the file stopped being reviewed.
+  A second gate reads the generator's own source and requires each shared string to be an
+  imported name rather than a literal, with canaries proving both bite: the planted
+  violation is a literal *identical* to the real constant, which is exactly what a
+  value-comparison gate cannot see.
+- `_coverage_sentence` no longer defaults `unmonitored_hours` to `0.0` with `or`. The
+  branch it sits on has already established that `monitored_hours` and `wall_clock_hours`
+  are both set, which is the only condition under which the property returns `None`, so
+  the figure is guaranteed and the invariant is now stated as a raise. The default was
+  wrong in the one case it could ever have fired: it would have printed "0.0 hours not
+  monitored" for hours nothing measured, and an unmeasured figure is never shown as a
+  number here -- a record that cannot support one gets `COVERAGE_UNKNOWN_NOTE` instead.
 - **The live branch ruleset and the committed definition now match** (maintainer
   decision, 2026-08-21). Live `protect-main` was brought up to
   `.github/rulesets/main.json` for the `pull_request` rule (approvals 0 per ADR-0001,
