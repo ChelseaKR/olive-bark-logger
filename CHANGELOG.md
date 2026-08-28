@@ -16,6 +16,29 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **`bypass_actors: []` was false: an administrator can bypass every rule, always.** A
+  `RepositoryRole:5 / always` bypass actor was added to this repository (and every
+  repository in this portfolio) so the owner can always recover a wedged gate.
+  `.github/rulesets/main.json` still recorded `bypass_actors: []`,
+  `.github/rulesets/README.md` said "**No bypass actors.** No one — including the
+  repository owner — merges past these rules", and the README's Standards Conformance
+  table said "no bypass actors". All three described a stricter gate than the one in
+  force. `make ruleset-check` named it in one line
+  (`bypass_actors: committed [] (no one bypasses), live ['RepositoryRole:5 (always)']`)
+  and the same API read returned `"current_user_can_bypass": "always"`.
+  **The file was amended to reality; the live ruleset was not touched and the owner's
+  bypass stays.** `tests/test_ruleset_check.py` now fails if the committed definition
+  stops recording the actor, if the live ruleset loses it, if a second bypass actor
+  appears, or if any document goes back to claiming nobody can bypass. Worth carrying
+  forward: the one field that turned out wrong is the one field CI structurally cannot
+  read — `verify` runs `--scope public` and the public ruleset payload omits
+  `bypass_actors` entirely, so `make ruleset-check` with a maintainer token is the only
+  check on it.
+- **`nightly.yml`'s header described a job that was deleted.** It said "ci.yml's
+  same-named twin job keeps the ruleset-required macos contexts green on PRs" — that
+  twin was `test-matrix-macos-nightly-notice`, removed on 2026-08-26 along with the five
+  contexts it faked. Replaced with what is actually true: the sweep is merge-blocking
+  indirectly and with a lag, through `verify`'s `check_nightly_macos.py` step.
 - **Five of the eleven required status checks on `main` were satisfied by an `echo`.**
   The `protect-main` ruleset required `test-matrix (macos-latest, 3.9–3.13)` to merge.
   Nothing on a pull request ran macOS; what reported those five contexts was

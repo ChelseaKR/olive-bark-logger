@@ -4,9 +4,20 @@ name: nightly
 # 10x minutes and are forbidden on per-push/PR CI, so the macOS legs of ci.yml's
 # test-matrix live here on a schedule instead. Platform coverage is kept (rather
 # than dropped) because the test suite exercises filesystem/path and store
-# behavior a macOS host can plausibly diverge on; ci.yml's same-named twin job
-# keeps the ruleset-required macos contexts green on PRs. workflow_dispatch is
-# for re-running a leg by hand after a nightly failure.
+# behavior a macOS host can plausibly diverge on. workflow_dispatch is for
+# re-running a leg by hand after a nightly failure.
+#
+# This sweep is merge-blocking, indirectly and with a lag. ci.yml's required
+# `verify` job runs scripts/check_nightly_macos.py, which fails unless this
+# workflow ran on `main`, on runners the API labels macos-*, within 7 days, and
+# passed. So a red or stale nightly blocks every merge until it is fixed, and
+# `gh workflow run nightly.yml --ref main` is how you clear it.
+#
+# These lines used to say ci.yml had a "same-named twin job" keeping the
+# ruleset-required macOS contexts green on PRs. That job was
+# test-matrix-macos-nightly-notice: one `echo`, on an ubuntu runner, satisfying
+# five required checks. It was deleted on 2026-08-26 along with those five
+# contexts. Do not add anything like it back -- see .github/rulesets/README.md.
 
 on:
   schedule:
