@@ -259,17 +259,43 @@ export function coverageHours(records) {
   };
 }
 
+// The claim itself, held as a template rather than built inline, so the shape lives in
+// exactly one place on this side and can be checked character for character against the
+// shared vector's `coverage.sentence_template` (pwa/report.test.mjs). Python's copy is
+// COVERAGE_SENTENCE_TEMPLATE in report/violations.py, and the vector is generated from
+// that one by scripts/gen_cover_spec.py -- so there is a single definition, and both
+// suites fail the moment this stops matching it. Each placeholder is pre-formatted by
+// the caller: hours to one decimal place, the percentage as a whole number.
+export const COVERAGE_SENTENCE_TEMPLATE =
+  "Over this reporting window the device monitored {monitored} of {wall} " +
+  "wall-clock hours ({pct}%); the remaining {unmonitored} hours are shown as not " +
+  "monitored rather than quiet.";
+
+// The `{name}` substitution Python's str.format does for the same template. An unknown
+// placeholder throws rather than surviving into the text: a template that gained a field
+// this port does not fill would otherwise ship a literal "{...}" to a reader as though it
+// were a measurement.
+function fillTemplate(template, values) {
+  return template.replace(/\{(\w+)\}/g, (whole, key) => {
+    if (!Object.prototype.hasOwnProperty.call(values, key)) {
+      throw new Error(`coverage sentence template has no value for ${whole}`);
+    }
+    return values[key];
+  });
+}
+
 /** The one-line coverage claim, or the stated limit when it cannot be computed. */
 export function coverageSentence(summary) {
   const { monitoredHours: monitored, wallClockHours: wall } = summary;
   if (monitored === null || wall === null) return COVERAGE_UNKNOWN_NOTE;
   const pct = wall ? (monitored / wall) * 100 : 0;
   const unmonitored = Math.max(0, wall - monitored);
-  return (
-    `Over this reporting window the device monitored ${monitored.toFixed(1)} of ` +
-    `${wall.toFixed(1)} wall-clock hours (${pct.toFixed(0)}%); the remaining ` +
-    `${unmonitored.toFixed(1)} hours are shown as not monitored rather than quiet.`
-  );
+  return fillTemplate(COVERAGE_SENTENCE_TEMPLATE, {
+    monitored: monitored.toFixed(1),
+    wall: wall.toFixed(1),
+    pct: pct.toFixed(0),
+    unmonitored: unmonitored.toFixed(1),
+  });
 }
 
 /** The coverage statement as plain-text lines, for a CSV comment preamble. */

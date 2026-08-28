@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import {
   COVERAGE_ABSENCE_NOTE,
   COVERAGE_HEADING,
+  COVERAGE_SENTENCE_TEMPLATE,
   COVERAGE_UNKNOWN_NOTE,
   COVER_CAN,
   COVER_CANNOT,
@@ -231,6 +232,11 @@ test("the coverage strings are the shared vector's, verbatim", () => {
   assert.equal(COVERAGE_HEADING, COV.heading);
   assert.equal(COVERAGE_ABSENCE_NOTE, COV.absence_note);
   assert.equal(COVERAGE_UNKNOWN_NOTE, COV.unknown_note);
+  // The sentence shape too, not only the sentence this port happens to build from it.
+  // The vector is generated from report/violations.py's COVERAGE_SENTENCE_TEMPLATE
+  // (scripts/gen_cover_spec.py), so this is what makes the Python constant the single
+  // definition rather than the first of two.
+  assert.equal(COVERAGE_SENTENCE_TEMPLATE, COV.sentence_template);
 });
 
 test("the coverage sentence matches the shared template exactly", () => {
