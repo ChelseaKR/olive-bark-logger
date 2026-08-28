@@ -367,7 +367,17 @@ def _coverage_sentence(report: ViolationReport) -> str:
     span = ""
     if report.span_start_iso and report.span_end_iso:
         span = f" The recorded span runs {report.span_start_iso} to {report.span_end_iso}."
-    unmonitored = report.unmonitored_hours or 0.0
+    # `unmonitored_hours` returns None only when `monitored_hours` or `wall_clock_hours`
+    # is None, and both were just found to be set, so the figure exists on this branch.
+    # Stated as a raise rather than defaulted with `or 0.0`: the default would be false
+    # in the one case it could ever fire, printing "0.0 hours not monitored" for hours
+    # nothing measured. An unmeasured figure is never shown as a number here -- the
+    # record that cannot support one gets COVERAGE_UNKNOWN_NOTE, above, which says so.
+    unmonitored = report.unmonitored_hours
+    if unmonitored is None:  # pragma: no cover - the return above is the only way here
+        raise AssertionError(
+            "unmonitored_hours is None while monitored_hours and wall_clock_hours are set"
+        )
     return (
         COVERAGE_SENTENCE_TEMPLATE.format(
             monitored=f"{monitored:.1f}",
