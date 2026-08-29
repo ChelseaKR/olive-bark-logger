@@ -1,6 +1,12 @@
 # Gap Ledger
 
-**Last verified: 2026-08-15 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+**Last verified: 2026-08-27 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+
+> The stamp above read `2026-08-15` until 2026-08-29, while entries below carried updates
+> dated 2026-08-21, 2026-08-26 and 2026-08-27 — three remediation passes edited this file
+> without moving its own freshness date, which is the ledger committing the exact defect it
+> exists to catch. It is now set to the newest date any entry records, and
+> `tests/test_doc_figures.py` fails the build if it ever falls behind again.
 
 > An entry that describes a gap the code has since closed is as wrong as one that hides a
 > gap — gentler, but the same defect: a document about the code that stopped tracking the
