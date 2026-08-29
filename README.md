@@ -3,7 +3,7 @@
 **A privacy-first, on-device noise monitor that timestamps barking events and sound-level spikes and turns them into a clean report** — so the next time a downstairs neighbor complains, you have objective data instead of a he-said-she-said. It measures sound *levels* and event metadata only. It never records, stores, or transmits audio. By design, there is no recording to leak, subpoena, or wiretap.
 
 **Status:** `Beta` · **Track:** Personal (on-device monitor + report generator) · **License:** MIT · **Data:** on-device/local
-**Supported versions:** pre-1.0 — only the latest `0.y` release receives fixes; no LTS branch (REL-24).
+**Supported versions:** pre-1.0, and **no version has been tagged or released yet** (`CHANGELOG.md`; `CITATION.cff` carries no `date-released` for the same reason). The policy for when one is: only the latest `0.y` release line receives fixes; no LTS branch (REL-24).
 
 ## Why it matters
 You've been on the receiving end of vague noise complaints about Olive with nothing concrete to point to. A small device that runs in your apartment and logs *when* sound crossed a threshold and for *how long* gives you an honest, time-stamped record — useful for property management or just for understanding the real pattern — without the legal and ethical problems of recording your home (or your neighbors).
@@ -30,11 +30,16 @@ Enforced by merge-blocking tests, not just promised:
   manufacture a case.
 - **The caveats travel with every export.** The "what this can and cannot prove" cover
   block leads every artifact either implementation produces — HTML report, quiet-hours
-  report, and both CSVs (as a `#` preamble, so the data rows still parse) — and anything
-  reporting a quiet-hours count carries the line that a count is a measurement, not a
-  determination. The strings live in [`spec/report/cover.json`](./spec/report/cover.json)
-  and are replayed against Python *and* the browser edition; the gate discovers export
-  paths from source, so a new one cannot ship without them.
+  report, the [local status page](#local-status-page), and both CSVs (as a `#` preamble,
+  so the data rows still parse) — and anything reporting a quiet-hours count also says a
+  count is a measurement and not a determination, either as that sentence or as the cover
+  bullet that says the same. The strings live in
+  [`spec/report/cover.json`](./spec/report/cover.json) and are replayed against Python
+  *and* the browser edition. The gate discovers export paths from source **by what they
+  build** — a whole HTML document, or a CSV — not by what they are called, so a new one
+  cannot ship without them. It used to discover them by name, and the status page slipped
+  through that way and shipped uncovered; the behavioural half exists because the
+  name-matching half missed a real artifact for as long as that artifact existed.
 
 Agent-facing build instructions live in [`CLAUDE.md`](./CLAUDE.md).
 
@@ -99,7 +104,9 @@ quiet), the most recent level, frame coverage, recorded monitoring gaps, and a r
 summary (event count, minutes with events, busiest hour, quiet-hours totals). The page
 is atomically rewritten, so you never catch it half-written, and it auto-refreshes every
 60s if left open in a browser. It inherits the report's accessibility (keyboard-complete,
-scoped table headers, reduced-motion) and the same no-audio guarantee.
+scoped table headers, reduced-motion) and the same no-audio guarantee, and — because it
+prints quiet-hours counts and is a page you can hand to someone — the same cover block
+and no-verdict line as every other artifact.
 
 ## Local automation hooks (opt-in, emit-only)
 For home-automation *confounder context* — e.g. correlating a doorbell, robot vacuum, or
@@ -147,7 +154,7 @@ Tier C — OTel tracing out-of-scope (no network surface). Opt-in `--log-format 
 **ships** (`monitor/log.py`, `--log-format json` or `"log_format": "json"` in the config):
 every operator line is emitted as one JSON object per line for a log shipper, using only
 the standard library. `text` stays the default and is byte-for-byte the previous output.
-See [`GAP-OBS-1`, addressed 2026-07-14](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation).
+See [`GAP-OBS-1`, addressed 2026-07-14](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json).
 Alongside it: a heartbeat JSON file (`monitor/service.py`) with no secret/PII fields by
 design.
 
@@ -164,11 +171,11 @@ write-effect, so gaps live here instead — see that file's header for why).
 |----------|-------|
 | Quality & Metrics | Applies — open gap recorded in [GAP-QM-1](./docs/GAP-LEDGER.md#gap-qm-1--quality--metrics-dora-ledger--release-gate-checklist-execution) (DORA ledger; release-gate checklist exists in `DEFINITION_OF_DONE.md` but has never been run, since no release has happened) |
 | Code Quality | Applies — open gap recorded in [GAP-CQ-1](./docs/GAP-LEDGER.md#gap-cq-1--code-quality-python-floor-pre-commit-hook-wiring-src-layout-hatchling) (Python-floor divergence recorded in [ADR-0002](./docs/adr/0002-python-39-floor.md); pre-commit enforcement, hatchling, and `src/` layout still open) |
-| Security & Supply-Chain | Applies — hardened posture (ASVS **L2**); open gap recorded in [GAP-SEC-1](./docs/GAP-LEDGER.md#gap-sec-1--security--supply-chain-harden-runner-block-mode-codeql-lockfileosv-scanner-trufflehog-sbomsigning-scorecard) |
+| Security & Supply-Chain | Applies — hardened posture (ASVS **L2**); open gap recorded in [GAP-SEC-1](./docs/GAP-LEDGER.md#gap-sec-1--security--supply-chain-harden-runner-block-mode-codeql-osv-scanner-trufflehog-sbomsigning-scorecard) |
 | CI/CD | Applies — open gap recorded in [GAP-CICD-1](./docs/GAP-LEDGER.md#gap-cicd-1--cicd-reconcile-the-live-branch-ruleset-with-the-committed-one-add-zizmor--codeql-actions) (the live `protect-main` ruleset **matches** the committed `.github/rulesets/main.json` since the 2026-08-21 reconciliation — PR required, strict checks, `required_signatures` deliberately dropped with a reasoned note, verified by `make ruleset-check` exit 0. On 2026-08-26 five of the eleven required checks were **removed**: `test-matrix (macos-latest, 3.9–3.13)` were satisfied by an `echo` on an ubuntu runner and could not fail. Six required checks remain and all six do real work; the nightly macOS sweep and the live ruleset are now themselves checked inside `verify`. On 2026-08-27 this row and `.github/rulesets/main.json` stopped claiming **no bypass actors**: the repository-admin role can bypass every rule, always, and could for as long as that claim stood. The bypass is deliberate and stays; the file was amended to it. CI's `--scope public` run cannot read that field at all, so `make ruleset-check` with a maintainer token is the only thing that checks it. Still open: zizmor + CodeQL-actions) |
 | Release & Versioning | Applies — release-producing deployed app; open gap recorded in [GAP-REL-1](./docs/GAP-LEDGER.md#gap-rel-1--release--versioning-the-releasesupply-chain-pipeline-is-still-absent) (tag-triggered `release.yml` now exists, REL-14 — no tag cut yet, and PyPI/GHCR/cosign are still open; `CITATION.cff` intentionally carries no `date-released` until a tag exists) |
 | Accessibility | Applies — open gap recorded in [GAP-A11Y-1](./docs/GAP-LEDGER.md#gap-a11y-1--accessibility-lighthouse-ci-regenerate-the-stale-walkthrough-acrvpat-at-pass) (`pwa/index.html` **is** scanned by axe on every push and PR since 2026-07-11; still open: no Lighthouse, walkthrough stale since `8a9f1eb`, no ACR/VPAT, no NVDA or iOS VoiceOver pass) and [GAP-A11Y-2](./docs/GAP-LEDGER.md#gap-a11y-2--accessibility-tagged-pdfa-export-exp-06-has-no-human-at-walkthrough-or-verapdf-ci-gate) (the optional tagged PDF/A-3a export's structure is tested; its PDF/UA/"fully accessible" conformance is **not** verified — no human AT walkthrough has been done) |
-| Observability | Applies — Tier C: OTel out-of-scope (no network surface); opt-in `--log-format json` **shipped** 2026-07-14 ([GAP-OBS-1: Addressed](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json-tier-c-structlog-reference-implementation)) |
+| Observability | Applies — Tier C: OTel out-of-scope (no network surface); opt-in `--log-format json` **shipped** 2026-07-14 ([GAP-OBS-1: Addressed](./docs/GAP-LEDGER.md#gap-obs-1--observability---log-format-json)) |
 | Internationalization | N/A — single-user tool, operator-only English output ([`docs/I18N.md`](./docs/I18N.md)) |
 | AI Evaluation | N/A — no model/prompt/retrieval surface; nothing in this codebase calls an LLM SDK |
 | Documentation | Applies — open gap recorded in [GAP-DOC-1](./docs/GAP-LEDGER.md#gap-doc-1--documentation-vendor-standards-as-a-pinned-submodule-finish-the-adr-migration) (`/STANDARDS` vendoring blocked on a portfolio-level tag prerequisite; ADR migration in progress) |
