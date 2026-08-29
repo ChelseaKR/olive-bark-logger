@@ -120,6 +120,18 @@ signed elsewhere in the portfolio; commit signing is a separate future decision 
 against the live API, and `tests/test_ruleset_check.py` pins a recorded copy of the
 reconciled live ruleset.
 
+Update 2026-08-28: **the committed file was missing the owner's bypass actor.** The live
+ruleset carried `{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode":
+"always"}` — the repository owner's standing bypass, kept deliberately after an agent
+once locked the owner out of their own repository — while `main.json` still said
+`"bypass_actors": []`. Nothing compared the two on that field with the right sign:
+`check_ruleset.py` compared the lists for equality, which would have reported a match on
+the day both were emptied together. The file now records the owner's bypass, and the
+check holds each side against it independently (`bypass_findings`), so a lockout is a
+finding whichever side it happens on. This matters here more than elsewhere because
+`.github/rulesets/README.md` publishes a `--method PUT --input .github/rulesets/main.json`
+reapply procedure: following it while the file said `[]` would have caused the lockout.
+
 **Still open:**
 - No zizmor workflow-linter step; no CodeQL `language: actions` workflow.
 

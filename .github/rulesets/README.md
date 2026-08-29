@@ -6,7 +6,9 @@ were reconciled** — the live configuration was brought up to `main.json` for t
 `pull_request` rule, strict required status checks, and `bypass_actors: []`, and
 `main.json` was amended to drop `required_signatures` (decision note below) and to carry
 the live ruleset's name. **On 2026-08-26 five of the eleven required status checks were
-removed, because an `echo` was satisfying them** (see the next section).
+removed, because an `echo` was satisfying them** (see the next section). **On
+2026-08-28 the repository owner's standing bypass actor was recorded in this file**,
+where it had been live and undocumented — see "Why the owner can bypass".
 `make ruleset-check` exits 0 against the live API.
 
 This document used to say the opposite — that nothing had been applied, and that "until a
@@ -24,13 +26,49 @@ ruleset required five macOS contexts, and its comment said so.
   contributor.
 - **Stale branches cannot merge** (`strict_required_status_checks_policy: true`): the
   branch must be up to date with `main` before merging.
-- **No bypass actors.** No one — including the repository owner — merges past these
-  rules. (Until 2026-08-21 the live ruleset granted the maintainer a `pull_request`
-  bypass; it was removed in the reconciliation.)
+- **One bypass actor: the repository owner** (`RepositoryRole` 5, `bypass_mode:
+  always`), deliberately and permanently. See "Why the owner can bypass" below. (From
+  2026-08-21 to 2026-08-26 there was none, and the maintainer's earlier `pull_request`
+  bypass had been removed in the reconciliation. That was the wrong call and it has been
+  reversed.)
 - **Six required status checks** must report green: `verify` and five
   `test-matrix (ubuntu-latest, 3.9–3.13)`. Every one of them runs the repository's real
   gates and every one of them can fail. Six is both the count and the strength; before
   2026-08-26 the count was eleven and the strength was six.
+
+## Why the owner can bypass
+
+`bypass_actors` holds **exactly one actor: the repository owner** (`RepositoryRole` 5,
+`bypass_mode: always`), and that is deliberate and permanent.
+
+This file used to argue the opposite, on the grounds that an admin bypass hands the
+ability to skip the gate to the person most likely to be in a hurry. That argument is not
+wrong about the risk; it is wrong about which risk is larger, and the larger one has
+already happened. **An agent applied a ruleset with no bypass and locked the owner out of
+their own repository**, and restoring access took a sweep across eighteen repositories in
+this portfolio. The standing instruction since is that the owner must always be able to
+bypass, in any repository.
+
+So an empty `bypass_actors` list here is not a stricter gate. It is the lockout, and
+anything checking this ruleset has to treat it as a failure rather than as a pass. Two
+things enforce that, and they are deliberately not one thing:
+
+- `tests/test_ruleset_check.py::test_the_committed_file_on_disk_records_the_owner_bypass`
+  asserts this file holds *exactly* that one actor — so a second bypass, granted to a
+  team, a GitHub App or another role, fails, and so does the owner's own going missing.
+- `scripts/check_ruleset.py` checks the live ruleset and this file **independently**
+  against that actor, rather than only comparing the two to each other. Comparing them
+  would report a match on the day both were emptied together, which is the incident
+  recurring with a green tick on it. `test_both_sides_emptied_is_still_a_failure` pins
+  that case: two findings, not zero.
+
+Note that `--scope public` (what CI runs) cannot see `bypass_actors` at all and says so
+on every run. `make ruleset-check` with a maintainer token is the only thing that checks
+this, which is why the assertion on the committed file matters independently.
+
+If you are reading this because the empty list looks more secure and you are about to
+restore it: reapplying a ruleset file that omits the owner's bypass is how the lockout
+happens. Do not.
 
 ## The 2026-08-26 change: five required checks that an `echo` satisfied
 
@@ -176,6 +214,14 @@ gh api --method PUT repos/ChelseaKR/olive-bark-logger/rulesets/18752850 \
   --input .github/rulesets/main.json
 ```
 
+> **Before running that, check that `main.json` still carries the owner's bypass actor.**
+> This command replaces the live ruleset wholesale with the contents of the file. On
+> 2026-08-28 the file said `"bypass_actors": []` while the live ruleset carried the
+> owner's standing bypass, so running it as written would have stripped that bypass and
+> locked the owner out of the repository — the exact incident described below, reached by
+> following this repository's own documented procedure. `make ruleset-check` now fails
+> when the file omits it, so run that first.
+
 Then `make ruleset-check` must print a match. Never change one side without the other:
 the divergence this file spent a month documenting started exactly that way.
 
@@ -197,12 +243,14 @@ the divergence this file spent a month documenting started exactly that way.
   once `docs/GAP-LEDGER.md#gap-sec-1` / `#gap-cicd-1` land CodeQL, zizmor, or Scorecard
   as separate jobs), subject to the "Adding a required status check" rule above. **Live,
   and matching.**
-- **`bypass_actors: []`.** No one — including repository admins — bypasses these rules.
-  This was written as the direct fix for commit `74e6b8f` (2026-07-02), a direct-to-main
-  push with no PR reference. **Live since 2026-08-21** — the maintainer's former
-  `pull_request` bypass was removed in the reconciliation. Consequence worth naming:
-  there is no emergency-merge path. If a required check goes red for a reason unrelated
-  to the change (a stale nightly is the likeliest), the way through is to fix the check
-  — `gh workflow run nightly.yml --ref main` — not to merge past it. Restoring a bypass
-  actor is a deliberate posture change: amend `main.json` and the live ruleset together,
-  and rewrite this note.
+- **`bypass_actors`: exactly the repository owner** (`RepositoryRole` 5,
+  `bypass_mode: always`). This note used to argue the opposite — an empty list, "no one
+  including repository admins", written as the direct fix for commit `74e6b8f`
+  (2026-07-02), a direct-to-main push with no PR reference. That argument is not wrong
+  about the risk of an admin merging past a red check; it is wrong about which risk is
+  larger, and the larger one has already happened. See "Why the owner can bypass" above.
+  The original concern is still addressed by everything else here: a PR is required, all
+  six checks are required, and the branch must be up to date. The bypass is the way back
+  in when a required check is wedged, not a routine merge path — if a check goes red for
+  a reason unrelated to the change (a stale nightly is the likeliest), the way through is
+  still to fix the check (`gh workflow run nightly.yml --ref main`).

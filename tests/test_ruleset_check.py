@@ -28,7 +28,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from check_ruleset import (
     CANNOT_VERIFY,
+    OWNER_BYPASS,
     CannotVerify,
+    bypass_findings,
     bypass_is_visible,
     diff_ruleset,
     fetch_live_ruleset,
@@ -127,6 +129,16 @@ LIVE_2026_08_26 = _with_contexts(
     ],
 )
 
+# The live ruleset as the API returned it on 2026-08-28, byte for byte from
+# `gh api repos/ChelseaKR/olive-bark-logger/rulesets/18752850`: the same six contexts as
+# 2026-08-26, plus the repository owner's standing bypass. That bypass had been added
+# live and this file still said `[]`, so nothing here matched reality until the file was
+# corrected. **The live value is the correct one** -- see `OWNER_BYPASS` in
+# `scripts/check_ruleset.py` and "Why the owner can bypass" in
+# `.github/rulesets/README.md`. This is the offline twin of `make ruleset-check` exiting
+# 0 today, and a check that failed against it would be a broken check, not a strict one.
+LIVE_2026_08_28 = {**LIVE_2026_08_26, "bypass_actors": [OWNER_BYPASS]}
+
 # The live ruleset as returned by the API on 2026-08-15, trimmed to the fields the check
 # reads. Recorded rather than fetched so this test is offline and deterministic; the
 # live-vs-file question is answered by `make ruleset-check`, not by the test suite.
@@ -195,13 +207,20 @@ def test_a_matching_ruleset_is_reported_as_a_match(tmp_path, capsys):
 
 
 def test_the_current_live_ruleset_matches_the_committed_definition(tmp_path, capsys):
-    """The 2026-08-26 change, held offline: the recorded live ruleset and the current
-    main.json agree. If either drifts, this fails before anyone needs the network to
-    notice."""
-    rc = check_main(["--live-json", str(_write(tmp_path, LIVE_2026_08_26))])
+    """The real configuration, held offline: the recorded live ruleset of 2026-08-28 and
+    the current main.json agree. If either drifts, this fails before anyone needs the
+    network to notice.
+
+    This used to pin `LIVE_2026_08_26`, which recorded `bypass_actors: []`. That stopped
+    being the live value once the owner's standing bypass was added, and the committed
+    file said `[]` too -- so the pair agreed with each other while both disagreed with
+    the repository. Pinning the *current* live payload is what makes this test a witness
+    rather than a matching pair of stale copies.
+    """
+    rc = check_main(["--live-json", str(_write(tmp_path, LIVE_2026_08_28))])
     assert rc == 0
     assert "matches" in capsys.readouterr().out
-    assert diff_ruleset(COMMITTED, LIVE_2026_08_26) == []
+    assert diff_ruleset(COMMITTED, LIVE_2026_08_28) == []
 
 
 def test_the_placeholder_macos_contexts_are_no_longer_required():
@@ -457,3 +476,95 @@ def test_the_docs_no_longer_claim_the_ruleset_is_unapplied():
     ledger = (ROOT / "docs" / "GAP-LEDGER.md").read_text(encoding="utf-8")
     cicd_entry = ledger.split("## GAP-CICD-1")[1].split("## GAP-A11Y-1")[0]
     assert "active on `main` since 2026-07-09" in cicd_entry
+
+
+# --- The owner's standing bypass ------------------------------------------------------
+#
+# `bypass_actors` is the one field not compared by equality. The owner keeps a standing
+# `RepositoryRole` 5 / `always` bypass, deliberately and permanently: an agent once
+# applied a ruleset with no bypass and locked the owner out of their own repository, and
+# restoring access took a sweep across eighteen repositories. This file and the live
+# ruleset are each held against that actor independently, because two wrong values that
+# agree with each other is the failure mode equality cannot see -- and this repository
+# publishes a `--method PUT --input .github/rulesets/main.json` reapply procedure, which
+# is exactly how an omission in the file becomes a lockout on the repository.
+
+
+def test_the_committed_file_on_disk_records_the_owner_bypass():
+    """Not a fixture: the actual `.github/rulesets/main.json`. Reapplying a ruleset file
+    that omits the owner's bypass is how the lockout happens, so the file has to be
+    right, not only the comparison."""
+    assert COMMITTED["bypass_actors"] == [OWNER_BYPASS]
+
+
+def test_the_real_live_configuration_is_a_match_not_a_finding():
+    """A check that failed forever against a correct repository would not be a stricter
+    check, it would be a broken one."""
+    assert bypass_findings(COMMITTED, LIVE_2026_08_28) == []
+
+
+def test_a_second_bypass_actor_is_reported():
+    """The threat actually worth guarding: a team, a GitHub App or a second role handed
+    the ability to skip these rules."""
+    for extra in (
+        {"actor_id": 4242, "actor_type": "Team", "bypass_mode": "pull_request"},
+        {"actor_id": 99, "actor_type": "Integration", "bypass_mode": "always"},
+        {"actor_id": 2, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+    ):
+        drifted = {**LIVE_2026_08_28, "bypass_actors": [OWNER_BYPASS, extra]}
+        found = bypass_findings(COMMITTED, drifted)
+        assert len(found) == 1, found
+        assert "unreviewed bypass actor" in found[0]
+        assert str(extra["actor_id"]) in found[0], "the finding names the actor"
+
+
+def test_the_owner_losing_their_bypass_is_reported():
+    """The incident the rule exists for. An empty bypass list coming back from the API is
+    the owner locked out of their own repository, however tidy the committed file looks."""
+    found = bypass_findings(COMMITTED, {**LIVE_2026_08_28, "bypass_actors": []})
+    assert len(found) == 1, found
+    assert "is NOT enforced live" in found[0]
+    assert "lockout" in found[0]
+
+
+def test_both_sides_emptied_is_still_a_failure():
+    """The case equality alone would pass, and the whole reason the owner's bypass is
+    asserted against each side rather than only compared between them: a tidy revert of
+    the committed file, on a day the owner had also been locked out, would otherwise
+    report a match on exactly the incident this guards. Two findings, not zero."""
+    found = bypass_findings(
+        {**COMMITTED, "bypass_actors": []}, {**LIVE_2026_08_28, "bypass_actors": []}
+    )
+    assert len(found) == 2, found
+    assert any("is NOT enforced live" in line for line in found), found
+    assert any("no longer records" in line for line in found), (
+        "the committed file losing the owner's bypass must be named too"
+    )
+
+
+def test_the_lockout_is_a_non_zero_exit_and_not_only_a_list(tmp_path, capsys):
+    """End to end through the CLI, since a finding nobody exits non-zero on is advice."""
+    rc = check_main(
+        ["--live-json", str(_write(tmp_path, {**LIVE_2026_08_28, "bypass_actors": []}))]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "DIFFERS" in out
+    assert "lockout" in out
+
+
+def test_public_scope_never_claims_to_have_checked_the_owner_bypass(tmp_path, capsys):
+    """CI's mode cannot see `bypass_actors` at all, so it must not imply the owner's
+    bypass was verified -- in either direction."""
+    rc = check_main(
+        [
+            "--scope",
+            "public",
+            "--live-json",
+            str(_write(tmp_path, _without_bypass(LIVE_2026_08_28))),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "NOT CHECKED in this run: bypass actors" in out
+    assert "lockout" not in out

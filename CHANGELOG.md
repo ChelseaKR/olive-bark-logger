@@ -16,6 +16,30 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **The committed ruleset omitted the repository owner's bypass actor, and the reapply
+  procedure in `.github/rulesets/README.md` would have used that omission to lock the
+  owner out.** The live `protect-main` ruleset carries `{"actor_id": 5, "actor_type":
+  "RepositoryRole", "bypass_mode": "always"}` — the owner's standing bypass, kept
+  deliberately after an agent once applied a no-bypass ruleset and locked the owner out
+  of their own repository (restoring access took a sweep across eighteen repositories).
+  `.github/rulesets/main.json` still said `"bypass_actors": []`, and this repository
+  publishes `gh api --method PUT ... --input .github/rulesets/main.json` as its
+  drift-correction step, which replaces the live ruleset wholesale with the file. The
+  file now records the owner's bypass; the README's design note, the "what is enforced"
+  summary, `docs/adr/0001-single-maintainer-review-posture.md` and `docs/GAP-LEDGER.md`
+  no longer argue an empty list is the stricter posture; and the reapply command carries
+  a warning to check the field first.
+- **`check_ruleset.py` compared `bypass_actors` by equality, which cannot see the
+  lockout.** Two wrong values that agree with each other passed: a "tidy" revert of the
+  committed file to `[]` on a day the owner had also been locked out would have reported
+  a match on exactly the incident the field exists to protect. The owner's bypass is now
+  asserted against the live ruleset and the committed file **independently**
+  (`bypass_findings`), and only *other* actors are compared between them, so a second
+  bypass granted to a team, an app or another role is still a finding in either
+  direction. `tests/test_ruleset_check.py` pins all three directions, including
+  `test_both_sides_emptied_is_still_a_failure` (two findings, not zero), and the
+  recorded live fixture is refreshed to the 2026-08-28 payload so the suite is a witness
+  rather than a matching pair of stale copies.
 - **Five of the eleven required status checks on `main` were satisfied by an `echo`.**
   The `protect-main` ruleset required `test-matrix (macos-latest, 3.9–3.13)` to merge.
   Nothing on a pull request ran macOS; what reported those five contexts was
