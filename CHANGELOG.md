@@ -16,6 +16,21 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **The tagging feature buffer grew without limit through any quiet stretch**
+  (issue #63). `run_pipeline` kept `(timestamp, zero-crossing-rate)` pairs so a closing
+  event could be classified over its own window, and its comment claimed the buffer
+  "never holds more than one event's worth of frame features". The only prune sat inside
+  `if event is not None:`, so a night, a weekend away, or any span with nothing crossing
+  the threshold never pruned at all: one entry per frame, forever. Traced over 5000
+  quiet frames the buffer reached exactly 5000 entries; at the default 100 ms frame that
+  is ~864,000 a day, on a Raspberry Pi meant to run for weeks under `Restart=always`.
+  The operators it bit were the ones with the quietest installs. The buffer is now
+  `monitor.features.FeatureWindow`, a deque pruned **every frame** against
+  `Detector.active_since` -- the open event's start, or None when nothing is open -- so
+  the bound is the detector's own state rather than a guessed retention horizon, and is
+  amortized O(1) rather than a per-frame rebuild that would make a long event quadratic
+  in its own length. Same 5000-frame trace now peaks at 1. Classification is unchanged:
+  a tag computed after a 500-frame quiet stretch is identical to one computed without it.
 - **The cover block did not lead every artifact, and the gate that promised it could not
   see the one it missed.** The README's Guardrails section said the "what this can and
   cannot prove" cover block "leads **every artifact** either implementation produces" and
@@ -135,6 +150,11 @@ release" defect this file's absence let stand.
   precache. It now extracts and checks membership in `ASSETS` specifically, with two
   canary tests (against a synthetic fixture, not the real files) proving it actually
   fails on both a real omission and a decoy mention outside the array.
+
+### Added
+- `Detector.active_since` -- the open event's start timestamp, or None. The only
+  interior state the detector exposes, and the exact bound a caller holding per-frame
+  side data needs.
 
 ### Security
 - **`pypdf` 6.15.0 -> 6.16.2 in `uv.lock`** (CVE-2026-84309, CVE-2026-84310,
