@@ -7,11 +7,13 @@ tests/test_no_egress.py (local-only) for the status snapshot rendered by report/
 from __future__ import annotations
 
 import re
+from html import escape
 
 from monitor.config import Config
 from monitor.detector import Event
 from monitor.service import _write_status_page
 from report.aggregate import summarize
+from report.render import COVER_CAN, COVER_CANNOT, COVER_PRIVACY, NO_VERDICT_NOTE
 from report.status import (
     FRAME_COVERAGE_NOT_YET_STARTED,
     GAP_UNAVAILABLE_NOTE,
@@ -301,6 +303,32 @@ def test_status_page_can_be_enabled_without_health_file(tmp_path):
         _write_status_page(config, store, _payload())
     assert path.exists()
     assert "Local Status" in path.read_text(encoding="utf-8")
+
+
+# --- the caveats travel with this artifact too ----------------------------------
+#
+# `status.html` is a fifth artifact path. The README's Guardrails section claims the
+# cover block "leads every artifact either implementation produces" and that anything
+# reporting a quiet-hours count says a count is not a determination; this page prints
+# two quiet-hours rows and, until 2026-08-29, carried neither. It was invisible to
+# `tests/test_export_caveats.py` because that gate discovered export paths by name and
+# `render_status` matched none of its alternatives. That gate now discovers by
+# behaviour and holds this page; these are the local, readable twin of that check.
+
+
+def test_status_page_leads_with_the_cover_block():
+    html = _html()
+    assert "What this can and cannot prove" in html
+    for line in (*COVER_CAN, *COVER_CANNOT, COVER_PRIVACY):
+        assert escape(line) in html, f"status page is missing a cover string: {line[:60]}"
+    # "Leads": the cover comes before the first data table, not tucked underneath it.
+    assert html.index("What this can and cannot prove") < html.index("<table>")
+
+
+def test_status_page_states_that_a_quiet_hours_count_is_not_a_determination():
+    html = _html()
+    assert "Events in quiet hours" in html, "premise: this page prints a quiet-hours count"
+    assert escape(NO_VERDICT_NOTE) in html
 
 
 # --- atomic write ---------------------------------------------------------------

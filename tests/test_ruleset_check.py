@@ -127,6 +127,15 @@ LIVE_2026_08_26 = _with_contexts(
     ],
 )
 
+# The administrator bypass actor added portfolio-wide, as the live API returned it on
+# 2026-08-27. This is the only difference from LIVE_2026_08_26, and for six days it was
+# the difference between what `main.json` claimed and what was enforced.
+ADMIN_BYPASS = {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+
+# The live ruleset as returned by the API on 2026-08-27, trimmed to the fields the check
+# reads. The offline twin of `make ruleset-check` exiting 0 today.
+LIVE_2026_08_27 = {**LIVE_2026_08_26, "bypass_actors": [ADMIN_BYPASS]}
+
 # The live ruleset as returned by the API on 2026-08-15, trimmed to the fields the check
 # reads. Recorded rather than fetched so this test is offline and deterministic; the
 # live-vs-file question is answered by `make ruleset-check`, not by the test suite.
@@ -195,13 +204,100 @@ def test_a_matching_ruleset_is_reported_as_a_match(tmp_path, capsys):
 
 
 def test_the_current_live_ruleset_matches_the_committed_definition(tmp_path, capsys):
-    """The 2026-08-26 change, held offline: the recorded live ruleset and the current
-    main.json agree. If either drifts, this fails before anyone needs the network to
-    notice."""
-    rc = check_main(["--live-json", str(_write(tmp_path, LIVE_2026_08_26))])
+    """Held offline: the recorded live ruleset and the current main.json agree. If
+    either drifts, this fails before anyone needs the network to notice."""
+    rc = check_main(["--live-json", str(_write(tmp_path, LIVE_2026_08_27))])
     assert rc == 0
     assert "matches" in capsys.readouterr().out
-    assert diff_ruleset(COMMITTED, LIVE_2026_08_26) == []
+    assert diff_ruleset(COMMITTED, LIVE_2026_08_27) == []
+
+
+# --- The administrator bypass, recorded rather than denied (2026-08-27) ---------------
+#
+# `main.json` said `bypass_actors: []`; the live ruleset carried
+# `RepositoryRole:5 (always)`. Two documents said "No bypass actors" while an
+# administrator could merge past every rule. The file was amended to reality -- the
+# bypass is the owner's deliberate recovery path and stays -- so these tests exist to
+# keep the *record* honest in both directions.
+
+
+def test_the_committed_definition_records_the_administrator_bypass():
+    """The claim that was false for six days, now pinned as a fact about the file.
+
+    Writing `bypass_actors: []` back would restore a document that undersells who can
+    merge, which is the defect this replaced, not a tightening.
+    """
+    assert COMMITTED["bypass_actors"] == [ADMIN_BYPASS], (
+        "main.json no longer records the administrator bypass that is live on this "
+        "repository. If the intent is to remove the bypass, remove it from the live "
+        "ruleset first and rewrite .github/rulesets/README.md; if the intent is to "
+        "tidy the file, it is not a tidy, it is a false claim about who can merge."
+    )
+
+
+def test_losing_the_administrator_bypass_live_is_reported_as_a_difference():
+    """The direction that matters most: a repository whose owner cannot recover it.
+
+    The owner requires an always-bypass in every repository in this portfolio. If the
+    live ruleset drops it, `make ruleset-check` must say so rather than shrug -- and
+    before 2026-08-27 it could not, because the file agreed with the loss.
+    """
+    stripped = {**LIVE_2026_08_27, "bypass_actors": []}
+    differences = "\n".join(diff_ruleset(COMMITTED, stripped))
+    assert "bypass_actors" in differences
+    assert "RepositoryRole:5 (always)" in differences
+
+
+def test_an_extra_bypass_actor_is_still_reported():
+    """The other direction: recording one bypass must not wave the next one through."""
+    extra = {
+        **LIVE_2026_08_27,
+        "bypass_actors": [
+            ADMIN_BYPASS,
+            {"actor_id": 1, "actor_type": "User", "bypass_mode": "always"},
+        ],
+    }
+    differences = "\n".join(diff_ruleset(COMMITTED, extra))
+    assert "bypass_actors" in differences
+    assert "User:1 (always)" in differences
+
+
+def test_no_document_still_claims_that_nobody_can_bypass():
+    """The prose half. `main.json` being right does not help a reader of the README.
+
+    Checked as the absence of the specific false sentences, not as the presence of a
+    replacement: a document can be rewritten many honest ways, and only one dishonest
+    one matters here.
+    """
+    ruleset_readme = (ROOT / ".github" / "rulesets" / "README.md").read_text(encoding="utf-8")
+
+    # The correction section quotes both false sentences on purpose -- that is how this
+    # repo records a mistake, the same way the broken `select(.name=="main")` command is
+    # republished under a DO NOT USE banner. So the sentences are struck from everywhere
+    # *else*: what fails this test is one of them standing again as a claim.
+    correction = "## The 2026-08-27 correction"
+    assert correction in ruleset_readme, "the correction section is the reason for the quotes"
+    before, _, rest = ruleset_readme.partition(correction)
+    _, _, after = rest.partition("\n## ")
+    elsewhere = before + after
+
+    for false_claim in (
+        "No bypass actors.",
+        "No one — including the repository owner — merges past these",
+        "No one — including repository admins — bypasses these rules",
+    ):
+        assert false_claim not in elsewhere, (
+            f"{false_claim!r} stands as a claim again outside the section that retracts it"
+        )
+    # And it must say what is true instead, in the place a reader looks first.
+    enforced = ruleset_readme.split("## What is actually enforced on `main` right now")[1]
+    assert "RepositoryRole" in enforced.split("\n## ")[0]
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    cicd_row = next(line for line in readme.splitlines() if line.startswith("| CI/CD |"))
+    assert "no bypass actors," not in cicd_row, (
+        "the Standards Conformance table still claims nobody can bypass the ruleset"
+    )
 
 
 def test_the_placeholder_macos_contexts_are_no_longer_required():

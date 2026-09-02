@@ -1,6 +1,12 @@
 # Gap Ledger
 
-**Last verified: 2026-08-15 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+**Last verified: 2026-08-27 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+
+> The stamp above read `2026-08-15` until 2026-08-29, while entries below carried updates
+> dated 2026-08-21, 2026-08-26 and 2026-08-27 — three remediation passes edited this file
+> without moving its own freshness date, which is the ledger committing the exact defect it
+> exists to catch. It is now set to the newest date any entry records, and
+> `tests/test_doc_figures.py` fails the build if it ever falls behind again.
 
 > An entry that describes a gap the code has since closed is as wrong as one that hides a
 > gap — gentler, but the same defect: a document about the code that stopped tracking the
@@ -119,6 +125,25 @@ signed elsewhere in the portfolio; commit signing is a separate future decision 
 `.github/rulesets/README.md`) and to carry the live name. `make ruleset-check` exits 0
 against the live API, and `tests/test_ruleset_check.py` pins a recorded copy of the
 reconciled live ruleset.
+
+Update 2026-08-27: **`bypass_actors: []` was false, and had been since the
+portfolio-wide administrator bypass was added.** `make ruleset-check` reported it in one
+line -- `bypass_actors: committed [] (no one bypasses), live ['RepositoryRole:5
+(always)']` -- and the same API read returned `"current_user_can_bypass": "always"` for
+the maintainer's token. `main.json`, `.github/rulesets/README.md` ("No bypass actors. No
+one -- including the repository owner -- merges past these rules") and this repository's
+README all described a stricter gate than the one in force. The bypass is deliberate and
+is not being removed: the owner requires a recovery path in every repository in this
+portfolio. **The file was amended to reality, not the ruleset to the file**, and
+`tests/test_ruleset_check.py` now fails if the committed definition stops recording it or
+if the live ruleset loses it.
+
+The part of this worth carrying forward: the one field that turned out to be wrong is the
+one field CI structurally cannot read. `verify` runs `--scope public`, and the publicly
+readable ruleset payload omits `bypass_actors`; every other field is diffed on every pull
+request. `--scope public` says so on its own passing path, and `make ruleset-check` with a
+maintainer token remains the only check on bypass actors. That is a stated limit, not a
+gap to close -- GitHub does not offer workflows the `administration` permission.
 
 **Still open:**
 - No zizmor workflow-linter step; no CodeQL `language: actions` workflow.

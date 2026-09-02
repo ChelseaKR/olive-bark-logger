@@ -101,6 +101,24 @@ class Detector:
             return self._close()
         return None
 
+    @property
+    def active_since(self) -> float | None:
+        """Start timestamp of the currently open event, or None if none is open.
+
+        Read-only, and deliberately the *only* thing this state machine exposes about
+        its interior. A caller that keeps per-frame side data alongside the detector --
+        `monitor.service`'s zero-crossing buffer is the one that does -- needs a bound
+        on how far back that data can still matter, and only the detector knows it: no
+        reading before the open event's start can belong to that event or to any later
+        one, and when nothing is open, no held reading can belong to anything at all.
+
+        Guessing that bound instead (say, `min_duration_s + debounce_s` of history) is
+        wrong in both directions: too short truncates the classification window of a
+        long event, too long is the unbounded growth it was meant to fix. Asking is
+        exact. See `monitor.features.FeatureWindow` and issue #63.
+        """
+        return self._start if self._active else None
+
     # -- internals -----------------------------------------------------------
     def _open(self, t: float, level: float) -> None:
         self._active = True
