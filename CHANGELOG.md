@@ -16,6 +16,40 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **The service worker's precache was all-or-nothing, and silently so** (issue #68).
+  `caches.open(CACHE).then((c) => c.addAll(ASSETS))` stores nothing at all if any single
+  one of the eight asset fetches fails, per the Cache API spec, and surfaced no error
+  anywhere. Everything #65/#66/#67 established about *which* files belong in `ASSETS`
+  rested on an install path that could quietly store none of them, so a client hitting a
+  transient hiccup on the exact visit meant to fix its offline reload stayed broken until
+  some later visit where all eight happened to succeed at once. Assets are now cached
+  individually via `Promise.allSettled`, which keeps whatever succeeded (Cache Storage
+  outlives a discarded worker, so the next attempt only fetches what is still missing),
+  and the install is **rejected** if any failed, so the browser retries later instead of
+  activating a worker whose cache cannot serve an offline reload. A partial precache
+  reporting success is the same defect class as a green check that cannot fail.
+- **The precache-completeness test's import regex was not anchored to import syntax**
+  (issue #68). `/from\s+["'](\.\/[^"']+)["']/g` matched the bare word `from` followed by
+  a quoted relative path anywhere in `app.js`, so a comment such as
+  `// ported from "./legacy.js"` would have been collected as an import and the test
+  would then have demanded `sw.js` precache a module `app.js` never imports — a
+  false-failure trap inside a test written to prevent false negatives. Against a
+  three-line fixture with one real import, the old pattern returned three specifiers and
+  the anchored one returns one. Both the binding/re-export form and the side-effect form
+  (`import "./x.js";`) are recognised, multi-line import lists still match, and the
+  pattern was duplicated in three places and is now one helper.
+- **The markdown link gate read a code span as a link.** `tests/test_doc_links.py`
+  matched `[...](...)` wherever those characters occurred, backticks included, where
+  Markdown renders no link at all. The changelog entry directly above quotes the regex
+  issue #68 was about; that quote contains a character class immediately followed by a
+  group, and the gate demanded the repository add a file named after the fragment. A
+  truthful sentence could not pass, and the cheap way out was to reword the document
+  rather than fix the check -- the same false-failure shape as the unanchored import
+  regex, in the gate rather than in the code. Code spans are now stripped before the
+  scan; stripping rather than skipping the line keeps the target of a code-labelled
+  link (``[`monitor/features.py`](../monitor/features.py)``, the house style here)
+  checked, and a canary pins both halves.
+
 - **The tagging feature buffer grew without limit through any quiet stretch**
   (issue #63). `run_pipeline` kept `(timestamp, zero-crossing-rate)` pairs so a closing
   event could be classified over its own window, and its comment claimed the buffer
@@ -155,6 +189,11 @@ release" defect this file's absence let stand.
 - `Detector.active_since` -- the open event's start timestamp, or None. The only
   interior state the detector exposes, and the exact bound a caller holding per-frame
   side data needs.
+- `pwa/sw.test.mjs` — the service worker's install path **executed** rather than read,
+  in a `node:vm` sandbox with a fake Cache API. The other PWA tests assert on `sw.js`
+  as text, and text cannot tell you what `addAll` does on a partial failure. Includes a
+  canary running the previous `addAll` implementation through the identical harness and
+  showing it store zero of eight on one failure.
 
 ### Security
 - **`pypdf` 6.15.0 -> 6.16.2 in `uv.lock`** (CVE-2026-84309, CVE-2026-84310,
