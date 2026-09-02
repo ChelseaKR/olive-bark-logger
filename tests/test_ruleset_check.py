@@ -28,7 +28,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from check_ruleset import (
     CANNOT_VERIFY,
+    OWNER_BYPASS,
     CannotVerify,
+    bypass_findings,
     bypass_is_visible,
     diff_ruleset,
     fetch_live_ruleset,
@@ -217,49 +219,26 @@ def test_the_current_live_ruleset_matches_the_committed_definition(tmp_path, cap
 # `main.json` said `bypass_actors: []`; the live ruleset carried
 # `RepositoryRole:5 (always)`. Two documents said "No bypass actors" while an
 # administrator could merge past every rule. The file was amended to reality -- the
-# bypass is the owner's deliberate recovery path and stays -- so these tests exist to
-# keep the *record* honest in both directions.
+# bypass is the owner's deliberate recovery path and stays.
+#
+# The three tests that lived here asserted on the rendered string
+# `bypass_actors: committed [...], live [...]`, which `bypass_findings` replaced on
+# 2026-08-28 (see "The owner's standing bypass" at the end of this file). Every one of
+# them is carried there against the function rather than the sentence, and widened: the
+# committed file on disk, the owner's bypass missing from either side independently,
+# three shapes of second actor, and the case equality got wrong. What stays here is the
+# prose half, which nothing else checks.
 
 
-def test_the_committed_definition_records_the_administrator_bypass():
-    """The claim that was false for six days, now pinned as a fact about the file.
+def test_the_owner_bypass_constant_matches_the_recorded_live_payload():
+    """`OWNER_BYPASS` drives the whole check, so it may not be the only record of itself.
 
-    Writing `bypass_actors: []` back would restore a document that undersells who can
-    merge, which is the defect this replaced, not a tightening.
+    `ADMIN_BYPASS` above is the actor as the API returned it on 2026-08-27, copied from
+    the response rather than from the source. If the constant is ever "corrected" to
+    something the repository does not actually carry, the check would go on passing while
+    describing a different repository.
     """
-    assert COMMITTED["bypass_actors"] == [ADMIN_BYPASS], (
-        "main.json no longer records the administrator bypass that is live on this "
-        "repository. If the intent is to remove the bypass, remove it from the live "
-        "ruleset first and rewrite .github/rulesets/README.md; if the intent is to "
-        "tidy the file, it is not a tidy, it is a false claim about who can merge."
-    )
-
-
-def test_losing_the_administrator_bypass_live_is_reported_as_a_difference():
-    """The direction that matters most: a repository whose owner cannot recover it.
-
-    The owner requires an always-bypass in every repository in this portfolio. If the
-    live ruleset drops it, `make ruleset-check` must say so rather than shrug -- and
-    before 2026-08-27 it could not, because the file agreed with the loss.
-    """
-    stripped = {**LIVE_2026_08_27, "bypass_actors": []}
-    differences = "\n".join(diff_ruleset(COMMITTED, stripped))
-    assert "bypass_actors" in differences
-    assert "RepositoryRole:5 (always)" in differences
-
-
-def test_an_extra_bypass_actor_is_still_reported():
-    """The other direction: recording one bypass must not wave the next one through."""
-    extra = {
-        **LIVE_2026_08_27,
-        "bypass_actors": [
-            ADMIN_BYPASS,
-            {"actor_id": 1, "actor_type": "User", "bypass_mode": "always"},
-        ],
-    }
-    differences = "\n".join(diff_ruleset(COMMITTED, extra))
-    assert "bypass_actors" in differences
-    assert "User:1 (always)" in differences
+    assert OWNER_BYPASS == ADMIN_BYPASS
 
 
 def test_no_document_still_claims_that_nobody_can_bypass():
@@ -553,3 +532,95 @@ def test_the_docs_no_longer_claim_the_ruleset_is_unapplied():
     ledger = (ROOT / "docs" / "GAP-LEDGER.md").read_text(encoding="utf-8")
     cicd_entry = ledger.split("## GAP-CICD-1")[1].split("## GAP-A11Y-1")[0]
     assert "active on `main` since 2026-07-09" in cicd_entry
+
+
+# --- The owner's standing bypass ------------------------------------------------------
+#
+# `bypass_actors` is the one field not compared by equality. The owner keeps a standing
+# `RepositoryRole` 5 / `always` bypass, deliberately and permanently: an agent once
+# applied a ruleset with no bypass and locked the owner out of their own repository, and
+# restoring access took a sweep across eighteen repositories. This file and the live
+# ruleset are each held against that actor independently, because two wrong values that
+# agree with each other is the failure mode equality cannot see -- and this repository
+# publishes a `--method PUT --input .github/rulesets/main.json` reapply procedure, which
+# is exactly how an omission in the file becomes a lockout on the repository.
+
+
+def test_the_committed_file_on_disk_records_the_owner_bypass():
+    """Not a fixture: the actual `.github/rulesets/main.json`. Reapplying a ruleset file
+    that omits the owner's bypass is how the lockout happens, so the file has to be
+    right, not only the comparison."""
+    assert COMMITTED["bypass_actors"] == [OWNER_BYPASS]
+
+
+def test_the_real_live_configuration_is_a_match_not_a_finding():
+    """A check that failed forever against a correct repository would not be a stricter
+    check, it would be a broken one."""
+    assert bypass_findings(COMMITTED, LIVE_2026_08_27) == []
+
+
+def test_a_second_bypass_actor_is_reported():
+    """The threat actually worth guarding: a team, a GitHub App or a second role handed
+    the ability to skip these rules."""
+    for extra in (
+        {"actor_id": 4242, "actor_type": "Team", "bypass_mode": "pull_request"},
+        {"actor_id": 99, "actor_type": "Integration", "bypass_mode": "always"},
+        {"actor_id": 2, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+    ):
+        drifted = {**LIVE_2026_08_27, "bypass_actors": [OWNER_BYPASS, extra]}
+        found = bypass_findings(COMMITTED, drifted)
+        assert len(found) == 1, found
+        assert "unreviewed bypass actor" in found[0]
+        assert str(extra["actor_id"]) in found[0], "the finding names the actor"
+
+
+def test_the_owner_losing_their_bypass_is_reported():
+    """The incident the rule exists for. An empty bypass list coming back from the API is
+    the owner locked out of their own repository, however tidy the committed file looks."""
+    found = bypass_findings(COMMITTED, {**LIVE_2026_08_27, "bypass_actors": []})
+    assert len(found) == 1, found
+    assert "is NOT enforced live" in found[0]
+    assert "lockout" in found[0]
+
+
+def test_both_sides_emptied_is_still_a_failure():
+    """The case equality alone would pass, and the whole reason the owner's bypass is
+    asserted against each side rather than only compared between them: a tidy revert of
+    the committed file, on a day the owner had also been locked out, would otherwise
+    report a match on exactly the incident this guards. Two findings, not zero."""
+    found = bypass_findings(
+        {**COMMITTED, "bypass_actors": []}, {**LIVE_2026_08_27, "bypass_actors": []}
+    )
+    assert len(found) == 2, found
+    assert any("is NOT enforced live" in line for line in found), found
+    assert any("no longer records" in line for line in found), (
+        "the committed file losing the owner's bypass must be named too"
+    )
+
+
+def test_the_lockout_is_a_non_zero_exit_and_not_only_a_list(tmp_path, capsys):
+    """End to end through the CLI, since a finding nobody exits non-zero on is advice."""
+    rc = check_main(
+        ["--live-json", str(_write(tmp_path, {**LIVE_2026_08_27, "bypass_actors": []}))]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "DIFFERS" in out
+    assert "lockout" in out
+
+
+def test_public_scope_never_claims_to_have_checked_the_owner_bypass(tmp_path, capsys):
+    """CI's mode cannot see `bypass_actors` at all, so it must not imply the owner's
+    bypass was verified -- in either direction."""
+    rc = check_main(
+        [
+            "--scope",
+            "public",
+            "--live-json",
+            str(_write(tmp_path, _without_bypass(LIVE_2026_08_27))),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "NOT CHECKED in this run: bypass actors" in out
+    assert "lockout" not in out

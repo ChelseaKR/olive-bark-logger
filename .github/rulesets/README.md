@@ -81,6 +81,36 @@ flipped. That change removed a gate that read as stronger than it was; this one 
 *sentence* that read as stronger than it was. Prose does not block a merge — and prose
 that overstates a gate is worse than no prose, because a reader stops looking.
 
+### 2026-08-28: the comparison itself was the wrong shape
+
+Recording the actor in `main.json` fixed the claim. It did not fix the check, which
+compared the two bypass lists **by equality** — the one comparison that cannot see this
+failure. If a later edit "tidied" the committed file back to `[]` on a day the owner had
+also been locked out live, the two sides would agree and the check would report a match
+on precisely the incident the field protects. Two wrong values that agree are the
+failure mode; equality cannot distinguish them from two right ones.
+
+`bypass_findings` in `scripts/check_ruleset.py` therefore holds **each side
+independently** against the owner's bypass, and compares only *other* actors between
+them:
+
+- the owner's bypass missing from the **live** ruleset is the lockout recurring;
+- the owner's bypass missing from the **committed file** is a lockout waiting for
+  somebody to run the reapply command above, which is how the original incident
+  happened;
+- any *other* bypass actor — a team, a GitHub App, a second role — is a finding in
+  either direction, which is the threat that was actually worth an equality check.
+
+`test_both_sides_emptied_is_still_a_failure` pins the case equality got wrong: two
+findings, not zero.
+
+Why the owner keeps a bypass at all, stated once so it is not re-litigated: an agent
+applied a ruleset with no bypass actor and locked the owner out of her own repository,
+and restoring access took a sweep across eighteen repositories in this portfolio. An
+empty `bypass_actors` list here is not a stricter gate — it is that incident. If you are
+reading this because the empty list looks more secure and you are about to restore it:
+do not.
+
 ## The 2026-08-26 change: five required checks that an `echo` satisfied
 
 Until 2026-08-26 the ruleset also required five `test-matrix (macos-latest, 3.9–3.13)`
@@ -229,6 +259,15 @@ gh api --method PUT repos/ChelseaKR/olive-bark-logger/rulesets/18752850 \
   -H "Accept: application/vnd.github+json" \
   --input .github/rulesets/main.json
 ```
+
+> **Before running that, check that `main.json` still carries the owner's bypass actor.**
+> This command replaces the live ruleset wholesale with the contents of the file. Until
+> 2026-08-27 the file said `"bypass_actors": []` while the live ruleset carried the
+> owner's standing bypass, so running it as written would have stripped that bypass and
+> locked the owner out of the repository — by following this repository's own documented
+> procedure. That is why the file is checked as something that will be *applied*, not
+> only as a description of what is live: `make ruleset-check` fails when the file omits
+> the owner's bypass, whatever the live ruleset says. Run it first.
 
 Then `make ruleset-check` must print a match. Never change one side without the other:
 the divergence this file spent a month documenting started exactly that way.

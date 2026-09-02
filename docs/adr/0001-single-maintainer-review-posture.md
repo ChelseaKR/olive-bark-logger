@@ -25,6 +25,34 @@ owner. `require_code_owner_review: true` stays on so that `CODEOWNERS` routing t
 effect automatically the moment a second contributor ever opens a PR, with no ruleset
 change needed at that point.
 
+## Update 2026-08-28 — the `bypass_actors: []` half of this decision is reversed
+
+The Decision above is unchanged on review count: `required_approving_review_count: 0`
+with a PR still mandatory and every required status check still enforced. What is
+reversed is the clause that the ruleset "cannot be force-pushed or bypassed by anyone —
+including the repo owner".
+
+`.github/rulesets/main.json` now records exactly one bypass actor, the repository owner
+(`RepositoryRole` 5, `bypass_mode: always`). The reason is not a change of mind about
+option 1 above — a standing bypass is still not a substitute for a rule — but an incident
+this ADR did not anticipate: **an agent applied a ruleset with no bypass and locked the
+owner out of their own repository**, and restoring access took a sweep across eighteen
+repositories in this portfolio. The owner's standing instruction since is that they must
+always be able to bypass, in any repository.
+
+The concern in option 1 was that a standing bypass for the account doing 100% of the
+merges is equivalent to no rule at all. That remains true of a bypass used routinely, and
+it is not what this is: the PR requirement, the six required checks and the up-to-date
+requirement all still apply to every merge, and the bypass exists as the way back in when
+a required check is wedged. The self-certification the standard guards against is
+addressed by the checks being real and able to fail, which is what the 2026-08-26 change
+was about.
+
+An empty `bypass_actors` list here is therefore not a stricter gate; it is the lockout.
+See "Why the owner can bypass" in `.github/rulesets/README.md`, and
+`tests/test_ruleset_check.py`, which fails if this file's bypass actor goes missing or if
+a second one appears.
+
 ## Consequences
 - **Easier:** the maintainer can still ship solo without being locked out of their own
   repo; CI still cannot be silently skipped by a raw push, which is the actual defect

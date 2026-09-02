@@ -28,6 +28,16 @@ reduced view of a ruleset omits `bypass_actors` altogether -- which `.get("bypas
 never read. That hole is closed: an absent field is CANNOT VERIFY under `--scope full`,
 and under `--scope public` every run prints, pass or fail, that bypass actors were not
 among the things it checked.
+
+**The bypass list is not compared by equality** (2026-08-28). The repository owner keeps
+a standing `RepositoryRole` 5 / `always` bypass, deliberately and permanently, because an
+agent once applied a ruleset with no bypass and locked the owner out of their own
+repository; restoring access took a sweep across eighteen repositories. This file and the
+live ruleset are each held against that actor *independently*, and only other actors are
+compared between them. The reason is the failure mode equality cannot see: if the
+committed file were "tidied" back to `[]` on a day the owner had also been locked out,
+the two sides would agree and a plain comparison would report a match on exactly the
+incident the rule exists to prevent. See :func:`bypass_findings`.
 """
 
 from __future__ import annotations
@@ -43,6 +53,20 @@ RULESET_FILE = Path(__file__).resolve().parent.parent / ".github" / "rulesets" /
 MAIN_REF = "refs/heads/main"
 
 CANNOT_VERIFY = 2
+
+# The repository owner's standing bypass. `RepositoryRole` 5 with `bypass_mode: "always"`
+# is what GitHub returns for it, and it is permanent by the owner's explicit decision:
+# an agent once applied a ruleset with no bypass and locked the owner out of their own
+# repository, and restoring access took a sweep across eighteen repositories. It is
+# written as a constant, and asserted against each side independently below, so that
+# neither "the owner was locked out again" nor "somebody granted a second actor a
+# bypass" can pass as a match. See .github/rulesets/README.md, "Why the owner can
+# bypass".
+OWNER_BYPASS = {
+    "actor_id": 5,
+    "actor_type": "RepositoryRole",
+    "bypass_mode": "always",
+}
 
 # Printed by every `--scope public` run, pass or fail. The run is genuinely narrower
 # than a `--scope full` one and must not be quoted as if it were not.
@@ -134,13 +158,6 @@ def _contexts(ruleset: dict[str, Any]) -> set[str]:
     return {c.get("context", "") for c in params.get("required_status_checks", [])}
 
 
-def _bypass(ruleset: dict[str, Any]) -> list[str]:
-    return sorted(
-        f"{a.get('actor_type', '?')}:{a.get('actor_id', '?')} ({a.get('bypass_mode', '?')})"
-        for a in ruleset.get("bypass_actors", [])
-    )
-
-
 def bypass_is_visible(live: dict[str, Any]) -> bool:
     """Whether the response actually carries `bypass_actors`, rather than omitting it.
 
@@ -208,6 +225,65 @@ def _diff_status_checks(committed: dict[str, Any], live: dict[str, Any]) -> list
     return out
 
 
+def bypass_findings(committed: dict[str, Any], live: dict[str, Any]) -> list[str]:
+    """The bypass list, checked three ways rather than compared once.
+
+    Equality alone is not enough here, and the reason is concrete: if a future edit put
+    `"bypass_actors": []` back into the committed file on a day the owner had also been
+    locked out of the repository, the two sides would agree and a plain comparison would
+    report a match on exactly the incident this rule exists to prevent. So the owner's
+    standing bypass is asserted against **each side independently**, and only *other*
+    actors are compared between them:
+
+    1. `OWNER_BYPASS` must be present in the **live** ruleset. An empty or owner-less
+       bypass list coming back from the API is the lockout recurring, not a stricter
+       gate.
+    2. `OWNER_BYPASS` must be present in the **committed** file, so an edit "restoring"
+       the empty list is caught at the file rather than after somebody reapplies it --
+       and this file has a documented `--method PUT --input` reapply procedure, which is
+       precisely how an omission here becomes a lockout.
+    3. Any **other** bypass actor -- a team, a GitHub App, a second role -- is a finding
+       in either direction. That is the threat actually worth guarding, and it is the one
+       an equality check against a hand-edited file would let through the moment both
+       sides were edited together.
+    """
+    findings: list[str] = []
+    committed_actors = list(committed.get("bypass_actors") or [])
+    live_actors = list(live.get("bypass_actors") or [])
+
+    if OWNER_BYPASS not in live_actors:
+        findings.append(
+            "bypass_actors: the repository owner's standing bypass "
+            f"({json.dumps(OWNER_BYPASS, sort_keys=True)}) is NOT enforced live. "
+            "An empty or owner-less bypass list is the lockout this rule exists to "
+            "prevent, not a stricter gate -- see .github/rulesets/README.md, "
+            '"Why the owner can bypass".'
+        )
+    if OWNER_BYPASS not in committed_actors:
+        findings.append(
+            "bypass_actors: .github/rulesets/main.json no longer records the repository "
+            "owner's standing bypass. Reapplying the file as it stands would lock the "
+            "owner out; restore it rather than reapplying."
+        )
+
+    other_committed = [a for a in committed_actors if a != OWNER_BYPASS]
+    other_live = [a for a in live_actors if a != OWNER_BYPASS]
+    for actor in other_live:
+        if actor not in other_committed:
+            findings.append(
+                "unreviewed bypass actor: "
+                f"{json.dumps(actor, sort_keys=True)} may skip these rules live and is "
+                "not in the committed definition. Only the owner's own standing bypass "
+                "is expected; a team, an app or a second role is not."
+            )
+    for actor in other_committed:
+        if actor not in other_live:
+            findings.append(
+                f"bypass actor committed but not enforced: {json.dumps(actor, sort_keys=True)}"
+            )
+    return findings
+
+
 def diff_ruleset(
     committed: dict[str, Any], live: dict[str, Any], *, check_bypass: bool = True
 ) -> list[str]:
@@ -240,12 +316,7 @@ def diff_ruleset(
     out.extend(_diff_pull_request(committed, live))
 
     if check_bypass:
-        want_bypass, have_bypass = _bypass(committed), _bypass(live)
-        if want_bypass != have_bypass:
-            out.append(
-                f"bypass_actors: committed {want_bypass or '[] (no one bypasses)'}, "
-                f"live {have_bypass or '[] (no one bypasses)'}"
-            )
+        out.extend(bypass_findings(committed, live))
     return out
 
 

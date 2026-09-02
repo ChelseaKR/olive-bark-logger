@@ -1,6 +1,6 @@
 # Gap Ledger
 
-**Last verified: 2026-08-27 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+**Last verified: 2026-08-28 · Recheck cadence: every remediation pass (see `docs/audits/`).**
 
 > The stamp above read `2026-08-15` until 2026-08-29, while entries below carried updates
 > dated 2026-08-21, 2026-08-26 and 2026-08-27 — three remediation passes edited this file
@@ -144,6 +144,19 @@ readable ruleset payload omits `bypass_actors`; every other field is diffed on e
 request. `--scope public` says so on its own passing path, and `make ruleset-check` with a
 maintainer token remains the only check on bypass actors. That is a stated limit, not a
 gap to close -- GitHub does not offer workflows the `administration` permission.
+
+Update 2026-08-28: **the check compared the bypass list by equality, which is the one
+comparison that cannot catch a lockout.** If `main.json` were ever "tidied" back to
+`"bypass_actors": []` on a day the owner had also been locked out, the two sides would
+agree and `check_ruleset.py` would have reported a match on precisely the incident the
+field protects. `bypass_findings` now holds the live ruleset and the committed file
+against the owner's standing bypass **independently**, and compares only *other* actors
+between them, so a second bypass granted to a team, an app or another role is still a
+finding in either direction. This matters here more than elsewhere because
+`.github/rulesets/README.md` publishes a `--method PUT --input .github/rulesets/main.json`
+reapply procedure: following it while the file said `[]` would itself have caused the
+lockout, so the file is now checked as a thing that will be applied, not only as a
+description of what is live.
 
 **Still open:**
 - No zizmor workflow-linter step; no CodeQL `language: actions` workflow.

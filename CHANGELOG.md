@@ -16,6 +16,23 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **`check_ruleset.py` compared `bypass_actors` by equality, which is the one comparison
+  that cannot see a lockout.** Recording the owner's standing bypass in
+  `.github/rulesets/main.json` (2026-08-27) fixed the claim but not the check. Two wrong
+  values that agree still passed: a later "tidy" of the committed file back to `[]`, on a
+  day the owner had also lost the bypass live, would have reported a match on precisely
+  the incident that field protects. `bypass_findings` now holds the live ruleset and the
+  committed file **independently** against the owner's bypass and compares only *other*
+  actors between them, so a second bypass granted to a team, an app or another role is
+  still a finding in either direction. The committed file is checked as something that
+  will be *applied*, not only as a description of what is live, because
+  `.github/rulesets/README.md` publishes `gh api --method PUT ... --input
+  .github/rulesets/main.json` as the drift-correction step — following that while the
+  file said `[]` is how the owner gets locked out of her own repository, which has
+  happened before and took a sweep across eighteen repositories to undo. That command now
+  carries a warning to check the field first, and
+  `tests/test_ruleset_check.py::test_both_sides_emptied_is_still_a_failure` pins the case
+  equality got wrong: two findings, not zero.
 - **The service worker's precache was all-or-nothing, and silently so** (issue #68).
   `caches.open(CACHE).then((c) => c.addAll(ASSETS))` stores nothing at all if any single
   one of the eight asset fetches fails, per the Cache API spec, and surfaced no error
