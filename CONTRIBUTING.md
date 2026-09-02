@@ -50,9 +50,31 @@ itself cleanly (`pytest.importorskip`) when the extra isn't installed.
 make dev        # one-time setup
 make verify     # lint, type-check, coverage (>=85%), security, a11y, PWA tests, i18n gate
 ```
-`make verify` is the same gate set CI enforces (see the README's Quickstart section and
-`docs/GAP-LEDGER.md#gap-cicd-1` for the one place CI and the Makefile still don't call
-identical commands, and why).
+### Local/CI parity
+
+This is the authoritative statement of how `make verify` and CI differ; `.github/workflows/ci.yml`
+and the rest of this file point here rather than restating it.
+
+`make verify` runs seven targets: `lint type cov security a11y pwa-test i18n`. CI invokes
+**four** of them as the Makefile target itself, so those cannot drift: `make lint`,
+`make type`, `make i18n`, `make pwa-test`. The other **three** run as separate CI steps:
+
+| Target | How CI runs it instead | Why |
+| --- | --- | --- |
+| `cov` | `pytest --cov --cov-fail-under=85` in the `test-matrix` job | Same flags and the same 85% floor, run once per supported Python (3.9–3.13) rather than once locally. |
+| `security` | `bandit` and `pip-audit` as steps, plus `gitleaks-action` | The Makefile's `security` expects a `gitleaks` CLI on `PATH`; CI runs gitleaks as a container action, so the target cannot be called as-is. |
+| `a11y` | `scripts/demo_report.py`, then `pa11y` on `report.html` and again on `pwa/index.html` | CI additionally scans the PWA page, and excludes axe's `color-contrast` rule on the report (axe cannot resolve SVG `<text>` backgrounds; `tests/test_svg_contrast.py` is the merge-blocking replacement). `ci.yml`'s own comments carry the detail. |
+
+Beyond `verify`, CI also runs things no local target does at all: the OS × Python
+compatibility matrix, the container build and Trivy scan, the tagged-PDF structural tests,
+and the two self-checks (`scripts/check_ruleset.py`, `scripts/check_nightly_macos.py`) that
+`make ruleset-check` / `make nightly-check` run locally only on demand, because they need
+network and `gh` auth.
+
+`tests/test_doc_figures.py` derives that four/three split from `ci.yml` and the `Makefile`,
+so this table fails a build if either side changes. It previously said there was "the one
+place" the two disagree and pointed at `docs/GAP-LEDGER.md#gap-cicd-1`, an entry about the
+branch ruleset that never mentions parity.
 
 1. Open a PR against `main` (direct pushes bypass every gate below — see
    `.github/rulesets/main.json` for the intended enforcement, and
@@ -62,8 +84,7 @@ identical commands, and why).
    artifacts if template/threshold changed" line if you touched the report template,
    the a11y walkthrough's subject matter, or anything in `docs/audits/`.
 3. `make verify` must pass locally before you open the PR; CI re-runs the equivalent
-   gates plus the full OS × Python compatibility matrix, container build + Trivy scan,
-   and secret scanning.
+   gates plus the extras listed under [Local/CI parity](#localci-parity) above.
 4. Update `CHANGELOG.md` under `[Unreleased]`.
 5. If your change is an expensive-to-reverse decision (a new dependency, a schema
    change, declaring something N/A, changing the Python floor), write an ADR under

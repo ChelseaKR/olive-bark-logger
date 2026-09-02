@@ -16,6 +16,107 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **The service worker's precache was all-or-nothing, and silently so** (issue #68).
+  `caches.open(CACHE).then((c) => c.addAll(ASSETS))` stores nothing at all if any single
+  one of the eight asset fetches fails, per the Cache API spec, and surfaced no error
+  anywhere. Everything #65/#66/#67 established about *which* files belong in `ASSETS`
+  rested on an install path that could quietly store none of them, so a client hitting a
+  transient hiccup on the exact visit meant to fix its offline reload stayed broken until
+  some later visit where all eight happened to succeed at once. Assets are now cached
+  individually via `Promise.allSettled`, which keeps whatever succeeded (Cache Storage
+  outlives a discarded worker, so the next attempt only fetches what is still missing),
+  and the install is **rejected** if any failed, so the browser retries later instead of
+  activating a worker whose cache cannot serve an offline reload. A partial precache
+  reporting success is the same defect class as a green check that cannot fail.
+- **The precache-completeness test's import regex was not anchored to import syntax**
+  (issue #68). `/from\s+["'](\.\/[^"']+)["']/g` matched the bare word `from` followed by
+  a quoted relative path anywhere in `app.js`, so a comment such as
+  `// ported from "./legacy.js"` would have been collected as an import and the test
+  would then have demanded `sw.js` precache a module `app.js` never imports — a
+  false-failure trap inside a test written to prevent false negatives. Against a
+  three-line fixture with one real import, the old pattern returned three specifiers and
+  the anchored one returns one. Both the binding/re-export form and the side-effect form
+  (`import "./x.js";`) are recognised, multi-line import lists still match, and the
+  pattern was duplicated in three places and is now one helper.
+- **The markdown link gate read a code span as a link.** `tests/test_doc_links.py`
+  matched `[...](...)` wherever those characters occurred, backticks included, where
+  Markdown renders no link at all. The changelog entry directly above quotes the regex
+  issue #68 was about; that quote contains a character class immediately followed by a
+  group, and the gate demanded the repository add a file named after the fragment. A
+  truthful sentence could not pass, and the cheap way out was to reword the document
+  rather than fix the check -- the same false-failure shape as the unanchored import
+  regex, in the gate rather than in the code. Code spans are now stripped before the
+  scan; stripping rather than skipping the line keeps the target of a code-labelled
+  link (``[`monitor/features.py`](../monitor/features.py)``, the house style here)
+  checked, and a canary pins both halves.
+
+- **The tagging feature buffer grew without limit through any quiet stretch**
+  (issue #63). `run_pipeline` kept `(timestamp, zero-crossing-rate)` pairs so a closing
+  event could be classified over its own window, and its comment claimed the buffer
+  "never holds more than one event's worth of frame features". The only prune sat inside
+  `if event is not None:`, so a night, a weekend away, or any span with nothing crossing
+  the threshold never pruned at all: one entry per frame, forever. Traced over 5000
+  quiet frames the buffer reached exactly 5000 entries; at the default 100 ms frame that
+  is ~864,000 a day, on a Raspberry Pi meant to run for weeks under `Restart=always`.
+  The operators it bit were the ones with the quietest installs. The buffer is now
+  `monitor.features.FeatureWindow`, a deque pruned **every frame** against
+  `Detector.active_since` -- the open event's start, or None when nothing is open -- so
+  the bound is the detector's own state rather than a guessed retention horizon, and is
+  amortized O(1) rather than a per-frame rebuild that would make a long event quadratic
+  in its own length. Same 5000-frame trace now peaks at 1. Classification is unchanged:
+  a tag computed after a 500-frame quiet stretch is identical to one computed without it.
+- **The cover block did not lead every artifact, and the gate that promised it could not
+  see the one it missed.** The README's Guardrails section said the "what this can and
+  cannot prove" cover block "leads **every artifact** either implementation produces" and
+  that "the gate discovers export paths from source, so a new one cannot ship without
+  them", under a heading that reads "Enforced by merge-blocking tests, not just promised".
+  `report/status.py`'s `render_status` is a fifth artifact path — it builds the
+  `status.html` the README tells the operator to double-click open, and it prints two
+  quiet-hours counts — and it carried neither the cover block nor the no-verdict line for
+  as long as it existed. It could not: its only import from `report.render` was `_STYLE`
+  and the span helpers. `tests/test_export_caveats.py` missed it because discovery was **by
+  name**, and `render_status` matches none of `PY_EXPORT_PATTERN`'s three alternatives —
+  the exact failure mode that file's own docstring names ("a gate that checks the paths
+  someone remembered to name"). Fixed by closing the hole rather than softening the
+  sentence: `status.html` now emits the shared `cover_html()` above its first table and the
+  shared `NO_VERDICT_NOTE` beside its quiet-hours counts, and discovery is now **by
+  behaviour** — a public function in `report/` that builds a whole HTML document
+  (`<!DOCTYPE html` in its own body) or writes a CSV (`csv.writer`) is an export path
+  whatever it is called. The old name pattern is kept as a union member, so discovery can
+  only widen; `test_the_name_half_of_discovery_is_never_narrowed` pins that. Verified by
+  planting `paint_ops_dashboard`, a name the old pattern demonstrably does not match: two
+  gates go red on it, and both go red again if the cover or the no-verdict line is removed
+  from the status page.
+- **Documentation figures, links, and citations that had drifted, now derived instead of
+  typed.** `docs/RESPONSIBLE-TECH-AUDITS.md` §F said "**ten** dev-toolchain-only CVEs are
+  waived … **All ten** are in `pip-audit`'s own transitive dependencies"; the Makefile has
+  **12**, and one of the two 2026-08-21 additions is setuptools, a venv seed package rather
+  than a pip-audit dependency. The same file said "artifacts are committed and regenerated
+  by `make verify`"; `verify` is `lint type cov security a11y pwa-test i18n`, `snapshot` is
+  not in it, and the only artifact `a11y` writes is the gitignored `report.html` — `verify`
+  *checks* the committed artifacts, it does not regenerate them, and **RTF-08 remains
+  open**. Three README links into `docs/GAP-LEDGER.md` carried anchors left behind when two
+  headings were shortened, and `.github/workflows/ci.yml` cited the WeasyPrint ADR under
+  its pre-rename `0003-` filename for a month after `7fe55bb` moved it to
+  `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md`, which every other reference in the
+  tree already used. `CONTRIBUTING.md` pointed at `GAP-CICD-1` for "the one place CI and the
+  Makefile still don't call identical commands" — an entry about the branch ruleset that
+  never mentions parity, and there are three such places, not one; `ci.yml` cited two
+  documents for "the exact local/CI parity statement" in which the word parity does not
+  appear. `docs/GAP-LEDGER.md`'s own "Last verified" stamp said 2026-08-15 over entries
+  dated through 2026-08-27. `docs/DOCUMENTATION-AUDIT.md` said "3 ADRs" (four existed at its
+  own commit, five now) and "33 Python/Node test files; 1 workflow file" (48 and 3).
+  Two new merge-blocking gates close the hole these all sat in: `tests/test_doc_links.py`
+  resolves every markdown link, anchor, and in-repo path citation in every tracked file,
+  and `tests/test_doc_figures.py` derives every stated count from the tree. `PROJECT-SCOPE`'s
+  "37 hand-authored doc or metadata files" is deliberately left ungated and labelled as a
+  point-in-time figure: its own definition has no mechanical equivalent here, so any number
+  asserted for it would be invented.
+- **The README's supported-versions line presupposed a release that does not exist.** It
+  read "only the latest `0.y` release receives fixes" while `CHANGELOG.md`, `CITATION.cff`
+  (no `date-released`) and `GAP-REL-1` all record that no `v*` tag has ever been cut — the
+  "phantom release" defect this file exists to prevent. It now states that no version has
+  been tagged, then gives the policy for when one is.
 - **`bypass_actors: []` was false: an administrator can bypass every rule, always.** A
   `RepositoryRole:5 / always` bypass actor was added to this repository (and every
   repository in this portfolio) so the owner can always recover a wedged gate.
@@ -119,6 +220,25 @@ release" defect this file's absence let stand.
   the way it did. The arithmetic is ported too: `coverageWindow` / `coverageHours` in
   `pwa/report.js` mirror `report/render.py`'s `_coverage_window`, `on_air_spans` and
   `_coverage_hours`.
+- `Detector.active_since` -- the open event's start timestamp, or None. The only
+  interior state the detector exposes, and the exact bound a caller holding per-frame
+  side data needs.
+- `pwa/sw.test.mjs` — the service worker's install path **executed** rather than read,
+  in a `node:vm` sandbox with a fake Cache API. The other PWA tests assert on `sw.js`
+  as text, and text cannot tell you what `addAll` does on a partial failure. Includes a
+  canary running the previous `addAll` implementation through the identical harness and
+  showing it store zero of eight on one failure.
+
+### Security
+- **`pypdf` 6.15.0 -> 6.16.2 in `uv.lock`** (CVE-2026-84309, CVE-2026-84310,
+  CVE-2026-84311). The `pdf` extra pins `pypdf>=5,<7`, so no constraint changed; only
+  the locked version moved, past the 6.16.0/6.16.1 fix versions the advisories name.
+  Unlike the twelve entries in the Makefile's `PIP_AUDIT_WAIVERS`, this one is a real
+  runtime dependency of a shipped code path (`report/pdf_export.py` reads the generated
+  PDF's structure tree back out for `tests/test_pdf_export.py`), so it is fixed rather
+  than waived. CI's `Dependency audit` step -- which runs bare `pip-audit`, without the
+  Makefile's waivers -- went red on `main` and on every open branch the moment the
+  advisories published; this is the whole of that failure.
 
 ### Changed
 - **The coverage sentence has one definition, and the generator that publishes it is

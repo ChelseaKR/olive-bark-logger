@@ -59,37 +59,59 @@ test("gap records are excluded from event counts and both CSVs", () => {
   assert.equal(violationLines.length, 2); // header + 1 real event only
 });
 
+// --- Precache completeness: which local modules app.js imports ------------------------
+//
+// Anchored to real import/export statements, not to the bare word `from`. The previous
+// pattern -- /from\s+["'](\.\/[^"']+)["']/g -- matched any literal `from` followed by a
+// quoted relative path anywhere in the file, so a comment like
+// `// ported from "./legacy.js"` would have been collected as an import and the test
+// would then have demanded sw.js precache a module app.js never imports. A false-failure
+// trap inside a test written to prevent false negatives (issue #68).
+//
+// Two shapes are recognised, both anchored to the start of a line:
+//   import ... from "./x.js";  /  export ... from "./x.js";   (binding and re-export)
+//   import "./x.js";                                          (side-effect only)
+// `[^;]*?` cannot cross a statement terminator, so a multi-line import list still
+// matches while a match cannot run away into unrelated code below.
+const IMPORT_FROM_RE = /^[ \t]*(?:import|export)\b[^;]*?\bfrom\s*["'](\.\/[^"']+)["']/gm;
+const IMPORT_SIDE_EFFECT_RE = /^[ \t]*import\s*["'](\.\/[^"']+)["']/gm;
+
+/** Relative module specifiers imported by `src`, in source order, de-duplicated. */
+function relativeImportsOf(src) {
+  const found = new Set();
+  for (const re of [IMPORT_FROM_RE, IMPORT_SIDE_EFFECT_RE]) {
+    re.lastIndex = 0;
+    let match;
+    while ((match = re.exec(src)) !== null) found.add(match[1]);
+  }
+  return [...found];
+}
+
+/** The contents of sw.js's own ASSETS array, or null if it is not declared as one. */
+function assetsArrayOf(swSrc) {
+  const match = swSrc.match(/const ASSETS\s*=\s*\[([\s\S]*?)\]/);
+  return match ? match[1] : null;
+}
+
+/** Imported modules that the precache list does not contain. */
+function missingFromPrecache(appSrc, swSrc) {
+  const assetsSrc = assetsArrayOf(swSrc);
+  assert.ok(assetsSrc !== null, "sw.js should declare a const ASSETS = [...] precache list");
+  return relativeImportsOf(appSrc).filter(
+    (mod) => !assetsSrc.includes(`"${mod}"`) && !assetsSrc.includes(`'${mod}'`),
+  );
+}
+
 test("sw.js precaches all local modules imported by app.js", () => {
   const pwaDir = dirname(fileURLToPath(import.meta.url));
   const appSrc = readFileSync(join(pwaDir, "app.js"), "utf8");
   const swSrc = readFileSync(join(pwaDir, "sw.js"), "utf8");
 
-  // Extract static import specifiers from app.js (e.g. from "./clock.js")
-  const importRegex = /from\s+["'](\.\/[^"']+)["']/g;
-  const importedFiles = [];
-  let match;
-  while ((match = importRegex.exec(appSrc)) !== null) {
-    importedFiles.push(match[1]);
-  }
+  const imported = relativeImportsOf(appSrc);
+  assert.ok(imported.length > 0, "app.js should have relative module imports");
 
-  assert.ok(importedFiles.length > 0, "app.js should have relative module imports");
-
-  // Extract only the ASSETS array's own contents, not the whole file: a
-  // stray comment or unrelated string elsewhere in sw.js that happens to
-  // mention a module's path must not satisfy this check. If ASSETS itself
-  // is ever renamed or restructured, this fails loudly rather than passing
-  // vacuously.
-  const assetsMatch = swSrc.match(/const ASSETS\s*=\s*\[([\s\S]*?)\]/);
-  assert.ok(assetsMatch, "sw.js should declare a const ASSETS = [...] precache list");
-  const assetsSrc = assetsMatch[1];
-
-  // Verify each imported relative module is an actual element of ASSETS.
-  for (const mod of importedFiles) {
-    assert.ok(
-      assetsSrc.includes(`"${mod}"`) || assetsSrc.includes(`'${mod}'`),
-      `sw.js ASSETS precache list missing imported module: ${mod}`,
-    );
-  }
+  const missing = missingFromPrecache(appSrc, swSrc);
+  assert.deepEqual(missing, [], `sw.js ASSETS precache list missing: ${missing.join(", ")}`);
 });
 
 test("sw.js precache-completeness check actually fails on a real omission", () => {
@@ -99,19 +121,7 @@ test("sw.js precache-completeness check actually fails on a real omission", () =
   // deliberately mismatched fixture pair, not the real sw.js/app.js.
   const fakeAppSrc = 'import { x } from "./missing-module.js";\n';
   const fakeSwSrc = 'const ASSETS = [\n  "./",\n  "./index.html",\n];\n';
-
-  const importRegex = /from\s+["'](\.\/[^"']+)["']/g;
-  const importedFiles = [];
-  let match;
-  while ((match = importRegex.exec(fakeAppSrc)) !== null) {
-    importedFiles.push(match[1]);
-  }
-  const assetsSrc = fakeSwSrc.match(/const ASSETS\s*=\s*\[([\s\S]*?)\]/)[1];
-
-  const missing = importedFiles.filter(
-    (mod) => !assetsSrc.includes(`"${mod}"`) && !assetsSrc.includes(`'${mod}'`),
-  );
-  assert.deepEqual(missing, ["./missing-module.js"]);
+  assert.deepEqual(missingFromPrecache(fakeAppSrc, fakeSwSrc), ["./missing-module.js"]);
 });
 
 test("sw.js precache-completeness check is not fooled by a stray mention outside ASSETS", () => {
@@ -121,22 +131,41 @@ test("sw.js precache-completeness check is not fooled by a stray mention outside
   const fakeAppSrc = 'import { x } from "./missing-module.js";\n';
   const fakeSwSrc =
     'const ASSETS = [\n  "./",\n  "./index.html",\n];\n' +
-    '// TODO: keep "./missing-module.js" in sync with app.js\n';
-
-  const importRegex = /from\s+["'](\.\/[^"']+)["']/g;
-  const importedFiles = [];
-  let match;
-  while ((match = importRegex.exec(fakeAppSrc)) !== null) {
-    importedFiles.push(match[1]);
-  }
-  const assetsSrc = fakeSwSrc.match(/const ASSETS\s*=\s*\[([\s\S]*?)\]/)[1];
-
-  const missing = importedFiles.filter(
-    (mod) => !assetsSrc.includes(`"${mod}"`) && !assetsSrc.includes(`'${mod}'`),
-  );
+    '// keep "./missing-module.js" in sync with app.js\n';
   assert.deepEqual(
-    missing,
+    missingFromPrecache(fakeAppSrc, fakeSwSrc),
     ["./missing-module.js"],
     "a mention of the module outside the ASSETS array must not count as precached",
   );
+});
+
+test("a comment that merely contains the word `from` is not read as an import", () => {
+  // Issue #68 (2). The old pattern matched the bare word `from` anywhere, so this
+  // comment would have been collected as an import and the completeness check would
+  // have demanded sw.js precache a file app.js does not import: a false failure, in a
+  // test whose whole job is to prevent a false pass.
+  const appSrc = [
+    'import { real } from "./clock.js";',
+    '// ported from "./legacy.js" in 2024',
+    'const doc = `see the notes from "./design/notes.md"`;',
+  ].join("\n");
+  assert.deepEqual(relativeImportsOf(appSrc), ["./clock.js"]);
+});
+
+test("side-effect and re-export forms are collected too", () => {
+  // Anchoring must not narrow the check into missing real imports. A module pulled in
+  // for its side effects alone is still a module sw.js has to precache.
+  const appSrc = [
+    'import "./polyfill.js";',
+    'export { helper } from "./helpers.js";',
+    "import {",
+    "  a,",
+    "  b,",
+    '} from "./multi-line.js";',
+  ].join("\n");
+  assert.deepEqual(relativeImportsOf(appSrc).sort(), [
+    "./helpers.js",
+    "./multi-line.js",
+    "./polyfill.js",
+  ]);
 });
