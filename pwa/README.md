@@ -22,10 +22,28 @@ exports — in the CSVs as a leading `#` comment preamble, so the caveat travels
 that gets emailed on while the data rows below it still parse. Anything reporting a
 quiet-hours count also carries the no-verdict line: *being within quiet hours is not the
 same as a violation, and only the relevant authority can decide whether a rule was
-broken.* The quiet-hours CSV names its recorded monitoring gaps, since a gap removes
-events and would otherwise make an unmonitored stretch read as a quiet one. This edition
-has no calibration step, so its report says plainly that its readings are relative dBFS
-and never dB(A).
+broken.* This edition has no calibration step, so its report says plainly that its
+readings are relative dBFS and never dB(A).
+
+**Every export states how much of the window it observed.** Monitored versus wall-clock
+hours lead the quiet-hours CSV, the event CSV, and the report, because a count is only
+readable against the time it was counted over: an outage during quiet hours removes
+events, so a device that dropped out for most of the night produces a low count that
+reads as a quiet night. Recorded monitoring gaps are still named individually, but as a
+numerator with a denominator above it rather than the bare *"37s of gap"* a reader cannot
+place against a half-hour test or a ten-hour night. Hours outside a monitoring run are
+reported as **not monitored, not quiet**.
+
+That figure needs a record of when observation began and ended, which this edition did
+not keep until now: a gap is written by the *running* app on a `visibilitychange`, so the
+most ordinary outage of all — the tab closed, the browser restarted, the laptop shut —
+left no trace at all. Each run now writes a session record, checkpointed as it goes. The
+error that leaves is one-directional and stated on every export: a tab killed outright
+ends its run at the last checkpoint, so up to 30 seconds of real observation goes
+unclaimed. Under-claiming is the safe direction. Where the record carries no sessions at
+all — data captured before this existed — the export says the figure assumes the app was
+listening whenever no gap was recorded, rather than presenting an assumption as a
+measurement.
 
 The exact strings live in [`spec/report/cover.json`](../spec/report/cover.json) and are
 replayed against **both** implementations, the way `spec/detector/*.json` keeps the two
@@ -45,8 +63,9 @@ python3 -m http.server 8000
 Click **Start monitoring**, grant microphone permission, and adjust the threshold and the
 quiet-hours window while watching the live level. Use **Download report** (HTML, with a
 day×hour calendar heatmap and a quiet-hours summary), **Download CSV** (the event log), or
-**Download quiet-hours CSV** (every event flagged within/outside quiet hours — an honest
-export for a neighbor/landlord/HOA submission). **Clear events** resets. Install it as an
+**Download quiet-hours CSV** (every event flagged within/outside quiet hours, led by how
+much of the window was monitored — an honest export for a neighbor/landlord/HOA
+submission). **Clear events** resets. Install it as an
 app from your browser's "Install" option.
 
 ## Test

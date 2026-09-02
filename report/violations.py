@@ -345,6 +345,19 @@ OFF_AIR_UNKNOWN_NOTE = (
 )
 
 
+# The claim itself, as a template rather than an f-string, because the browser edition
+# has to produce the identical sentence (issue #64) and a shape that lives only inside
+# one f-string cannot be shared. `scripts/gen_cover_spec.py` writes it into
+# `spec/report/cover.json`, `pwa/report.js` formats its own numbers into the same shape,
+# and both test suites replay it. Each placeholder is pre-formatted by the caller:
+# hours to one decimal place, the percentage as a whole number.
+COVERAGE_SENTENCE_TEMPLATE = (
+    "Over this reporting window the device monitored {monitored} of {wall} "
+    "wall-clock hours ({pct}%); the remaining {unmonitored} hours are shown as not "
+    "monitored rather than quiet."
+)
+
+
 def _coverage_sentence(report: ViolationReport) -> str:
     """The one-line coverage claim, or the stated limit when it cannot be computed."""
     monitored, wall = report.monitored_hours, report.wall_clock_hours
@@ -354,10 +367,25 @@ def _coverage_sentence(report: ViolationReport) -> str:
     span = ""
     if report.span_start_iso and report.span_end_iso:
         span = f" The recorded span runs {report.span_start_iso} to {report.span_end_iso}."
+    # `unmonitored_hours` returns None only when `monitored_hours` or `wall_clock_hours`
+    # is None, and both were just found to be set, so the figure exists on this branch.
+    # Stated as a raise rather than defaulted with `or 0.0`: the default would be false
+    # in the one case it could ever fire, printing "0.0 hours not monitored" for hours
+    # nothing measured. An unmeasured figure is never shown as a number here -- the
+    # record that cannot support one gets COVERAGE_UNKNOWN_NOTE, above, which says so.
+    unmonitored = report.unmonitored_hours
+    if unmonitored is None:  # pragma: no cover - the return above is the only way here
+        raise AssertionError(
+            "unmonitored_hours is None while monitored_hours and wall_clock_hours are set"
+        )
     return (
-        f"Over this reporting window the device monitored {monitored:.1f} of {wall:.1f} "
-        f"wall-clock hours ({pct:.0f}%); the remaining {report.unmonitored_hours:.1f} "
-        f"hours are shown as not monitored rather than quiet.{span}"
+        COVERAGE_SENTENCE_TEMPLATE.format(
+            monitored=f"{monitored:.1f}",
+            wall=f"{wall:.1f}",
+            pct=f"{pct:.0f}",
+            unmonitored=f"{unmonitored:.1f}",
+        )
+        + span
     )
 
 

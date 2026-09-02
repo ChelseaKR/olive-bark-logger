@@ -140,6 +140,22 @@ release" defect this file's absence let stand.
   twin was `test-matrix-macos-nightly-notice`, removed on 2026-08-26 along with the five
   contexts it faked. Replaced with what is actually true: the sweep is merge-blocking
   indirectly and with a lag, through `verify`'s `check_nightly_macos.py` step.
+- **The browser edition's quiet-hours export never said how much of the window it
+  observed** (issue #64). Issue #39 established that a quiet-hours document is only
+  honest with a coverage figure -- an outage during quiet hours removes events, so a
+  device that dropped out for most of the night produces a low count that reads as a
+  quiet night -- and `report/violations.py` has carried monitored-vs-wall-clock hours
+  ever since. `pwa/` never received the equivalent, while `pwa/README.md` made the same
+  "honest ... submission" claim about the same kind of file. A reader got
+  `Monitoring gaps: 1 recorded, totalling 37s` with no denominator anywhere: 37 seconds
+  out of a half-hour test, or out of a ten-hour night, are not the same document.
+  Every browser export path -- quiet-hours CSV, event CSV and report HTML -- now leads
+  with the coverage block, and the same ten-hour example now reads *"the device monitored
+  2.0 of 10.0 wall-clock hours (20%); the remaining 8.0 hours are shown as not monitored
+  rather than quiet."*
+- **The browser's on-screen event counter counted monitoring gaps as events.**
+  `refresh()` displayed `allEvents().length`, which includes gap records, so the number
+  on screen disagreed with every number in every export. It now counts detected events.
 - **Five of the eleven required status checks on `main` were satisfied by an `echo`.**
   The `protect-main` ruleset required `test-matrix (macos-latest, 3.9–3.13)` to merge.
   Nothing on a pull request ran macOS; what reported those five contexts was
@@ -186,6 +202,24 @@ release" defect this file's absence let stand.
   fails on both a real omission and a decoy mention outside the array.
 
 ### Added
+- **Session records in the browser store** (`{kind: "session", start, end}`), which is
+  what makes the coverage figure possible at all. The store previously held events and
+  gaps only, and a gap is written by the *running* app on a `visibilitychange`, so the
+  most ordinary outage of all -- the tab closed, the browser restarted, the laptop shut
+  -- left no trace whatsoever; there was no data to compute coverage from even if the
+  report had tried. Each run's end is checkpointed every 30 s, mirroring the Python
+  monitor's `checkpoint_interval_s`. The residual error is one-directional and stated on
+  every export: a tab killed outright ends its run at the last checkpoint, so up to 30
+  seconds of real observation goes unclaimed. Under-claiming coverage is the safe
+  direction. A record with no sessions at all falls back to window-minus-recorded-gaps
+  and says, in the export, that it is doing so.
+- **`spec/report/cover.json` gains a `coverage` object** -- heading, the
+  not-monitored-is-not-quiet note, the undeterminable-coverage note, and the sentence
+  template both ports format their own numbers into. Replayed by
+  `tests/test_export_caveats.py` and `pwa/report.test.mjs`, so the wording cannot drift
+  the way it did. The arithmetic is ported too: `coverageWindow` / `coverageHours` in
+  `pwa/report.js` mirror `report/render.py`'s `_coverage_window`, `on_air_spans` and
+  `_coverage_hours`.
 - `Detector.active_since` -- the open event's start timestamp, or None. The only
   interior state the detector exposes, and the exact bound a caller holding per-frame
   side data needs.
@@ -207,6 +241,37 @@ release" defect this file's absence let stand.
   advisories published; this is the whole of that failure.
 
 ### Changed
+- **The coverage sentence has one definition, and the generator that publishes it is
+  now checked against what it published.** The claim both editions make -- *"the device
+  monitored X of Y wall-clock hours (Z%); the remaining N hours are shown as not
+  monitored rather than quiet"* -- existed three times: an f-string in
+  `report/violations.py`, a template literal in `pwa/report.js`, and a hand-maintained
+  copy in `spec/report/cover.json`. The two suites compared the *rendered* sentence
+  against the vector, which caught a reworded sentence but not the arrangement that let
+  it happen. It is now `COVERAGE_SENTENCE_TEMPLATE` in `report/violations.py`;
+  `scripts/gen_cover_spec.py` imports that constant and builds the whole vector from it;
+  `pwa/report.js` holds the shape once, as its own `COVERAGE_SENTENCE_TEMPLATE`, and
+  formats its numbers into it (an unfilled placeholder now throws rather than shipping a
+  literal `{wall}` to a reader as though it were a measurement).
+- **`spec/report/cover.json` is gated against its generator.** The generator wrote the
+  file and nothing read it back, so the vector had drifted into a superset of what
+  `scripts/gen_cover_spec.py` produced: running it would have silently deleted the entire
+  `coverage` block that ten assertions across both suites replay.
+  `tests/test_export_caveats.py` now fails unless the committed JSON is byte-identical to
+  `render()`, in either direction -- a Python constant changed without regenerating, or
+  the JSON edited by hand into something no constant says. The gate reads only; it never
+  regenerates, because a gate that repairs drift is how the file stopped being reviewed.
+  A second gate reads the generator's own source and requires each shared string to be an
+  imported name rather than a literal, with canaries proving both bite: the planted
+  violation is a literal *identical* to the real constant, which is exactly what a
+  value-comparison gate cannot see.
+- `_coverage_sentence` no longer defaults `unmonitored_hours` to `0.0` with `or`. The
+  branch it sits on has already established that `monitored_hours` and `wall_clock_hours`
+  are both set, which is the only condition under which the property returns `None`, so
+  the figure is guaranteed and the invariant is now stated as a raise. The default was
+  wrong in the one case it could ever have fired: it would have printed "0.0 hours not
+  monitored" for hours nothing measured, and an unmeasured figure is never shown as a
+  number here -- a record that cannot support one gets `COVERAGE_UNKNOWN_NOTE` instead.
 - **The live branch ruleset and the committed definition now match** (maintainer
   decision, 2026-08-21). Live `protect-main` was brought up to
   `.github/rulesets/main.json` for the `pull_request` rule (approvals 0 per ADR-0001,
