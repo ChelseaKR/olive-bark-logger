@@ -6,7 +6,10 @@ were reconciled** — the live configuration was brought up to `main.json` for t
 `pull_request` rule, strict required status checks, and `bypass_actors: []`, and
 `main.json` was amended to drop `required_signatures` (decision note below) and to carry
 the live ruleset's name. **On 2026-08-26 five of the eleven required status checks were
-removed, because an `echo` was satisfying them** (see the next section).
+removed, because an `echo` was satisfying them** (see the next section). **On 2026-08-27
+this file and the paragraphs below stopped saying "no bypass actors", because that had
+become false: the repository-admin role can bypass every rule on this ruleset, always**
+(see [The 2026-08-27 correction](#the-2026-08-27-correction-someone-can-bypass-and-two-documents-said-no-one-could)).
 `make ruleset-check` exits 0 against the live API.
 
 This document used to say the opposite — that nothing had been applied, and that "until a
@@ -24,13 +27,59 @@ ruleset required five macOS contexts, and its comment said so.
   contributor.
 - **Stale branches cannot merge** (`strict_required_status_checks_policy: true`): the
   branch must be up to date with `main` before merging.
-- **No bypass actors.** No one — including the repository owner — merges past these
-  rules. (Until 2026-08-21 the live ruleset granted the maintainer a `pull_request`
-  bypass; it was removed in the reconciliation.)
+- **One bypass actor: the repository-admin role, always.** `bypass_actors` carries
+  `{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}`. Everything
+  above binds every contributor **except** an administrator, and on this repository the
+  administrator is the owner, who is also the only human with write access. So for her
+  these rules are a default she can step past on purpose, and for anyone else they are
+  absolute. That is the deliberate posture — an owner who cannot recover a repository
+  whose required check is wedged has a worse problem than an unreviewed merge — and it is
+  written here because between 2026-08-21 and 2026-08-27 this page said the opposite.
 - **Six required status checks** must report green: `verify` and five
   `test-matrix (ubuntu-latest, 3.9–3.13)`. Every one of them runs the repository's real
   gates and every one of them can fail. Six is both the count and the strength; before
   2026-08-26 the count was eleven and the strength was six.
+
+## The 2026-08-27 correction: someone can bypass, and two documents said no one could
+
+On 2026-08-27 the live ruleset answered `make ruleset-check` like this:
+
+```
+Live ruleset 'protect-main' (id 18752850) DIFFERS from main.json in 1 way(s):
+  - bypass_actors: committed [] (no one bypasses), live ['RepositoryRole:5 (always)']
+```
+
+A `RepositoryRole:5 / always` bypass actor was added to this repository (and to every
+repository in this portfolio) so that the owner can always merge past a wedged gate. The
+same read reports `"current_user_can_bypass": "always"` for the maintainer's token, which
+is the API stating the consequence directly.
+
+`main.json` said `bypass_actors: []`. This page said "**No bypass actors.** No one —
+including the repository owner — merges past these rules." Both were false from the
+moment that actor was added, and both were false in the direction that flatters the
+repository: they described a stricter gate than the one that exists. **The file has been
+amended to the truth, not the ruleset to the file.** The owner's bypass is deliberate and
+stays; a document that undersells who can merge is the thing that was wrong.
+
+Two consequences worth stating rather than discovering later:
+
+- **CI cannot catch this class of drift, and it is the only class it cannot catch.**
+  `verify` runs `scripts/check_ruleset.py --scope public`, and the publicly readable view
+  of a ruleset omits `bypass_actors` entirely. Every other field is checked on every pull
+  request; this one is checked only by `make ruleset-check` with a maintainer token. The
+  field that turned out to be wrong is exactly the field nothing automatic reads. The
+  answer is not to pretend otherwise: `--scope public` prints "NOT CHECKED in this run:
+  bypass actors" on its passing path, and the honest cadence is to run
+  `make ruleset-check` locally after any change to repository administration.
+- **`main.json` now records the bypass actor, so the check fails in both directions.**
+  Adding a second bypass actor is a difference, and so is *removing* this one — which
+  matters, because silently dropping the owner's recovery path would leave a repository
+  nobody can unstick. `tests/test_ruleset_check.py` pins both.
+
+The pattern this repeats is the one the 2026-08-26 section is about, with the sign
+flipped. That change removed a gate that read as stronger than it was; this one removes a
+*sentence* that read as stronger than it was. Prose does not block a merge — and prose
+that overstates a gate is worse than no prose, because a reader stops looking.
 
 ## The 2026-08-26 change: five required checks that an `echo` satisfied
 
@@ -82,6 +131,11 @@ Before 2026-08-21 the live ruleset was weaker than this file in four named ways
 (`strict` false, `required_signatures` absent, no `pull_request` rule, one bypass
 actor). Three were closed by bringing the live configuration up to the file. The fourth
 went the other way, as a decision:
+
+(The bypass actor removed that day was a *user* bypass on the `pull_request` rule alone.
+The `RepositoryRole:5 / always` actor live today is a different, later, deliberate one —
+see the 2026-08-27 section. This paragraph describes what happened on 2026-08-21 and is
+not a statement about the ruleset as it stands.)
 
 **`required_signatures` was removed from `main.json` rather than applied.** Commits in
 this portfolio are routinely made by delegated agents on the maintainer's machines
@@ -197,12 +251,26 @@ the divergence this file spent a month documenting started exactly that way.
   once `docs/GAP-LEDGER.md#gap-sec-1` / `#gap-cicd-1` land CodeQL, zizmor, or Scorecard
   as separate jobs), subject to the "Adding a required status check" rule above. **Live,
   and matching.**
-- **`bypass_actors: []`.** No one — including repository admins — bypasses these rules.
-  This was written as the direct fix for commit `74e6b8f` (2026-07-02), a direct-to-main
-  push with no PR reference. **Live since 2026-08-21** — the maintainer's former
-  `pull_request` bypass was removed in the reconciliation. Consequence worth naming:
-  there is no emergency-merge path. If a required check goes red for a reason unrelated
-  to the change (a stale nightly is the likeliest), the way through is to fix the check
-  — `gh workflow run nightly.yml --ref main` — not to merge past it. Restoring a bypass
-  actor is a deliberate posture change: amend `main.json` and the live ruleset together,
-  and rewrite this note.
+- **`bypass_actors`: the repository-admin role, `bypass_mode: always`.** Recorded here
+  since 2026-08-27, live since the day the portfolio-wide administrator bypass was added.
+  Read it as what it is: **there is an emergency-merge path, and the owner is on it.**
+  Everyone else is bound absolutely — a future second contributor has no way past a red
+  required check — and the owner is bound by default and by habit, not by mechanism.
+
+  This entry used to read `bypass_actors: []`, "no one — including repository admins —
+  bypasses these rules", written as the direct fix for commit `74e6b8f` (2026-07-02), a
+  direct-to-main push with no PR reference. That fix did its job and the maintainer's
+  former `pull_request`-only user bypass is still gone. What replaced it is broader and
+  deliberate, and the file said nothing about it for as long as it existed. The intent
+  behind `74e6b8f`'s fix is now carried by habit and by the six required checks rather
+  than by the absence of a bypass: when a required check goes red for a reason unrelated
+  to the change (a stale nightly is the likeliest), the way through is still to fix the
+  check — `gh workflow run nightly.yml --ref main` — and bypassing is a decision to make
+  out loud, not the path of least resistance.
+
+  **Never remove this actor to make a check pass.** It is the owner's stated requirement
+  in every repository in this portfolio. If `make ruleset-check` reports it as a
+  difference, the live ruleset lost it and needs it back; the file is not the thing to
+  edit. Changing the posture in either direction means amending `main.json` and the live
+  ruleset together and rewriting this note — and note that CI cannot see this field at
+  all (`--scope public`), so only a local `make ruleset-check` will ever tell you.

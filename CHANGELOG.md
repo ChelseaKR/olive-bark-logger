@@ -31,11 +31,81 @@ release" defect this file's absence let stand.
   amortized O(1) rather than a per-frame rebuild that would make a long event quadratic
   in its own length. Same 5000-frame trace now peaks at 1. Classification is unchanged:
   a tag computed after a 500-frame quiet stretch is identical to one computed without it.
-
-### Added
-- `Detector.active_since` -- the open event's start timestamp, or None. The only
-  interior state the detector exposes, and the exact bound a caller holding per-frame
-  side data needs.
+- **The cover block did not lead every artifact, and the gate that promised it could not
+  see the one it missed.** The README's Guardrails section said the "what this can and
+  cannot prove" cover block "leads **every artifact** either implementation produces" and
+  that "the gate discovers export paths from source, so a new one cannot ship without
+  them", under a heading that reads "Enforced by merge-blocking tests, not just promised".
+  `report/status.py`'s `render_status` is a fifth artifact path — it builds the
+  `status.html` the README tells the operator to double-click open, and it prints two
+  quiet-hours counts — and it carried neither the cover block nor the no-verdict line for
+  as long as it existed. It could not: its only import from `report.render` was `_STYLE`
+  and the span helpers. `tests/test_export_caveats.py` missed it because discovery was **by
+  name**, and `render_status` matches none of `PY_EXPORT_PATTERN`'s three alternatives —
+  the exact failure mode that file's own docstring names ("a gate that checks the paths
+  someone remembered to name"). Fixed by closing the hole rather than softening the
+  sentence: `status.html` now emits the shared `cover_html()` above its first table and the
+  shared `NO_VERDICT_NOTE` beside its quiet-hours counts, and discovery is now **by
+  behaviour** — a public function in `report/` that builds a whole HTML document
+  (`<!DOCTYPE html` in its own body) or writes a CSV (`csv.writer`) is an export path
+  whatever it is called. The old name pattern is kept as a union member, so discovery can
+  only widen; `test_the_name_half_of_discovery_is_never_narrowed` pins that. Verified by
+  planting `paint_ops_dashboard`, a name the old pattern demonstrably does not match: two
+  gates go red on it, and both go red again if the cover or the no-verdict line is removed
+  from the status page.
+- **Documentation figures, links, and citations that had drifted, now derived instead of
+  typed.** `docs/RESPONSIBLE-TECH-AUDITS.md` §F said "**ten** dev-toolchain-only CVEs are
+  waived … **All ten** are in `pip-audit`'s own transitive dependencies"; the Makefile has
+  **12**, and one of the two 2026-08-21 additions is setuptools, a venv seed package rather
+  than a pip-audit dependency. The same file said "artifacts are committed and regenerated
+  by `make verify`"; `verify` is `lint type cov security a11y pwa-test i18n`, `snapshot` is
+  not in it, and the only artifact `a11y` writes is the gitignored `report.html` — `verify`
+  *checks* the committed artifacts, it does not regenerate them, and **RTF-08 remains
+  open**. Three README links into `docs/GAP-LEDGER.md` carried anchors left behind when two
+  headings were shortened, and `.github/workflows/ci.yml` cited the WeasyPrint ADR under
+  its pre-rename `0003-` filename for a month after `7fe55bb` moved it to
+  `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md`, which every other reference in the
+  tree already used. `CONTRIBUTING.md` pointed at `GAP-CICD-1` for "the one place CI and the
+  Makefile still don't call identical commands" — an entry about the branch ruleset that
+  never mentions parity, and there are three such places, not one; `ci.yml` cited two
+  documents for "the exact local/CI parity statement" in which the word parity does not
+  appear. `docs/GAP-LEDGER.md`'s own "Last verified" stamp said 2026-08-15 over entries
+  dated through 2026-08-27. `docs/DOCUMENTATION-AUDIT.md` said "3 ADRs" (four existed at its
+  own commit, five now) and "33 Python/Node test files; 1 workflow file" (48 and 3).
+  Two new merge-blocking gates close the hole these all sat in: `tests/test_doc_links.py`
+  resolves every markdown link, anchor, and in-repo path citation in every tracked file,
+  and `tests/test_doc_figures.py` derives every stated count from the tree. `PROJECT-SCOPE`'s
+  "37 hand-authored doc or metadata files" is deliberately left ungated and labelled as a
+  point-in-time figure: its own definition has no mechanical equivalent here, so any number
+  asserted for it would be invented.
+- **The README's supported-versions line presupposed a release that does not exist.** It
+  read "only the latest `0.y` release receives fixes" while `CHANGELOG.md`, `CITATION.cff`
+  (no `date-released`) and `GAP-REL-1` all record that no `v*` tag has ever been cut — the
+  "phantom release" defect this file exists to prevent. It now states that no version has
+  been tagged, then gives the policy for when one is.
+- **`bypass_actors: []` was false: an administrator can bypass every rule, always.** A
+  `RepositoryRole:5 / always` bypass actor was added to this repository (and every
+  repository in this portfolio) so the owner can always recover a wedged gate.
+  `.github/rulesets/main.json` still recorded `bypass_actors: []`,
+  `.github/rulesets/README.md` said "**No bypass actors.** No one — including the
+  repository owner — merges past these rules", and the README's Standards Conformance
+  table said "no bypass actors". All three described a stricter gate than the one in
+  force. `make ruleset-check` named it in one line
+  (`bypass_actors: committed [] (no one bypasses), live ['RepositoryRole:5 (always)']`)
+  and the same API read returned `"current_user_can_bypass": "always"`.
+  **The file was amended to reality; the live ruleset was not touched and the owner's
+  bypass stays.** `tests/test_ruleset_check.py` now fails if the committed definition
+  stops recording the actor, if the live ruleset loses it, if a second bypass actor
+  appears, or if any document goes back to claiming nobody can bypass. Worth carrying
+  forward: the one field that turned out wrong is the one field CI structurally cannot
+  read — `verify` runs `--scope public` and the public ruleset payload omits
+  `bypass_actors` entirely, so `make ruleset-check` with a maintainer token is the only
+  check on it.
+- **`nightly.yml`'s header described a job that was deleted.** It said "ci.yml's
+  same-named twin job keeps the ruleset-required macos contexts green on PRs" — that
+  twin was `test-matrix-macos-nightly-notice`, removed on 2026-08-26 along with the five
+  contexts it faked. Replaced with what is actually true: the sweep is merge-blocking
+  indirectly and with a lag, through `verify`'s `check_nightly_macos.py` step.
 - **Five of the eleven required status checks on `main` were satisfied by an `echo`.**
   The `protect-main` ruleset required `test-matrix (macos-latest, 3.9–3.13)` to merge.
   Nothing on a pull request ran macOS; what reported those five contexts was
@@ -80,6 +150,11 @@ release" defect this file's absence let stand.
   precache. It now extracts and checks membership in `ASSETS` specifically, with two
   canary tests (against a synthetic fixture, not the real files) proving it actually
   fails on both a real omission and a decoy mention outside the array.
+
+### Added
+- `Detector.active_since` -- the open event's start timestamp, or None. The only
+  interior state the detector exposes, and the exact bound a caller holding per-frame
+  side data needs.
 
 ### Changed
 - **The live branch ruleset and the committed definition now match** (maintainer
