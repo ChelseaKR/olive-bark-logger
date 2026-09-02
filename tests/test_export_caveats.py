@@ -18,6 +18,26 @@ Two gates, and the second is the one that matters:
    The failure mode this avoids is the one that let the browser CSV drift: a gate that
    checks the paths someone remembered to name.
 
+**Discovery is by behaviour, not only by name (2026-08-29).** The enumeration gate above
+described itself as behaviour-proof and was not: it discovered Python export paths purely
+from a name pattern (`*_to_csv`, `build_report`, `build_*_html`), and `render_status` in
+`report/status.py` matched none of them. `status.html` is an artifact a person is handed
+-- the README tells the operator to open it from disk -- it printed two quiet-hours counts,
+and it shipped with neither the cover block nor the no-verdict line for as long as it
+existed. The gate's own docstring named this exact failure mode while the gate had it.
+
+So an export path is now identified by what its body *builds*, which is what actually
+makes something an artifact:
+
+* it emits a complete HTML document (a `<!DOCTYPE html` literal in its own body), or
+* it writes a CSV file (a `csv.writer(...)` call in its own body),
+
+and the name pattern is kept as a union member so discovery can only ever widen. A helper
+that returns an HTML *fragment* (`coverage_html`, `cover_html`) builds no document and is
+not an export path; a function that re-encodes an already-built artifact
+(`report/pdf_export.py`'s `write_tagged_pdf`, which is handed finished HTML) carries the
+caveats through from its input rather than emitting them, so it is not a producer either.
+
 Canaries prove both scanners bite, on the pattern `tests/gates.py` uses -- the same
 function that clears the tree is the one shown to flag a planted violation.
 """
@@ -26,6 +46,8 @@ from __future__ import annotations
 
 import ast
 import csv
+import dataclasses
+import importlib.util
 import json
 import re
 from datetime import datetime, timezone
@@ -43,7 +65,17 @@ from report.render import (
     build_report,
     cover_text_lines,
 )
-from report.violations import build_violation_report_html, compute_violations, violations_to_csv
+from report.status import StatusAggregates, render_status
+from report.violations import (
+    ABSENCE_NOTE,
+    COVERAGE_HEADING,
+    COVERAGE_SENTENCE_TEMPLATE,
+    COVERAGE_UNKNOWN_NOTE,
+    _coverage_sentence,
+    build_violation_report_html,
+    compute_violations,
+    violations_to_csv,
+)
 
 from conftest import ROOT
 
@@ -57,14 +89,31 @@ REQUIRED_IN_EVERY_EXPORT = [COVER["heading"], *COVER["can"], *COVER["cannot"], C
 COVER_HELPERS = {"cover_text_lines", "cover_html"}
 
 # A Python export path: a public function in report/ that produces an artifact a person is
-# handed. Matched by name so a new one is discovered rather than remembered.
+# handed. Two independent signatures, unioned, so a path has to evade both to ship
+# unchecked:
+#
+#  * NAME -- the original pattern, kept verbatim. It is only ever added to.
+#  * BEHAVIOUR -- the function's own body builds a whole HTML document or writes a CSV.
+#    Name-only discovery is what let `render_status` ship uncovered; a new export path
+#    can be called anything, but it cannot produce an artifact without building one.
 PY_EXPORT_PATTERN = re.compile(r"^(?!_)(.*_to_csv|build_report|build_.*_html)$")
 
-# The browser twin, in `export function <name>` form.
-JS_EXPORT_PATTERN = re.compile(r"^(.*ToCsv|buildReportHtml)$")
+# The behavioural half. `<!DOCTYPE html` marks a complete document (a fragment helper such
+# as `cover_html` has none); `csv.writer` marks a CSV file being written.
+HTML_DOCUMENT_MARKER = re.compile(r"<!doctype html", re.IGNORECASE)
+
+# The browser twin. Same union: the name alternation is widened (strictly -- every name
+# the old pattern matched still matches), plus the same `<!DOCTYPE html` behaviour test.
+JS_EXPORT_PATTERN = re.compile(r"^(.*[Cc]sv|(build|render).*Html)$")
 
 # The paths this file renders and asserts on below. Discovery must land on exactly these.
-PY_CHECKED = {"events_to_csv", "violations_to_csv", "build_report", "build_violation_report_html"}
+PY_CHECKED = {
+    "events_to_csv",
+    "violations_to_csv",
+    "build_report",
+    "build_violation_report_html",
+    "render_status",
+}
 JS_CHECKED = {"eventsToCsv", "violationsToCsv", "buildReportHtml"}
 
 
@@ -79,21 +128,64 @@ def _events():
 # --- scanners (shared by the gates and their canaries) -------------------------------
 
 
+def _builds_an_html_document(node: ast.FunctionDef) -> bool:
+    """This function's own body contains a whole-HTML-document string literal.
+
+    Nested functions are walked with it, which is correct: a closure that assembles the
+    document is still this path building it.
+    """
+    return any(
+        isinstance(sub, ast.Constant)
+        and isinstance(sub.value, str)
+        and HTML_DOCUMENT_MARKER.search(sub.value)
+        for sub in ast.walk(node)
+    )
+
+
+def _writes_a_csv(node: ast.FunctionDef) -> bool:
+    """This function's own body calls `csv.writer(...)`, i.e. it writes a CSV file."""
+    return any(
+        isinstance(sub, ast.Call)
+        and isinstance(sub.func, ast.Attribute)
+        and sub.func.attr == "writer"
+        for sub in ast.walk(node)
+    )
+
+
+def _is_python_export(node: ast.FunctionDef) -> bool:
+    """A public function in report/ that hands a person a finished artifact.
+
+    Name OR behaviour: either signature alone is enough, so widening one never narrows
+    the set. Private helpers (`_`-prefixed) are excluded from the behavioural half the
+    same way the name pattern excludes them.
+    """
+    if PY_EXPORT_PATTERN.match(node.name):
+        return True
+    if node.name.startswith("_"):
+        return False
+    return _builds_an_html_document(node) or _writes_a_csv(node)
+
+
 def discover_python_exports(source: str) -> set[str]:
     """Public artifact-producing functions defined in a Python report module."""
     return {
         node.name
         for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef) and PY_EXPORT_PATTERN.match(node.name)
+        if isinstance(node, ast.FunctionDef) and _is_python_export(node)
     }
+
+
+def _is_js_export(name: str, body: str) -> bool:
+    """The browser twin of `_is_python_export`: name OR whole-document behaviour."""
+    return bool(JS_EXPORT_PATTERN.match(name)) or bool(HTML_DOCUMENT_MARKER.search(body))
 
 
 def discover_js_exports(source: str) -> set[str]:
     """Exported artifact-producing functions in a PWA report module."""
     return {
         m.group(1)
-        for m in re.finditer(r"^export function (\w+)", source, re.MULTILINE)
-        if JS_EXPORT_PATTERN.match(m.group(1))
+        for m in re.finditer(r"^export function (\w+)[\s\S]*?\n}\n", source, re.MULTILINE)
+        if _is_js_export(m.group(1), m.group(0))
     }
 
 
@@ -101,7 +193,7 @@ def uncovered_python_exports(source: str) -> list[str]:
     """Export paths in this source whose body never reaches a cover helper."""
     offenders: list[str] = []
     for node in ast.walk(ast.parse(source)):
-        if not (isinstance(node, ast.FunctionDef) and PY_EXPORT_PATTERN.match(node.name)):
+        if not (isinstance(node, ast.FunctionDef) and _is_python_export(node)):
             continue
         called = {
             sub.func.id
@@ -118,7 +210,7 @@ def uncovered_js_exports(source: str) -> list[str]:
     offenders: list[str] = []
     for match in re.finditer(r"^export function (\w+)[\s\S]*?\n}\n", source, re.MULTILINE):
         name, body = match.group(1), match.group(0)
-        if not JS_EXPORT_PATTERN.match(name):
+        if not _is_js_export(name, body):
             continue
         if "csvPreamble(" not in body and "coverHtml(" not in body:
             offenders.append(name)
@@ -153,6 +245,212 @@ def test_browser_cover_constants_match_the_shared_spec():
     assert COVER["heading"] in flattened
 
 
+# --- the coverage block is shared too (issue #64) -------------------------------------
+#
+# The Python side has carried monitored-vs-wall-clock hours since #39. The browser
+# edition made the same "honest ... submission" claim about its quiet-hours CSV while
+# stating a gap total with no denominator, because its store held no record of when
+# observation began or ended. Sessions closed that; these assertions are what stops the
+# two wordings drifting apart again, the same way the block above stops the cover
+# drifting.
+
+COVERAGE = SPEC["coverage"]
+
+
+def test_python_coverage_constants_match_the_shared_spec():
+    assert COVERAGE["heading"] == COVERAGE_HEADING
+    assert COVERAGE["absence_note"] == ABSENCE_NOTE
+    assert COVERAGE["unknown_note"] == COVERAGE_UNKNOWN_NOTE
+    # The shape itself, not just the rendered result: `_coverage_sentence` formats numbers
+    # into this and so does `coverageSentence` in pwa/report.js, so it is the one string
+    # both ports must share exactly.
+    assert COVERAGE["sentence_template"] == COVERAGE_SENTENCE_TEMPLATE
+
+
+def test_the_python_coverage_sentence_matches_the_shared_template():
+    """Both ports format the numbers themselves; the sentence they build must be one
+    sentence. Python appends a further clause naming the recorded span, so the shared
+    claim is the prefix -- stated in the vector rather than discovered here."""
+    report = compute_violations(_events(), quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    report = dataclasses.replace(report, monitored_hours=7.0, wall_clock_hours=10.0)
+    expected = COVERAGE["sentence_template"].format(
+        monitored="7.0", wall="10.0", pct="70", unmonitored="3.0"
+    )
+    assert _coverage_sentence(report).startswith(expected)
+
+
+def test_browser_coverage_strings_match_the_shared_spec():
+    """Same source-level check as the cover block, for the same reason: it holds without
+    a Node runtime, and pwa/report.test.mjs replays it against the live module."""
+    js = (ROOT / "pwa" / "report.js").read_text(encoding="utf-8")
+    flattened = re.sub(r'"\s*\+\s*\n?\s*"', "", js)
+    for key in ("heading", "absence_note", "unknown_note", "sentence_template"):
+        assert COVERAGE[key] in flattened, f"pwa/report.js is missing coverage.{key}"
+
+
+def test_the_browser_holds_the_coverage_sentence_in_exactly_one_place():
+    """The template is shared only while each port keeps one copy of it. `coverageSentence`
+    used to build the sentence inline, so the shape existed twice with nothing comparing
+    them; the equality check above would still pass if a second, drifted copy were added
+    beside the constant. Counting the stem is what makes re-inlining fail."""
+    js = (ROOT / "pwa" / "report.js").read_text(encoding="utf-8")
+    flattened = re.sub(r'"\s*\+\s*\n?\s*"', "", js)
+    stem = COVERAGE["sentence_template"].split("{")[0]
+    assert flattened.count(stem) == 1, (
+        f"pwa/report.js states the coverage sentence {flattened.count(stem)} times; it must "
+        "hold it once, as COVERAGE_SENTENCE_TEMPLATE, and format its numbers into that."
+    )
+
+
+# --- the generator is the vector's definition, and is checked against it --------------
+#
+# Every assertion above reads the committed JSON, which makes that file authoritative --
+# and an authoritative file nothing derives leaves the same hole one layer down. Soften a
+# Python constant, hand-patch the vector to match, and both suites stay green while the
+# two are no longer the same string by construction; they are two strings that happen to
+# agree today. `scripts/gen_cover_spec.py` closes that by building the whole document out
+# of the constants, so this gate makes its output the *definition* of the committed file.
+#
+# It reads only. A gate that regenerated on mismatch would repair the drift instead of
+# reporting it, which is how the file stopped being reviewed in the first place.
+
+
+def _generator():
+    """`scripts/gen_cover_spec.py` as a module.
+
+    Importing it builds `DOC` and nothing else: the write lives behind `main()`, guarded by
+    `if __name__ == "__main__"`, so loading it here cannot rewrite the vector.
+    """
+    path = ROOT / "scripts" / "gen_cover_spec.py"
+    spec = importlib.util.spec_from_file_location("gen_cover_spec", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_committed_vector_is_exactly_what_the_generator_would_write():
+    generator = _generator()
+    before = generator.SPEC_PATH.read_bytes()
+    assert generator.render() == before.decode("utf-8"), (
+        "spec/report/cover.json is not what scripts/gen_cover_spec.py builds from the "
+        "current Python constants. Either a rendered string changed and the vector was not "
+        "regenerated, or the vector was edited by hand into something no constant says. "
+        "Regenerate on purpose -- `.venv/bin/python scripts/gen_cover_spec.py` -- and review "
+        "the diff, exactly as for a detector vector."
+    )
+    assert generator.SPEC_PATH.read_bytes() == before, (
+        "checking the vector rewrote it. This gate must report drift, never repair it."
+    )
+
+
+# The equality above is only worth something while the generator's strings come from the
+# code that renders them. A generator holding its own literals would satisfy it and still
+# let the report and the vector say different things -- the same drift, moved one file
+# along. Checked at the source, not by value: a planted literal that happens to equal the
+# constant today passes a value comparison and fails the moment the constant moves, which
+# is a gate that reports the drift one change too late.
+
+# Dotted paths in the generator's DOC whose value must be a name imported from the module
+# that renders it. Excluded, deliberately and not silently: `name` and `description` are
+# metadata about the vector; `coverage._why` and `coverage._sentence_template_note` are
+# annotations no export renders; and `cover.heading`, `cover.can_label`, `cover.cannot_label`
+# are still inline literals inside report/render.py's own cover_text_lines / cover_html, so
+# there is no constant for the generator to import yet. Give them one and add them here.
+IMPORTED_SPEC_PATHS = {
+    "no_verdict",
+    "uncalibrated_headline",
+    "cover.can",
+    "cover.cannot",
+    "cover.privacy",
+    "coverage.heading",
+    "coverage.absence_note",
+    "coverage.unknown_note",
+    "coverage.sentence_template",
+}
+
+
+def _report_imports(source: str) -> set[str]:
+    """Names this module pulled in from the report package."""
+    return {
+        alias.asname or alias.name
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("report")
+        for alias in node.names
+    }
+
+
+def unsourced_spec_values(source: str, required: set[str] = IMPORTED_SPEC_PATHS) -> list[str]:
+    """Paths in the generator's DOC stated inline instead of imported from the renderer."""
+    doc = next(
+        (
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Dict)
+            and any(isinstance(t, ast.Name) and t.id == "DOC" for t in node.targets)
+        ),
+        None,
+    )
+    if doc is None:
+        return sorted(required)
+    imported, offenders = _report_imports(source), []
+
+    def visit(node: ast.Dict, prefix: str = "") -> None:
+        for key, value in zip(node.keys, node.values):
+            if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                continue
+            path = prefix + key.value
+            if isinstance(value, ast.Dict):
+                visit(value, path + ".")
+            elif path in required:
+                # `list(COVER_CAN)` is the constant, copied so the JSON gets an array.
+                if (
+                    isinstance(value, ast.Call)
+                    and isinstance(value.func, ast.Name)
+                    and value.func.id == "list"
+                    and value.args
+                ):
+                    value = value.args[0]
+                if not (isinstance(value, ast.Name) and value.id in imported):
+                    offenders.append(path)
+
+    visit(doc)
+    return sorted(offenders)
+
+
+def test_the_generator_imports_every_shared_string_rather_than_stating_it():
+    source = (ROOT / "scripts" / "gen_cover_spec.py").read_text(encoding="utf-8")
+    offenders = unsourced_spec_values(source)
+    assert not offenders, (
+        "scripts/gen_cover_spec.py states these itself instead of importing them from the "
+        f"module that renders them, so the vector can drift from the report: {offenders}"
+    )
+
+
+def test_the_generator_scanner_flags_a_planted_literal():
+    """The canary, on the pattern the scanners above use. A literal identical to the real
+    constant is the exact violation a value comparison cannot see, so it is the one planted
+    here."""
+    planted = (
+        "from report.violations import ABSENCE_NOTE\n"
+        'DOC = {"coverage": {"absence_note": "Hours that were not monitored are not '
+        'quiet hours.", "unknown_note": ABSENCE_NOTE}}\n'
+    )
+    assert unsourced_spec_values(planted, {"coverage.absence_note", "coverage.unknown_note"}) == [
+        "coverage.absence_note"
+    ], "the scanner missed a hand-written literal -- gate is dead"
+
+
+def test_the_generator_scanner_passes_an_imported_value():
+    """The other half: it must not flag a compliant generator, or it is noise. A name that
+    is *not* imported from the renderer still counts as stating it yourself."""
+    ok = "from report.render import COVER_PRIVACY\nDOC = {'cover': {'privacy': COVER_PRIVACY}}\n"
+    assert unsourced_spec_values(ok, {"cover.privacy"}) == []
+    local = "COVER_PRIVACY = 'x'\nDOC = {'cover': {'privacy': COVER_PRIVACY}}\n"
+    assert unsourced_spec_values(local, {"cover.privacy"}) == ["cover.privacy"]
+
+
 # --- 1. content: every export path's output carries the caveats ----------------------
 
 
@@ -179,6 +477,17 @@ def _rendered_python_exports(tmp_path) -> dict[str, str]:
         ),
         "events_to_csv": events_csv.read_text(encoding="utf-8"),
         "violations_to_csv": violations_csv.read_text(encoding="utf-8"),
+        # The local status page (README "Local status page"): a file the operator is
+        # told to double-click open, printing quiet-hours counts. It is an export path.
+        "render_status": render_status(
+            {"updated_at": events[0].start, "status": "ok"},
+            StatusAggregates(
+                summary=summary,
+                quiet_window=config.quiet_hours.label(),
+                tz_name="UTC",
+            ),
+            now=events[0].start,
+        ),
     }
 
 
@@ -252,6 +561,27 @@ def test_every_browser_export_path_goes_through_the_shared_cover_helper():
     assert not offenders, f"browser export paths that never emit the cover block: {offenders}"
 
 
+def test_the_readme_enumerates_every_artifact_it_claims_the_cover_leads():
+    """The README's Guardrails bullet says the cover "leads every artifact" and then
+    enumerates them by hand. It listed four while five existed, for as long as the fifth
+    existed. Tie the sentence to discovery: while `render_status` is a discovered export
+    path, that bullet has to name the page it produces."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    bullet = readme.split("**The caveats travel with every export.**")[1].split("\n\n")[0]
+    # The *enumeration* only: the span between "produces" and the dash that closes the
+    # list. Checking the whole bullet would let prose about the status page elsewhere in
+    # the paragraph satisfy a list that does not mention it -- which it did, first try.
+    enumeration = bullet.split("produces")[1].split("—")[1]
+    assert "render_status" in PY_CHECKED, (
+        "premise: the status page is a checked export path. If it stopped being one, fix "
+        "that rather than relaxing the README check below."
+    )
+    assert "status page" in enumeration.lower(), (
+        "README's 'every artifact' list does not name the local status page, which is one "
+        f"of them: {enumeration.strip()!r}"
+    )
+
+
 def test_pwa_test_file_exercises_the_same_export_paths():
     """The browser suite is the runtime half of this gate; keep the two sets in step so a
     path checked here is not silently unchecked there."""
@@ -269,6 +599,49 @@ def test_export_discovery_flags_a_planted_path():
     assert discover_python_exports(planted_py) - PY_CHECKED == {"summary_to_csv"}
     planted_js = "export function summaryToCsv(records) {\n  return '';\n}\n"
     assert discover_js_exports(planted_js) - JS_CHECKED == {"summaryToCsv"}
+
+
+def test_export_discovery_flags_a_path_whose_name_matches_nothing():
+    """The regression canary for the hole this gate actually had.
+
+    `render_status` built a whole `status.html`, printed quiet-hours counts, and was
+    invisible to name-only discovery. Both plants below are named so that
+    `PY_EXPORT_PATTERN` / the JS name pattern reject them; behaviour has to find them.
+    """
+    named_py = "def paint_the_dashboard(data):\n    return '<!DOCTYPE html>\\n<html></html>'\n"
+    assert not PY_EXPORT_PATTERN.match("paint_the_dashboard"), "plant must evade the name half"
+    assert discover_python_exports(named_py) == {"paint_the_dashboard"}
+
+    writes_csv = "def dump(rows, path):\n    w = csv.writer(path)\n    w.writerow(rows)\n"
+    assert not PY_EXPORT_PATTERN.match("dump"), "plant must evade the name half"
+    assert discover_python_exports(writes_csv) == {"dump"}
+
+    named_js = "export function paintDashboard(d) {\n  return `<!DOCTYPE html>`;\n}\n"
+    assert not JS_EXPORT_PATTERN.match("paintDashboard"), "plant must evade the name half"
+    assert discover_js_exports(named_js) == {"paintDashboard"}
+
+
+def test_export_discovery_ignores_fragment_helpers_and_private_functions():
+    """The other half of the canary: behaviour must not flag everything that touches
+    HTML, or the gate becomes noise someone widens `PY_CHECKED` to silence."""
+    fragment = "def sidebar_html(x):\n    return '<section>' + x + '</section>'\n"
+    assert discover_python_exports(fragment) == set()
+    private = "def _paint(data):\n    return '<!DOCTYPE html>'\n"
+    assert discover_python_exports(private) == set()
+
+
+def test_the_name_half_of_discovery_is_never_narrowed():
+    """`PY_EXPORT_PATTERN` and the JS pattern are a floor, not a knob. Every name the
+    gate was written to catch still matches, so a future edit can only widen."""
+    for name in (
+        "events_to_csv",
+        "violations_to_csv",
+        "build_report",
+        "build_violation_report_html",
+    ):
+        assert PY_EXPORT_PATTERN.match(name), f"name half narrowed: {name} no longer matches"
+    for name in ("eventsToCsv", "violationsToCsv", "buildReportHtml"):
+        assert JS_EXPORT_PATTERN.match(name), f"JS name half narrowed: {name} no longer matches"
 
 
 def test_cover_scanner_flags_a_planted_uncovered_export():

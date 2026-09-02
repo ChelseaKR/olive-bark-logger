@@ -5,7 +5,7 @@
 import { computeAnchor, toEpochSeconds } from "./clock.js";
 import { Detector } from "./detector.js";
 import { dbfs } from "./level.js";
-import { buildReportHtml, eventsToCsv, summarize, violationsToCsv } from "./report.js";
+import { buildReportHtml, countEvents, eventsToCsv, summarize, violationsToCsv } from "./report.js";
 
 const $ = (id) => document.getElementById(id);
 const cfg = () => ({
@@ -28,9 +28,18 @@ function openDb() {
 }
 async function addEvent(ev) {
   const db = await openDb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("events", "readwrite");
+    const req = tx.objectStore("events").add(ev);
+    tx.oncomplete = () => res(req.result); // the autoIncrement key, for later updates
+    tx.onerror = () => rej(tx.error);
+  });
+}
+async function putRecord(key, value) {
+  const db = await openDb();
   await new Promise((res, rej) => {
     const tx = db.transaction("events", "readwrite");
-    tx.objectStore("events").add(ev);
+    tx.objectStore("events").put(value, key);
     tx.oncomplete = res;
     tx.onerror = () => rej(tx.error);
   });
@@ -60,12 +69,46 @@ const STATUS_LISTENING =
 const SAMPLE_INTERVAL_MS = 100; // steady clock, not tied to rAF (which throttles in the background)
 const GAP_THRESHOLD_S = 2; // background interruptions longer than this are logged as gaps
 
+// How often an in-progress run's end timestamp is rewritten (issue #64).
+//
+// The store had no record of when observation began or ended, so a quiet-hours export
+// could state a gap total with no denominator: "37s of gap" that a reader cannot place
+// against a half-hour test or a ten-hour night. A gap is written by the *running* app on
+// a visibilitychange; the most ordinary outage of all -- the tab closed, the browser
+// restarted, the laptop shut -- left no trace at all.
+//
+// A session record therefore checkpoints its end as it goes, mirroring the Python
+// monitor's checkpoint_interval_s. The error this leaves is deliberately one-directional:
+// a tab killed outright ends its run at the last checkpoint, so up to 30 seconds of real
+// observation goes unclaimed. Under-claiming coverage is the safe direction -- it can
+// only make the document more cautious about what it observed, never less.
+const SESSION_CHECKPOINT_S = 30;
+
 let audioCtx = null;
 let stream = null;
 let sampler = 0; // setInterval id; rAF throttles to ~0 in a backgrounded tab
 let detector = null;
 let anchor = 0; // epoch-seconds value that audioCtx.currentTime 0 maps to
 let gapStart = 0; // epoch-seconds when the tab was last hidden, 0 when visible/idle
+let sessionKey = null; // IndexedDB key of the in-progress session record, null when idle
+let sessionStart = 0; // epoch-seconds when the current run began
+let lastSessionWrite = 0; // epoch-seconds of the last session checkpoint
+
+// Open a session record so the report has a basis for a monitored-window figure.
+async function openSession(t) {
+  sessionStart = t;
+  lastSessionWrite = t;
+  sessionKey = await addEvent({ kind: "session", start: t, end: t });
+}
+
+// Advance the in-progress run's end. Cheap and idempotent; skipped until the checkpoint
+// interval has elapsed, and forced once on stop() so a clean stop is exact.
+async function checkpointSession(t, { force = false } = {}) {
+  if (sessionKey === null) return;
+  if (!force && t - lastSessionWrite < SESSION_CHECKPOINT_S) return;
+  lastSessionWrite = t;
+  await putRecord(sessionKey, { kind: "session", start: sessionStart, end: t });
+}
 
 // Persist a coverage hole so the report can be honest about time we could not monitor.
 async function recordGap(start, end) {
@@ -94,6 +137,7 @@ async function start() {
   // (report.js/CSV do new Date(ev.start * 1000)), not seconds-since-context-created.
   anchor = computeAnchor(Date.now(), audioCtx.currentTime);
   gapStart = 0;
+  await openSession(toEpochSeconds(audioCtx.currentTime, anchor));
   const src = audioCtx.createMediaStreamSource(stream);
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 2048;
@@ -112,6 +156,7 @@ async function start() {
     const level = dbfs(buf);
     $("meter").value = Math.max(0, Math.min(100, ((level + 60) / 60) * 100));
     $("level").textContent = `${level.toFixed(1)} dBFS`;
+    await checkpointSession(t);
     const ev = detector.push(t, level);
     if (ev) {
       await addEvent(ev);
@@ -125,6 +170,10 @@ async function stop() {
   clearInterval(sampler);
   sampler = 0;
   document.removeEventListener("visibilitychange", onVisibilityChange);
+  // Close the run at its true end, before the context that carries the clock is torn
+  // down. Everything after this point is teardown, not observation.
+  if (audioCtx) await checkpointSession(toEpochSeconds(audioCtx.currentTime, anchor), { force: true });
+  sessionKey = null;
   if (gapStart && audioCtx) {
     const end = toEpochSeconds(audioCtx.currentTime, anchor);
     const start = gapStart;
@@ -158,8 +207,9 @@ function download(name, text, type) {
 }
 
 async function refresh() {
-  const events = await allEvents();
-  $("count").textContent = String(events.length);
+  // Detected events only. Gap and session records live in the same store, and counting
+  // them here would put a number on screen that no export agrees with.
+  $("count").textContent = String(countEvents(await allEvents()));
 }
 
 async function downloadReport() {

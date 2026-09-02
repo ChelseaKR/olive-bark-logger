@@ -9,7 +9,9 @@ so the operator can double-click it open at any time.
 Same guarantees as the rest of the tool: pure standard library, no network, no audio —
 only the derived level/coverage metadata already in the heartbeat and the event store.
 The page reuses the report's stylesheet and structural-a11y conventions (lang, landmarks,
-headings, scoped table headers) so the same accessibility floor applies here.
+headings, scoped table headers) so the same accessibility floor applies here, and it
+leads with the same "what this can and cannot prove" cover block every other artifact
+carries — it is a page a person is handed, and it prints quiet-hours counts.
 """
 
 from __future__ import annotations
@@ -32,7 +34,16 @@ from report.aggregate import Summary, summarize
 # (rather than `off_air_spans`'s derived window) so a monitor that never restarted
 # inside the window -- its last session ended before `since` -- still reads as
 # off-air for the whole window instead of clipping away to nothing.
-from report.render import _STYLE, _subtract_spans, on_air_spans
+#
+# `cover_html`/`NO_VERDICT_NOTE` are the same shared strings (spec/report/cover.json)
+# every other artifact carries. This page is handed to a person, it is the page the
+# README tells the operator to double-click open, and it prints quiet-hours counts --
+# so it is an export path, not an internal debug view, and the caveats travel with it
+# exactly as they travel with the report and the CSVs. It shipped without them for as
+# long as it existed because `tests/test_export_caveats.py` discovered export paths by
+# *name* and `render_status` matched none of its alternatives; that gate now discovers
+# them by behaviour (an HTML document or a CSV built in the function's own body) too.
+from report.render import _STYLE, NO_VERDICT_NOTE, _subtract_spans, cover_html, on_air_spans
 
 if TYPE_CHECKING:
     from monitor.config import Config
@@ -317,6 +328,9 @@ def render_status(
         '<thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>'
         f"<tbody>{night_rows}</tbody></table>"
     )
+    # The table above prints a quiet-hours count. Every artifact that does carries the
+    # same sentence saying a count is a measurement and not a finding.
+    no_verdict_html = f'<div class="note"><p>{escape(NO_VERDICT_NOTE)}</p></div>'
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -334,6 +348,9 @@ def render_status(
 <p>Snapshot as of <strong>{escape(_fmt_ts(now, tz))}</strong> (time zone
 <strong>{escape(aggregates.tz_name)}</strong>). This page is a static file the monitor
 rewrites in place; open it directly from disk. No server, no network, no audio.</p>
+
+{cover_html()}
+
 {banner}
 
 <h2>Live capture</h2>
@@ -348,6 +365,7 @@ rewrites in place; open it directly from disk. No server, no network, no audio.<
 <h2>Last night</h2>
 <p>Summary of the most recent {aggregates.window_hours} hours of logged events. Counts
 are sound-level events (a threshold crossing held long enough) — never audio.</p>
+{no_verdict_html}
 {night_table}
 </main>
 </body>

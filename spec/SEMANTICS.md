@@ -43,6 +43,20 @@ and the uncalibrated headline. The same rule applies as to the detector vectors:
 `scripts/gen_cover_spec.py` and review the diff). Both suites read the committed JSON, so
 softening a caveat in one implementation fails in both.
 
+Unlike the detector vectors, this one is *generated*: `scripts/gen_cover_spec.py` imports
+each string from the module that puts it in front of a person and builds the document from
+those. Two gates in `tests/test_export_caveats.py` keep that true. The first fails unless
+the committed JSON is byte-identical to what the generator produces, so a constant changed
+without regenerating and a JSON hand-edited into something no constant says both fail; it
+reads only, and never regenerates, because a gate that repairs drift is a gate nobody
+reviews. The second reads the generator's own source and requires each shared string to be
+an imported name rather than a literal -- a literal identical to the real constant passes
+a value comparison and only fails once the constant moves, which is one change too late.
+The vector's `name`, `description` and `_`-prefixed keys are the generator's own prose and
+are exempt; `cover.heading`, `cover.can_label` and `cover.cannot_label` are exempt for a
+different reason, recorded in the test: they are still inline literals inside
+`report/render.py` and have no constant to import yet.
+
 The enumeration half is in `tests/test_export_caveats.py`: export paths are discovered
 from the source rather than listed, so a **new** export path fails the gate until it is
 rendered and asserted on. That is the half that was missing — the browser CSV drifted
@@ -83,6 +97,30 @@ force parity on them:
   format timestamps against different time zones (fixed-offset vs IANA zone
   handling); this is noted in the FIX-06 roadmap entry and is *not* a detector
   concern, so it is out of scope for `spec/detector/`.
+
+## Shared: the monitoring-coverage block
+
+`spec/report/cover.json`'s `coverage` object is replayed against both ports the way the
+cover block is. It carries the heading, the not-monitored-is-not-quiet note, the
+undeterminable-coverage note, and the sentence template both sides format their own
+numbers into. Python builds it in `report/violations.py`; the browser in `pwa/report.js`
+(`coverageSentence` / `coverageTextLines`). The arithmetic is ported too --
+`coverageWindow` / `coverageHours` mirror `report/render.py`'s `_coverage_window`,
+`on_air_spans` and `_coverage_hours` -- so the two answer the same question the same way:
+the window is the earliest to latest moment across events, gaps and sessions; monitored
+time is the union of session runs and event spans minus recorded gaps; a record with no
+sessions falls back to window-minus-gaps and says that it did.
+
+The sentence itself has one definition: `COVERAGE_SENTENCE_TEMPLATE` in
+`report/violations.py`, from which the vector's `coverage.sentence_template` is generated.
+Each port holds the shape at most once -- Python in that constant, the browser in its own
+`COVERAGE_SENTENCE_TEMPLATE` -- formats its own numbers into it, and is checked against the
+vector both by value and, for the browser, by a count that fails if the sentence is stated
+a second time anywhere in `pwa/report.js`.
+
+Python appends a further sentence naming the recorded span, and renders an off-air
+section the browser does not; the shared claim is therefore the sentence prefix, which
+the vector states rather than leaving to be discovered.
 
 ## Extension point: quiet-hours / summarize parity
 

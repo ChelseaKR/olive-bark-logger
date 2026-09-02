@@ -1,6 +1,6 @@
 {
   "name": "report-cover",
-  "description": "Strings every human-readable export must carry, in both implementations. Python: report/render.py (cover_text_lines / cover_html) plus every writer in report/export.py and report/violations.py. Browser: pwa/report.js. Same rule as spec/detector/*.json - one list, replayed by tests/test_export_caveats.py and pwa/report.test.mjs, so the two ports cannot drift. See spec/SEMANTICS.md.",
+  "description": "Strings every human-readable export must carry, in both implementations. Python: report/render.py (cover_text_lines / cover_html) plus every writer in report/export.py and report/violations.py; the coverage block is report/violations.py. Browser: pwa/report.js. Same rule as spec/detector/*.json - one list, replayed by tests/test_export_caveats.py and pwa/report.test.mjs, so the two ports cannot drift. See spec/SEMANTICS.md.",
   "cover": {
     "heading": "What this can and cannot prove",
     "can_label": "What it can show:",
@@ -18,5 +18,13 @@
     "privacy": "By design no audio is ever recorded, stored, or transmitted, so there is nothing to leak, subpoena, or misuse. This is general information, not legal advice; verify your local rule before relying on these numbers."
   },
   "no_verdict": "This is a measurement, not a determination. Being within quiet hours is not the same as a violation, and only the relevant authority can decide whether a rule was broken.",
-  "uncalibrated_headline": "Uncalibrated — these readings are relative, not dB(A)."
+  "uncalibrated_headline": "Uncalibrated — these readings are relative, not dB(A).",
+  "coverage": {
+    "_why": "A quiet-hours count is only readable against the time it was counted over. An outage during quiet hours removes events, so a monitor that dropped out for most of the night produces a low count that reads as a quiet night. Python carried this from issue #39; the browser edition made the same 'honest submission' claim with no coverage figure at all until issue #64. These strings are what both ports must say, verbatim.",
+    "heading": "Monitoring coverage",
+    "absence_note": "Hours that were not monitored are not quiet hours: no event could be recorded then, so the absence of an event in those hours is not evidence that no sound occurred.",
+    "unknown_note": "How much of this window the device actually monitored could not be determined from this record: it carries no monitoring session, no recorded gap, and no measurable span of events. Do not read the counts below as covering the whole window.",
+    "sentence_template": "Over this reporting window the device monitored {monitored} of {wall} wall-clock hours ({pct}%); the remaining {unmonitored} hours are shown as not monitored rather than quiet.",
+    "_sentence_template_note": "{monitored}, {wall} and {unmonitored} are hours to one decimal place; {pct} is a whole-number percentage. Both ports format the numbers themselves and must produce this sentence exactly. Python appends a further sentence naming the recorded span; the browser does not, so the shared claim is the prefix."
+  }
 }

@@ -6,9 +6,10 @@ were reconciled** — the live configuration was brought up to `main.json` for t
 `pull_request` rule, strict required status checks, and `bypass_actors: []`, and
 `main.json` was amended to drop `required_signatures` (decision note below) and to carry
 the live ruleset's name. **On 2026-08-26 five of the eleven required status checks were
-removed, because an `echo` was satisfying them** (see the next section). **On
-2026-08-28 the repository owner's standing bypass actor was recorded in this file**,
-where it had been live and undocumented — see "Why the owner can bypass".
+removed, because an `echo` was satisfying them** (see the next section). **On 2026-08-27
+this file and the paragraphs below stopped saying "no bypass actors", because that had
+become false: the repository-admin role can bypass every rule on this ruleset, always**
+(see [The 2026-08-27 correction](#the-2026-08-27-correction-someone-can-bypass-and-two-documents-said-no-one-could)).
 `make ruleset-check` exits 0 against the live API.
 
 This document used to say the opposite — that nothing had been applied, and that "until a
@@ -26,49 +27,89 @@ ruleset required five macOS contexts, and its comment said so.
   contributor.
 - **Stale branches cannot merge** (`strict_required_status_checks_policy: true`): the
   branch must be up to date with `main` before merging.
-- **One bypass actor: the repository owner** (`RepositoryRole` 5, `bypass_mode:
-  always`), deliberately and permanently. See "Why the owner can bypass" below. (From
-  2026-08-21 to 2026-08-26 there was none, and the maintainer's earlier `pull_request`
-  bypass had been removed in the reconciliation. That was the wrong call and it has been
-  reversed.)
+- **One bypass actor: the repository-admin role, always.** `bypass_actors` carries
+  `{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}`. Everything
+  above binds every contributor **except** an administrator, and on this repository the
+  administrator is the owner, who is also the only human with write access. So for her
+  these rules are a default she can step past on purpose, and for anyone else they are
+  absolute. That is the deliberate posture — an owner who cannot recover a repository
+  whose required check is wedged has a worse problem than an unreviewed merge — and it is
+  written here because between 2026-08-21 and 2026-08-27 this page said the opposite.
 - **Six required status checks** must report green: `verify` and five
   `test-matrix (ubuntu-latest, 3.9–3.13)`. Every one of them runs the repository's real
   gates and every one of them can fail. Six is both the count and the strength; before
   2026-08-26 the count was eleven and the strength was six.
 
-## Why the owner can bypass
+## The 2026-08-27 correction: someone can bypass, and two documents said no one could
 
-`bypass_actors` holds **exactly one actor: the repository owner** (`RepositoryRole` 5,
-`bypass_mode: always`), and that is deliberate and permanent.
+On 2026-08-27 the live ruleset answered `make ruleset-check` like this:
 
-This file used to argue the opposite, on the grounds that an admin bypass hands the
-ability to skip the gate to the person most likely to be in a hurry. That argument is not
-wrong about the risk; it is wrong about which risk is larger, and the larger one has
-already happened. **An agent applied a ruleset with no bypass and locked the owner out of
-their own repository**, and restoring access took a sweep across eighteen repositories in
-this portfolio. The standing instruction since is that the owner must always be able to
-bypass, in any repository.
+```
+Live ruleset 'protect-main' (id 18752850) DIFFERS from main.json in 1 way(s):
+  - bypass_actors: committed [] (no one bypasses), live ['RepositoryRole:5 (always)']
+```
 
-So an empty `bypass_actors` list here is not a stricter gate. It is the lockout, and
-anything checking this ruleset has to treat it as a failure rather than as a pass. Two
-things enforce that, and they are deliberately not one thing:
+A `RepositoryRole:5 / always` bypass actor was added to this repository (and to every
+repository in this portfolio) so that the owner can always merge past a wedged gate. The
+same read reports `"current_user_can_bypass": "always"` for the maintainer's token, which
+is the API stating the consequence directly.
 
-- `tests/test_ruleset_check.py::test_the_committed_file_on_disk_records_the_owner_bypass`
-  asserts this file holds *exactly* that one actor — so a second bypass, granted to a
-  team, a GitHub App or another role, fails, and so does the owner's own going missing.
-- `scripts/check_ruleset.py` checks the live ruleset and this file **independently**
-  against that actor, rather than only comparing the two to each other. Comparing them
-  would report a match on the day both were emptied together, which is the incident
-  recurring with a green tick on it. `test_both_sides_emptied_is_still_a_failure` pins
-  that case: two findings, not zero.
+`main.json` said `bypass_actors: []`. This page said "**No bypass actors.** No one —
+including the repository owner — merges past these rules." Both were false from the
+moment that actor was added, and both were false in the direction that flatters the
+repository: they described a stricter gate than the one that exists. **The file has been
+amended to the truth, not the ruleset to the file.** The owner's bypass is deliberate and
+stays; a document that undersells who can merge is the thing that was wrong.
 
-Note that `--scope public` (what CI runs) cannot see `bypass_actors` at all and says so
-on every run. `make ruleset-check` with a maintainer token is the only thing that checks
-this, which is why the assertion on the committed file matters independently.
+Two consequences worth stating rather than discovering later:
 
-If you are reading this because the empty list looks more secure and you are about to
-restore it: reapplying a ruleset file that omits the owner's bypass is how the lockout
-happens. Do not.
+- **CI cannot catch this class of drift, and it is the only class it cannot catch.**
+  `verify` runs `scripts/check_ruleset.py --scope public`, and the publicly readable view
+  of a ruleset omits `bypass_actors` entirely. Every other field is checked on every pull
+  request; this one is checked only by `make ruleset-check` with a maintainer token. The
+  field that turned out to be wrong is exactly the field nothing automatic reads. The
+  answer is not to pretend otherwise: `--scope public` prints "NOT CHECKED in this run:
+  bypass actors" on its passing path, and the honest cadence is to run
+  `make ruleset-check` locally after any change to repository administration.
+- **`main.json` now records the bypass actor, so the check fails in both directions.**
+  Adding a second bypass actor is a difference, and so is *removing* this one — which
+  matters, because silently dropping the owner's recovery path would leave a repository
+  nobody can unstick. `tests/test_ruleset_check.py` pins both.
+
+The pattern this repeats is the one the 2026-08-26 section is about, with the sign
+flipped. That change removed a gate that read as stronger than it was; this one removes a
+*sentence* that read as stronger than it was. Prose does not block a merge — and prose
+that overstates a gate is worse than no prose, because a reader stops looking.
+
+### 2026-08-28: the comparison itself was the wrong shape
+
+Recording the actor in `main.json` fixed the claim. It did not fix the check, which
+compared the two bypass lists **by equality** — the one comparison that cannot see this
+failure. If a later edit "tidied" the committed file back to `[]` on a day the owner had
+also been locked out live, the two sides would agree and the check would report a match
+on precisely the incident the field protects. Two wrong values that agree are the
+failure mode; equality cannot distinguish them from two right ones.
+
+`bypass_findings` in `scripts/check_ruleset.py` therefore holds **each side
+independently** against the owner's bypass, and compares only *other* actors between
+them:
+
+- the owner's bypass missing from the **live** ruleset is the lockout recurring;
+- the owner's bypass missing from the **committed file** is a lockout waiting for
+  somebody to run the reapply command above, which is how the original incident
+  happened;
+- any *other* bypass actor — a team, a GitHub App, a second role — is a finding in
+  either direction, which is the threat that was actually worth an equality check.
+
+`test_both_sides_emptied_is_still_a_failure` pins the case equality got wrong: two
+findings, not zero.
+
+Why the owner keeps a bypass at all, stated once so it is not re-litigated: an agent
+applied a ruleset with no bypass actor and locked the owner out of her own repository,
+and restoring access took a sweep across eighteen repositories in this portfolio. An
+empty `bypass_actors` list here is not a stricter gate — it is that incident. If you are
+reading this because the empty list looks more secure and you are about to restore it:
+do not.
 
 ## The 2026-08-26 change: five required checks that an `echo` satisfied
 
@@ -120,6 +161,11 @@ Before 2026-08-21 the live ruleset was weaker than this file in four named ways
 (`strict` false, `required_signatures` absent, no `pull_request` rule, one bypass
 actor). Three were closed by bringing the live configuration up to the file. The fourth
 went the other way, as a decision:
+
+(The bypass actor removed that day was a *user* bypass on the `pull_request` rule alone.
+The `RepositoryRole:5 / always` actor live today is a different, later, deliberate one —
+see the 2026-08-27 section. This paragraph describes what happened on 2026-08-21 and is
+not a statement about the ruleset as it stands.)
 
 **`required_signatures` was removed from `main.json` rather than applied.** Commits in
 this portfolio are routinely made by delegated agents on the maintainer's machines
@@ -215,12 +261,13 @@ gh api --method PUT repos/ChelseaKR/olive-bark-logger/rulesets/18752850 \
 ```
 
 > **Before running that, check that `main.json` still carries the owner's bypass actor.**
-> This command replaces the live ruleset wholesale with the contents of the file. On
-> 2026-08-28 the file said `"bypass_actors": []` while the live ruleset carried the
+> This command replaces the live ruleset wholesale with the contents of the file. Until
+> 2026-08-27 the file said `"bypass_actors": []` while the live ruleset carried the
 > owner's standing bypass, so running it as written would have stripped that bypass and
-> locked the owner out of the repository — the exact incident described below, reached by
-> following this repository's own documented procedure. `make ruleset-check` now fails
-> when the file omits it, so run that first.
+> locked the owner out of the repository — by following this repository's own documented
+> procedure. That is why the file is checked as something that will be *applied*, not
+> only as a description of what is live: `make ruleset-check` fails when the file omits
+> the owner's bypass, whatever the live ruleset says. Run it first.
 
 Then `make ruleset-check` must print a match. Never change one side without the other:
 the divergence this file spent a month documenting started exactly that way.
@@ -243,14 +290,26 @@ the divergence this file spent a month documenting started exactly that way.
   once `docs/GAP-LEDGER.md#gap-sec-1` / `#gap-cicd-1` land CodeQL, zizmor, or Scorecard
   as separate jobs), subject to the "Adding a required status check" rule above. **Live,
   and matching.**
-- **`bypass_actors`: exactly the repository owner** (`RepositoryRole` 5,
-  `bypass_mode: always`). This note used to argue the opposite — an empty list, "no one
-  including repository admins", written as the direct fix for commit `74e6b8f`
-  (2026-07-02), a direct-to-main push with no PR reference. That argument is not wrong
-  about the risk of an admin merging past a red check; it is wrong about which risk is
-  larger, and the larger one has already happened. See "Why the owner can bypass" above.
-  The original concern is still addressed by everything else here: a PR is required, all
-  six checks are required, and the branch must be up to date. The bypass is the way back
-  in when a required check is wedged, not a routine merge path — if a check goes red for
-  a reason unrelated to the change (a stale nightly is the likeliest), the way through is
-  still to fix the check (`gh workflow run nightly.yml --ref main`).
+- **`bypass_actors`: the repository-admin role, `bypass_mode: always`.** Recorded here
+  since 2026-08-27, live since the day the portfolio-wide administrator bypass was added.
+  Read it as what it is: **there is an emergency-merge path, and the owner is on it.**
+  Everyone else is bound absolutely — a future second contributor has no way past a red
+  required check — and the owner is bound by default and by habit, not by mechanism.
+
+  This entry used to read `bypass_actors: []`, "no one — including repository admins —
+  bypasses these rules", written as the direct fix for commit `74e6b8f` (2026-07-02), a
+  direct-to-main push with no PR reference. That fix did its job and the maintainer's
+  former `pull_request`-only user bypass is still gone. What replaced it is broader and
+  deliberate, and the file said nothing about it for as long as it existed. The intent
+  behind `74e6b8f`'s fix is now carried by habit and by the six required checks rather
+  than by the absence of a bypass: when a required check goes red for a reason unrelated
+  to the change (a stale nightly is the likeliest), the way through is still to fix the
+  check — `gh workflow run nightly.yml --ref main` — and bypassing is a decision to make
+  out loud, not the path of least resistance.
+
+  **Never remove this actor to make a check pass.** It is the owner's stated requirement
+  in every repository in this portfolio. If `make ruleset-check` reports it as a
+  difference, the live ruleset lost it and needs it back; the file is not the thing to
+  edit. Changing the posture in either direction means amending `main.json` and the live
+  ruleset together and rewriting this note — and note that CI cannot see this field at
+  all (`--scope public`), so only a local `make ruleset-check` will ever tell you.

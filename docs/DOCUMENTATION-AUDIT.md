@@ -1,8 +1,10 @@
 # Documentation Audit
 
-Last reviewed: 2026-07-12. Base branch: `main`.
+Last reviewed: 2026-07-12. Base branch: `main`. **Counts corrected and put under a gate 2026-08-29.**
 
 This audit records the documentation sweep and remediation loop for this repository. It checks the docs as a system: entry points, root-level process and legal files, project scope, setup and validation notes, safety and privacy posture, architecture and planning docs, local links, and the places where code, tests, workflows, and docs meet.
+
+> **Correction (2026-08-29).** The counts in the Audit Results table below were typed by hand on 2026-07-12 and never re-read. "3 ADRs" was wrong when it was written — four already existed at this file's own commit (`8c00624`) — and by 2026-08-29 it was wrong by two. "33 Python/Node test files; 1 workflow file" had drifted to 48 and 3. "0 unresolved" links was a hand count over a tree that then grew three broken README anchors and a citation to a renamed ADR. The three figures below are now **derived from the tree by `tests/test_doc_figures.py`** and the link row is **enforced by `tests/test_doc_links.py`**, so this table fails a build rather than ageing quietly — the arrangement `docs/GAP-LEDGER.md` already uses for its own claims. They are live values, not as-of-the-review-date values; the "Last reviewed" stamp above governs the prose, not the numbers.
 
 ## Audit Results
 
@@ -10,10 +12,10 @@ This audit records the documentation sweep and remediation loop for this reposit
 | --- | --- | --- |
 | Entry docs | pass | `README.md` present |
 | Security/process docs | pass | CONTRIBUTING.md, SECURITY.md, CHANGELOG.md |
-| Architecture/planning docs | pass | 3 ADRs; canonical, research, and ideation roadmaps |
+| Architecture/planning docs | pass | 5 ADRs; canonical, research, and ideation roadmaps |
 | Safety/privacy/audit docs | pass | 9 safety/privacy/accessibility/audit docs |
-| Validation surface | pass | 33 Python/Node test files; 1 workflow file |
-| Local doc links | pass | All authored-doc relative links checked after rebase; 0 unresolved |
+| Validation surface | pass | 49 Python/Node test files; 3 workflow files |
+| Local doc links | pass | Every relative link, markdown anchor, and in-repo path citation checked on every run by `tests/test_doc_links.py`; 0 unresolved |
 
 ## Root-Level Documentation Audit
 
@@ -26,7 +28,7 @@ This section covers hand-authored documentation at the repository root and root-
 | Root legal, citation, and conduct docs | pass | Present: `LICENSE`, `NOTICE`, `CITATION.cff`, `CODE_OF_CONDUCT.md` |
 | Other root project docs | info | `DEFINITION_OF_DONE.md` |
 | Root-adjacent GitHub templates | pass | `.github/PULL_REQUEST_TEMPLATE.md`, `.github/CODEOWNERS` |
-| Root/template doc links | pass | 24 root-level/template links checked; 0 unresolved |
+| Root/template doc links | pass | Checked on every run by `tests/test_doc_links.py`, which reads every tracked file rather than a hand-picked 24; 0 unresolved |
 
 Root-level files checked:
 
@@ -70,12 +72,14 @@ Source and operations surfaces seen at the repo root:
 Workflow files checked:
 
 - `.github/workflows/ci.yml`
+- `.github/workflows/nightly.yml`
+- `.github/workflows/release.yml`
 
 ## Documentation Inventory
 
 | Category | Count | Representative files |
 | --- | ---: | --- |
-| architecture and interfaces | 3 | `docs/adr/0000-record-architecture-decisions.md`, `docs/adr/0001-single-maintainer-review-posture.md`, `docs/adr/0002-python-39-floor.md` |
+| architecture and interfaces | 5 | `docs/adr/0000-record-architecture-decisions.md`, `docs/adr/0001-single-maintainer-review-posture.md`, `docs/adr/0002-python-39-floor.md`, `docs/adr/0003-raw-levels-append-only-calibration.md`, `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md` |
 | entry points and repo process | 11 | `.github/CODEOWNERS`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/rulesets/README.md`, `CHANGELOG.md`, `CITATION.cff`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `LICENSE`, plus 3 more |
 | other docs | 6 | `DEFINITION_OF_DONE.md`, `docs/GAP-LEDGER.md`, `docs/I18N.md`, `docs/PROJECT-SCOPE.md`, `docs/README.md`, `pwa/README.md` |
 | planning and research | 8 | `docs/ROADMAP.md`, `docs/RESEARCH-ROADMAP.md`, `docs/USER-RESEARCH.md`, and 5 files under `docs/ideation/` |

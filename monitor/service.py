@@ -26,7 +26,7 @@ from monitor.capture import resilient_source
 from monitor.clock import ClockGuard
 from monitor.config import Config
 from monitor.detector import Detector, Event
-from monitor.features import classify, zero_crossing_rate
+from monitor.features import FeatureWindow, classify, zero_crossing_rate
 from monitor.health import CaptureStats, write_health
 from monitor.ipc import LocalIpcEmitter
 from monitor.level import dbfs
@@ -63,9 +63,12 @@ def run_pipeline(
         debounce_s=config.debounce_s,
     )
     # When tagging is on, keep (t, zcr) for recent frames so a closing event can be
-    # classified over its own time window. The buffer is pruned past each event's end,
-    # so it never holds more than one event's worth of frame features (numbers, no audio).
-    feats: list[tuple[float, float]] = []
+    # classified over its own time window. FeatureWindow.prune() is called once per
+    # frame against the detector's own open-event start, so the buffer holds at most one
+    # event's worth of frame features and is empty whenever no event is open (numbers,
+    # no audio). Pruning used to happen only when an event *closed*, which meant a quiet
+    # stretch never pruned at all -- see issue #63 and FeatureWindow's docstring.
+    feats = FeatureWindow()
     ambient = _AmbientSink(config, store, session_id)
 
     def finish(ev: Event) -> Event:
@@ -82,13 +85,18 @@ def run_pipeline(
         # the threshold and every persisted row are defined against the same raw scale.
         level = dbfs(frame)
         if config.tagging:
-            feats.append((t, zero_crossing_rate(frame)))
+            feats.append(t, zero_crossing_rate(frame))
         ambient.push(t, level)
         # `frame` is not referenced again; it is dropped on the next iteration.
         event = detector.push(t, level)
         if event is not None:
             yield finish(event)
-            feats = [f for f in feats if f[0] > event.end]
+        # Unconditionally, every frame: this is the line whose absence was the bug. A
+        # closing event is the rare path; a quiet night is the common one, and the
+        # common one is where an unpruned buffer grows. Runs after finish(), which needs
+        # the closing event's window intact.
+        if config.tagging:
+            feats.prune(detector.active_since)
     final = detector.flush()
     if final is not None:
         yield finish(final)
@@ -148,12 +156,12 @@ class _AmbientSink:
             self._store.add_minute_level(minute, session_id=self._session_id)
 
 
-def _attach_tag(event: Event, feats: list[tuple[float, float]]) -> Event:
+def _attach_tag(event: Event, feats: FeatureWindow) -> Event:
     """Classify an event by the mean zero-crossing rate over its time window."""
-    window = [z for (t, z) in feats if event.start <= t <= event.end]
-    if not window:
+    mean_zcr = feats.mean_over(event.start, event.end)
+    if mean_zcr is None:
         return event
-    return dataclasses.replace(event, coarse_tag=classify(sum(window) / len(window)))
+    return dataclasses.replace(event, coarse_tag=classify(mean_zcr))
 
 
 def _health_payload(
