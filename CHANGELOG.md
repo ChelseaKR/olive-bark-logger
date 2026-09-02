@@ -38,6 +38,17 @@ release" defect this file's absence let stand.
   the anchored one returns one. Both the binding/re-export form and the side-effect form
   (`import "./x.js";`) are recognised, multi-line import lists still match, and the
   pattern was duplicated in three places and is now one helper.
+- **The markdown link gate read a code span as a link.** `tests/test_doc_links.py`
+  matched `[...](...)` wherever those characters occurred, backticks included, where
+  Markdown renders no link at all. The changelog entry directly above quotes the regex
+  issue #68 was about; that quote contains a character class immediately followed by a
+  group, and the gate demanded the repository add a file named after the fragment. A
+  truthful sentence could not pass, and the cheap way out was to reword the document
+  rather than fix the check -- the same false-failure shape as the unanchored import
+  regex, in the gate rather than in the code. Code spans are now stripped before the
+  scan; stripping rather than skipping the line keeps the target of a code-labelled
+  link (``[`monitor/features.py`](../monitor/features.py)``, the house style here)
+  checked, and a canary pins both halves.
 
 - **The tagging feature buffer grew without limit through any quiet stretch**
   (issue #63). `run_pipeline` kept `(timestamp, zero-crossing-rate)` pairs so a closing

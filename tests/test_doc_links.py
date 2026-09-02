@@ -18,6 +18,11 @@ Two scanners, matching those two shapes:
 
 1. **Markdown links.** Every `[text](target)` in a tracked `.md` file: the file resolves,
    and if the target carries a `#fragment`, a heading in the destination slugifies to it.
+   Inline code spans are removed first (`md_link_targets`), because Markdown renders no
+   link inside backticks and this scanner read one there: a changelog entry quoting a
+   regex was told to add the file it "linked" to. Removing the span rather than skipping
+   the whole line keeps the target of a code-labelled link -- the house style here --
+   checked.
 2. **Bare in-repo paths.** Every `path/to/file.ext` mentioned in tracked Markdown, YAML,
    Python, or the Makefile resolves. This is the half that catches a stale citation in a
    comment, which is where the ADR rename hid.
@@ -66,6 +71,11 @@ BARE_PATH = re.compile(
 # label (`[`code`](x)` and `[GAP-A11Y-1](y)` both appear in this repo).
 MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 
+# An inline code span: a run of backticks, the shortest span closed by an equal run.
+# Markdown does not render links inside one, and neither does this scanner -- see
+# `md_link_targets`.
+CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)*?\1", re.DOTALL)
+
 # Targets that are not repository paths.
 EXTERNAL = re.compile(r"^(https?:|mailto:|#|\.\./STANDARDS)")
 
@@ -98,6 +108,24 @@ def scanned_files() -> list[Path]:
 
 def markdown_files() -> list[Path]:
     return [p for p in tracked_files() if p.suffix == ".md" and p.is_file()]
+
+
+def md_link_targets(line: str) -> list[str]:
+    """Link targets on one line of Markdown, ignoring anything inside a code span.
+
+    `MD_LINK` alone reads `[...](...)` wherever the characters occur, including inside
+    backticks -- where Markdown renders no link at all. That is not hypothetical: this
+    repository's own changelog quotes the regex an earlier defect used, which contains a
+    character class immediately followed by a group, and the scanner demanded a file be
+    added for it. A gate that a truthful sentence cannot pass is a false-failure trap,
+    the same shape as the unanchored import regex in issue #68 -- and worse here, because
+    the pressure it creates is to reword the document rather than fix the check.
+
+    Code spans are removed rather than skipped over, so a real link whose *label* is code
+    -- ``[`monitor/features.py`](../monitor/features.py)``, which this repository writes
+    often -- still has its target checked; only the label goes.
+    """
+    return MD_LINK.findall(CODE_SPAN.sub("", line))
 
 
 def slugify(heading: str) -> str:
@@ -148,7 +176,7 @@ def test_every_markdown_link_resolves_to_a_file():
     broken: list[str] = []
     for path in markdown_files():
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            for target in MD_LINK.findall(line):
+            for target in md_link_targets(line):
                 if EXTERNAL.match(target):
                     continue
                 dest = (path.parent / target.split("#")[0]).resolve()
@@ -164,7 +192,7 @@ def test_every_markdown_anchor_matches_a_real_heading():
     broken: list[str] = []
     for path in markdown_files():
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            for target in MD_LINK.findall(line):
+            for target in md_link_targets(line):
                 if EXTERNAL.match(target) or "#" not in target:
                     continue
                 file_part, _, fragment = target.partition("#")
@@ -178,6 +206,32 @@ def test_every_markdown_anchor_matches_a_real_heading():
         "markdown anchors that match no heading (GitHub silently lands the reader at the "
         "top of the file, so these look fine in a browser):\n" + "\n".join(broken)
     )
+
+
+def test_a_code_span_is_not_read_as_a_link_and_a_code_label_still_is():
+    """Both halves of `md_link_targets`, against the sentence that exposed the first.
+
+    The left column is text this repository actually writes. Before code spans were
+    stripped, the first row made `test_every_markdown_link_resolves_to_a_file` demand a
+    file named after a regex fragment -- a truthful changelog entry the gate could not
+    pass, whose only cheap fix was to reword the document. The last two rows are the
+    reason stripping is not the same as skipping the line: a link whose *label* is code
+    is the repository's house style, and its target must still be checked.
+    """
+    cases = [
+        (r'the pattern `/from\s+["\'](\./[^"\']+)["\']/g` matched the bare word', []),
+        ("`[GAP-A11Y-1](notes/nope.md)` is quoted, not linked", []),
+        (
+            "[`monitor/features.py`](../monitor/features.py) is a real link",
+            ["../monitor/features.py"],
+        ),
+        ("[plain](./a.md) and `code` and [second](./b.md)", ["./a.md", "./b.md"]),
+    ]
+    for line, expected in cases:
+        assert md_link_targets(line) == expected, line
+    # And the raw pattern still sees the quoted regex, so the difference is the stripping
+    # and not a line that happened to stop matching for some other reason.
+    assert MD_LINK.findall(cases[0][0])
 
 
 # --- 2. bare in-repo path citations resolve ------------------------------------------
