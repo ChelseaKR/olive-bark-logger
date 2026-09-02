@@ -136,6 +136,17 @@ release" defect this file's absence let stand.
   canary tests (against a synthetic fixture, not the real files) proving it actually
   fails on both a real omission and a decoy mention outside the array.
 
+### Security
+- **`pypdf` 6.15.0 -> 6.16.2 in `uv.lock`** (CVE-2026-84309, CVE-2026-84310,
+  CVE-2026-84311). The `pdf` extra pins `pypdf>=5,<7`, so no constraint changed; only
+  the locked version moved, past the 6.16.0/6.16.1 fix versions the advisories name.
+  Unlike the twelve entries in the Makefile's `PIP_AUDIT_WAIVERS`, this one is a real
+  runtime dependency of a shipped code path (`report/pdf_export.py` reads the generated
+  PDF's structure tree back out for `tests/test_pdf_export.py`), so it is fixed rather
+  than waived. CI's `Dependency audit` step -- which runs bare `pip-audit`, without the
+  Makefile's waivers -- went red on `main` and on every open branch the moment the
+  advisories published; this is the whole of that failure.
+
 ### Changed
 - **The live branch ruleset and the committed definition now match** (maintainer
   decision, 2026-08-21). Live `protect-main` was brought up to
