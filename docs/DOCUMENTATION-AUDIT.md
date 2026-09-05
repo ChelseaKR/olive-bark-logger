@@ -12,7 +12,7 @@ This audit records the documentation sweep and remediation loop for this reposit
 | --- | --- | --- |
 | Entry docs | pass | `README.md` present |
 | Security/process docs | pass | CONTRIBUTING.md, SECURITY.md, CHANGELOG.md |
-| Architecture/planning docs | pass | 5 ADRs; canonical, research, and ideation roadmaps |
+| Architecture/planning docs | pass | 30 ADRs; canonical, research, and ideation roadmaps |
 | Safety/privacy/audit docs | pass | 9 safety/privacy/accessibility/audit docs |
 | Validation surface | pass | 49 Python/Node test files; 3 workflow files |
 | Local doc links | pass | Every relative link, markdown anchor, and in-repo path citation checked on every run by `tests/test_doc_links.py`; 0 unresolved |
@@ -79,7 +79,7 @@ Workflow files checked:
 
 | Category | Count | Representative files |
 | --- | ---: | --- |
-| architecture and interfaces | 5 | `docs/adr/0000-record-architecture-decisions.md`, `docs/adr/0001-single-maintainer-review-posture.md`, `docs/adr/0002-python-39-floor.md`, `docs/adr/0003-raw-levels-append-only-calibration.md`, `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md` |
+| architecture and interfaces | 30 | `docs/adr/0000-record-architecture-decisions.md`, `docs/adr/0001-single-maintainer-review-posture.md`, `docs/adr/0002-python-39-floor.md`, `docs/adr/0003-raw-levels-append-only-calibration.md`, `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md`, plus the 25 records migrated out of `docs/ROADMAP.md` on 2026-09-05 (`0005`-`0029`) |
 | entry points and repo process | 11 | `.github/CODEOWNERS`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/rulesets/README.md`, `CHANGELOG.md`, `CITATION.cff`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `LICENSE`, plus 3 more |
 | other docs | 6 | `DEFINITION_OF_DONE.md`, `docs/GAP-LEDGER.md`, `docs/I18N.md`, `docs/PROJECT-SCOPE.md`, `docs/README.md`, `pwa/README.md` |
 | planning and research | 8 | `docs/ROADMAP.md`, `docs/RESEARCH-ROADMAP.md`, `docs/USER-RESEARCH.md`, and 5 files under `docs/ideation/` |
@@ -117,6 +117,33 @@ Full hand-authored doc inventory checked by this pass:
 - `docs/adr/0000-record-architecture-decisions.md`
 - `docs/adr/0001-single-maintainer-review-posture.md`
 - `docs/adr/0002-python-39-floor.md`
+- `docs/adr/0003-raw-levels-append-only-calibration.md`
+- `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md`
+- `docs/adr/0005-level-only-no-audio-persisted.md`
+- `docs/adr/0006-raspberry-pi-primary-pwa-alternative.md`
+- `docs/adr/0007-in-memory-frames-discarded-immediately.md`
+- `docs/adr/0008-mandatory-methodology-and-limitations.md`
+- `docs/adr/0009-zero-dependency-pure-python-core.md`
+- `docs/adr/0010-json-config-not-toml.md`
+- `docs/adr/0011-hand-rendered-inline-svg-charts.md`
+- `docs/adr/0012-fixed-utc-offset-bucketing.md`
+- `docs/adr/0013-structural-a11y-gate-as-the-floor.md`
+- `docs/adr/0014-type-check-under-310-semantics.md`
+- `docs/adr/0015-dst-safe-iana-time-zones.md`
+- `docs/adr/0016-frame-coverage-accounting.md`
+- `docs/adr/0017-clock-integrity-guard.md`
+- `docs/adr/0018-durability-and-lineage.md`
+- `docs/adr/0019-detection-parameter-provenance.md`
+- `docs/adr/0020-unattended-ops.md`
+- `docs/adr/0021-time-driven-heartbeat-and-crash-safe-counters.md`
+- `docs/adr/0022-runtime-egress-proof.md`
+- `docs/adr/0023-local-automation-hooks-over-af-unix.md`
+- `docs/adr/0024-opt-in-coarse-event-tagging.md`
+- `docs/adr/0025-bounded-per-event-envelope-stats.md`
+- `docs/adr/0026-pwa-as-a-parallel-implementation.md`
+- `docs/adr/0027-pwa-epoch-clock-and-background-proof-capture.md`
+- `docs/adr/0028-cross-implementation-conformance-harness.md`
+- `docs/adr/0029-static-status-page-local-ops-console.md`
 - `docs/audits/accessibility-2026-06-05.md`
 - `docs/audits/data-card.md`
 - `docs/audits/methodology-and-limitations.md`
