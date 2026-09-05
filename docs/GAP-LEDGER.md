@@ -1,6 +1,6 @@
 # Gap Ledger
 
-**Last verified: 2026-08-28 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+**Last verified: 2026-09-05 · Recheck cadence: every remediation pass (see `docs/audits/`).**
 
 > The stamp above read `2026-08-15` until 2026-08-29, while entries below carried updates
 > dated 2026-08-21, 2026-08-26 and 2026-08-27 — three remediation passes edited this file
@@ -158,8 +158,24 @@ reapply procedure: following it while the file said `[]` would itself have cause
 lockout, so the file is now checked as a thing that will be applied, not only as a
 description of what is live.
 
+**Closed 2026-09-05: both static-analysis halves.**
+- **zizmor** runs over `.github/workflows/` as `make workflows`, and CI runs the same
+  command as step 2c *inside* the already-required `verify` job. Deliberately not a new
+  required context: the 2026-08-26 entry above is about five required checks that could
+  not fail, and the lesson recorded then was that adding a context name is how such a
+  check gets in. Clean today, with 9 findings suppressed by `# zizmor: ignore[rule]`
+  comments that carry their reason on the same line.
+- **CodeQL `language: actions`** is `.github/workflows/codeql.yml`. This one cannot live
+  inside `verify`: it uploads SARIF to code scanning, which needs its own workflow and
+  `security-events: write`. So it *is* a new context, and the required-check list has to
+  be revisited deliberately rather than inherited by accident. Python analysis is
+  deliberately not enabled yet: the runtime core is stdlib-only, so the workflow surface
+  is where an injected expression or an unpinned action would actually reach a token, and
+  adding `python` later is one matrix entry.
+
 **Still open:**
-- No zizmor workflow-linter step; no CodeQL `language: actions` workflow.
+- The required-check list has not been revisited to decide whether `codeql (actions)`
+  should be required (REMEDIATION.md P1-6).
 
 Plan: REMEDIATION.md P0-2 (now a reconciliation, not an activation), P1-2, P1-6
 (revisit required-check list after these land).

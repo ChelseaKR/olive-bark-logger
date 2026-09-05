@@ -6,7 +6,7 @@ RUFF ?= .venv/bin/ruff
 MYPY ?= .venv/bin/mypy
 UV ?= uv
 
-.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check nightly-check verify clean
+.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check nightly-check verify clean workflows
 
 help:
 	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check nightly-check verify clean"
@@ -138,6 +138,22 @@ i18n:
 	@grep -Eq '^Reason: .+' docs/I18N.md || { echo "docs/I18N.md missing a non-empty 'Reason:' line"; exit 1; }
 	@echo "i18n: N/A declaration present."
 
+# Static analysis of the workflows themselves (GAP-CICD-1). zizmor reads .github/
+# workflows/ for the mistakes a linter can see and a reviewer stops seeing: an
+# expression interpolated into a run block, a token wider than the job needs, an
+# action pinned to a tag rather than a commit. Offline mode is the default and is
+# what CI runs, so the local and remote answers match without a token.
+#
+# Part of `verify`, and NOT a new required status check. Five required checks that
+# could not fail were removed from this repository on 2026-08-26, and the lesson
+# recorded then was that adding a context name is how such a check gets in. This one
+# runs inside the gate that already exists.
+#
+# Suppressions live in the workflows as `# zizmor: ignore[rule]` comments with a
+# reason on the same line, so a suppression is reviewable where it applies.
+workflows:
+	uvx --from zizmor==1.29.0 zizmor --format=plain .github/workflows/
+
 # Diff the LIVE branch ruleset on main against .github/rulesets/main.json. Exits 1 on any
 # difference and 2 ("CANNOT VERIFY") when gh is missing, unauthenticated, or the API
 # errors — never 0 without having read the live configuration. Deliberately NOT part of
@@ -156,7 +172,7 @@ ruleset-check:
 nightly-check:
 	$(PY) scripts/check_nightly_macos.py
 
-verify: lint type cov security a11y pwa-test i18n
+verify: lint type cov security a11y pwa-test i18n workflows
 	@echo "All local gates passed."
 	@echo "Note: 'make ruleset-check' and 'make nightly-check' are separate (they need"
 	@echo "network + gh auth). CI runs both inside the required 'verify' job; locally"

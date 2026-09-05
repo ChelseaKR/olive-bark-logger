@@ -53,6 +53,29 @@ GOOD_RUN = {
     "html_url": "https://github.com/ChelseaKR/olive-bark-logger/actions/runs/32938452292",
 }
 
+
+def fresh_run(**overrides: object) -> dict:
+    """`GOOD_RUN`, but recent as of whenever the suite runs.
+
+    The `assess` tests below pass an explicit `NOW`, so they are deterministic and pin
+    the freshness logic exactly. The end-to-end tests call `main()`, which reads the
+    real clock, and against a fixture dated 2026-08-26 they aged out of the 168-hour
+    window on 2026-09-02 and stayed red: the pass-path test failed, and the
+    failure-path test went on passing for the wrong reason, because the staleness
+    message names the same remedy the no-macOS-jobs message does.
+
+    A fixture with a date in it is a test with an expiry date on it. This one carries a
+    recency instead, which is the property the check actually reads.
+    """
+    started = datetime.now(timezone.utc) - timedelta(hours=1)
+    return {
+        **GOOD_RUN,
+        "run_started_at": started.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "updated_at": (started + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        **overrides,
+    }
+
+
 # Its five jobs, as the jobs endpoint returned them. `labels` is the load-bearing field.
 GOOD_JOBS = [
     {
@@ -199,7 +222,7 @@ def test_the_pass_message_states_what_it_does_not_cover(monkeypatch, capsys):
     it has to say so on the passing path, where nobody is looking for caveats."""
     import check_nightly_macos
 
-    monkeypatch.setattr(check_nightly_macos, "latest_completed_run", lambda *_a, **_k: GOOD_RUN)
+    monkeypatch.setattr(check_nightly_macos, "latest_completed_run", lambda *_a, **_k: fresh_run())
     monkeypatch.setattr(check_nightly_macos, "macos_jobs", lambda *_a, **_k: GOOD_JOBS)
     rc = nightly_main([])
     out = capsys.readouterr().out
@@ -211,7 +234,7 @@ def test_the_pass_message_states_what_it_does_not_cover(monkeypatch, capsys):
 def test_the_failure_message_names_the_remedy(monkeypatch, capsys):
     import check_nightly_macos
 
-    monkeypatch.setattr(check_nightly_macos, "latest_completed_run", lambda *_a, **_k: GOOD_RUN)
+    monkeypatch.setattr(check_nightly_macos, "latest_completed_run", lambda *_a, **_k: fresh_run())
     monkeypatch.setattr(check_nightly_macos, "macos_jobs", lambda *_a, **_k: [])
     rc = nightly_main([])
     out = capsys.readouterr().out

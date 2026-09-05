@@ -1,0 +1,55 @@
+# CodeQL over the workflows themselves.
+#
+# GAP-CICD-1 named two static-analysis gaps: no zizmor step, and no CodeQL
+# `language: actions` workflow. zizmor now runs inside the already-required `verify`
+# job, because adding a new required context is how a placeholder gate got in here
+# once already (see the 2026-08-26 entry in docs/GAP-LEDGER.md). CodeQL cannot run
+# that way: it needs its own workflow to upload SARIF to code scanning, so this is a
+# new context and the required-check list has to be revisited deliberately rather
+# than by accident. GAP-CICD-1 records that as the follow-up.
+#
+# `language: actions` only. The Python analysis is a separate question with a
+# separate cost, and this repository's runtime core is stdlib-only, so the workflow
+# surface is where an injected expression or an unpinned third-party action would
+# actually reach a token. Adding python here later is one matrix entry.
+#
+# Actions are pinned to the full 40-char commit SHA of their tag, matching every
+# other workflow in this repository.
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, offset from the nightly macOS sweep so a red morning has one cause.
+    - cron: "17 6 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: codeql (actions)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28  # v4.37.8
+        with:
+          languages: actions
+      - uses: github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28  # v4.37.8
+        with:
+          category: "/language:actions"

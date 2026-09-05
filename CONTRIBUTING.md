@@ -55,9 +55,11 @@ make verify     # lint, type-check, coverage (>=85%), security, a11y, PWA tests,
 This is the authoritative statement of how `make verify` and CI differ; `.github/workflows/ci.yml`
 and the rest of this file point here rather than restating it.
 
-`make verify` runs seven targets: `lint type cov security a11y pwa-test i18n`. CI invokes
-**four** of them as the Makefile target itself, so those cannot drift: `make lint`,
-`make type`, `make i18n`, `make pwa-test`. The other **three** run as separate CI steps:
+`make verify` runs eight targets: `lint type cov security a11y pwa-test i18n workflows`.
+CI invokes
+**five** of them as the Makefile target itself, so those cannot drift: `make lint`,
+`make type`, `make i18n`, `make pwa-test`, `make workflows`. The other **three** run as
+separate CI steps:
 
 | Target | How CI runs it instead | Why |
 | --- | --- | --- |
@@ -71,7 +73,7 @@ and the two self-checks (`scripts/check_ruleset.py`, `scripts/check_nightly_maco
 `make ruleset-check` / `make nightly-check` run locally only on demand, because they need
 network and `gh` auth.
 
-`tests/test_doc_figures.py` derives that four/three split from `ci.yml` and the `Makefile`,
+`tests/test_doc_figures.py` derives that five/three split from `ci.yml` and the `Makefile`,
 so this table fails a build if either side changes. It previously said there was "the one
 place" the two disagree and pointed at `docs/GAP-LEDGER.md#gap-cicd-1`, an entry about the
 branch ruleset that never mentions parity.
