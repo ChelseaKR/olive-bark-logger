@@ -17,6 +17,7 @@ jobs:
   # (since 2026-08-26) the integrity of the merge gate itself — see steps 9a/9b.
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       # Step 9b reads the nightly workflow's runs and their jobs. `administration` is
@@ -41,6 +42,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
+          cache: 'pip'
           python-version: "3.12"
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
@@ -189,6 +191,7 @@ jobs:
         os: [ubuntu-latest]
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       # 0. egress monitoring (SEC-04), audit mode — see the `verify` job's identical
       #    step above for why this isn't block mode yet.

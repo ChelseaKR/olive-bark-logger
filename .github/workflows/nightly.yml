@@ -39,6 +39,7 @@ jobs:
         os: [macos-latest]
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       # harden-runner (SEC-04) is deliberately absent: it does not support macOS
       # runners (Linux-only network interception) — see ci.yml's audit-mode notes.
