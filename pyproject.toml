@@ -50,6 +50,11 @@ dev = [
     "bandit>=1.8",
     "pip-audit>=2.7",
     "tzdata>=2025.2",
+    # The runner for the committed `.pre-commit-config.yaml` hook set. In the dev group,
+    # not a separate `pip install`, because the lock is this repo's single dependency
+    # snapshot and `make hooks` (a `make verify` prerequisite) and CI both run it from
+    # `.venv` — see CONTRIBUTING.md's "Local/CI parity" section.
+    "pre-commit>=3.5",
 ]
 
 [project.scripts]

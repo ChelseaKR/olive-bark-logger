@@ -1,6 +1,6 @@
 # Gap Ledger
 
-**Last verified: 2026-08-28 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+**Last verified: 2026-09-05 · Recheck cadence: every remediation pass (see `docs/audits/`).**
 
 > The stamp above read `2026-08-15` until 2026-08-29, while entries below carried updates
 > dated 2026-08-21, 2026-08-26 and 2026-08-27 — three remediation passes edited this file
@@ -40,8 +40,8 @@ that document's section headers).
 Plan: REMEDIATION.md P2-3.
 
 ## GAP-CQ-1 — Code Quality: Python floor, pre-commit hook wiring, src/ layout, hatchling
-**Status: Partially open (updated 2026-07-14).** Controls: CQ-01, CQ-10, CQ-12 (mechanism
-added, not yet wired to CI as a required gate), CQ-13/CQ-23, CQ-27 (closed this pass).
+**Status: Partially open (updated 2026-09-05).** Controls: CQ-01, CQ-10, CQ-12 (**closed
+2026-09-05**), CQ-13/CQ-23, CQ-27 (closed 2026-07-14).
 - `docs/adr/0002-python-39-floor.md` records the floor decision (option (b): keep 3.9,
   ADR on file) — this makes the *declaration* honest but the standard's floor is still
   ≥3.12, so this remains a tracked, accepted divergence, not a pass.
@@ -49,8 +49,22 @@ added, not yet wired to CI as a required gate), CQ-13/CQ-23, CQ-27 (closed this 
   reproducible (CQ-09, SEC-13). The Pi deploy remains source-based because the runtime
   has zero mandatory dependencies; pinning the optional live-capture stack is still
   tracked under CQ-28 (`scripts/setup-pi.sh:19`).
-- `.pre-commit-config.yaml` now exists (this pass) but is opt-in until a CI job asserts
-  hooks are current, or until the ruleset in `.github/rulesets/main.json` is applied.
+- **CQ-12 — the pre-commit hook wiring — closed 2026-09-05.** `make hooks` runs the
+  committed `.pre-commit-config.yaml` over every tracked file, is a prerequisite of
+  `make verify`, and is a step in the required `verify` CI job, so the hooks now gate
+  what merges rather than only the clones that had run `pre-commit install`.
+
+  > The entry previously read: "`.pre-commit-config.yaml` now exists (this pass) but is
+  > opt-in until a CI job asserts hooks are current, or until the ruleset in
+  > `.github/rulesets/main.json` is applied." That was true for seven weeks and the
+  > config gated nothing in that time.
+
+  Two of the config's hooks are named as *not* run by that gate rather than left to look
+  covered, in the `Makefile`'s `hooks` recipe and CONTRIBUTING.md: gitleaks, whose entry
+  is `gitleaks protect --staged` and would pass without reading a byte in a checkout that
+  stages nothing (the real scan is `make security` locally and `gitleaks-action` over the
+  whole commit range in CI), and mypy, which the config stages at pre-push and which is
+  bare `mypy` on this repo's configuration — that is `make type`, already in both gates.
 - Flat `monitor/`/`store`/`report/` layout, not `src/` (CQ-23) — no ADR yet either way.
 - setuptools build backend, not hatchling (CQ-10).
 Plan: REMEDIATION.md P1-3, P1-5, P2-4, P3.
