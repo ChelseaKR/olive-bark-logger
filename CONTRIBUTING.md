@@ -97,7 +97,7 @@ CI invokes
 | Target | How CI runs it instead | Why |
 | --- | --- | --- |
 | `cov` | `pytest --cov --cov-fail-under=85` in the `test-matrix` job | Same flags and the same 85% floor, run once per supported Python (3.9–3.13) rather than once locally. |
-| `security` | `bandit` and `pip-audit` as steps, plus `gitleaks-action` | The Makefile's `security` expects a `gitleaks` CLI on `PATH`; CI runs gitleaks as a container action, so the target cannot be called as-is. |
+| `security` | `bandit` and `pip-audit` as steps, plus `gitleaks-action` | The Makefile's `security` expects a `gitleaks` CLI on `PATH`; CI runs gitleaks as a container action, so the target cannot be called as-is. **The two `pip-audit` runs are not the same command:** the Makefile passes `PIP_AUDIT_WAIVERS`, CI passes nothing. The waivers exist because this repo's dev venv targets the documented `>=3.9` floor and no fix version for those advisories installs under 3.9; CI runs 3.12, where `uv.lock` resolves the fixed versions, so CI is *fixed, not waived* and is deliberately the stricter of the two. That means a green `make verify` does not by itself predict a green CI here. Reproduce CI's exact run locally with `make security PIP_AUDIT_WAIVERS=` — on a 3.9 venv it currently reports 12 advisories in the dev toolchain, which is the divergence, not a regression. |
 | `a11y` | `scripts/demo_report.py`, then `pa11y` on `report.html` and again on `pwa/index.html` | CI additionally scans the PWA page, and excludes axe's `color-contrast` rule on the report (axe cannot resolve SVG `<text>` backgrounds; `tests/test_svg_contrast.py` is the merge-blocking replacement). `ci.yml`'s own comments carry the detail. |
 
 Beyond `verify`, CI also runs things no local target does at all: the OS × Python

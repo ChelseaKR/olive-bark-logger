@@ -127,6 +127,17 @@ jobs:
       #    parity statement"; the word parity appears in neither.)
       - name: SAST (bandit)
         run: .venv/bin/bandit -q -r monitor store report
+      #    The dependency audit is deliberately NOT `make security`'s command. That target
+      #    passes `PIP_AUDIT_WAIVERS`; this passes nothing, so CI is the stricter of the
+      #    two. The waivers exist because the local dev venv targets the documented >=3.9
+      #    floor (CQ-01) and no fix version for those advisories installs under 3.9, while
+      #    this job runs 3.12 where uv.lock resolves the fixed versions -- fixed, not
+      #    waived. Keeping the waivers out of here is what stops a 3.9-only accommodation
+      #    from silently becoming CI's policy. The consequence -- a green `make verify`
+      #    does not by itself predict a green run here -- is stated in CONTRIBUTING.md's
+      #    Local/CI parity table, and `tests/test_doc_figures.py` fails if the two
+      #    commands diverge without that table saying so. `make security
+      #    PIP_AUDIT_WAIVERS=` reproduces this step locally.
       - name: Dependency audit
         run: .venv/bin/pip-audit
       - name: Secret scan (gitleaks)
