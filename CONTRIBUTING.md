@@ -35,6 +35,34 @@ single dependency snapshot used by local, CI, and release verification. One tool
   pytest gate is the enforced floor for the tagged-PDF export (EXP-06). See
   `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md`.
 
+### Git hooks (`.pre-commit-config.yaml`)
+`pre-commit` itself comes from the `dev` group, so `make dev` installs it. Installing the
+hooks into your clone is optional and recommended, not the enforcement mechanism:
+
+```bash
+.venv/bin/pre-commit install                      # fast commit-time checks
+.venv/bin/pre-commit install --hook-type pre-push # strict mypy before push
+```
+
+The enforcement mechanism is `make hooks`, which runs the same committed config over
+**every tracked file** and is a prerequisite of `make verify` and a step in CI. Until
+2026-09-05 nothing ran that config anywhere, so the whitespace, end-of-file, YAML-syntax,
+line-ending and large-file hooks gated only the clones that had opted in
+([GAP-CQ-1](./docs/GAP-LEDGER.md#gap-cq-1--code-quality-python-floor-pre-commit-hook-wiring-src-layout-hatchling)).
+
+Two of the config's hooks do **not** run under `make hooks`, and the `hooks` recipe in
+the `Makefile` is the single place that says so:
+
+- **gitleaks** is skipped (`SKIP=gitleaks`). Its upstream entry is `gitleaks protect
+  --staged`, which reads the *staged* diff — empty under `--all-files` and empty in a CI
+  checkout, so it would report success without scanning anything. Secrets are scanned for
+  real by `make security` (`gitleaks detect`) locally and by `gitleaks-action` over the
+  PR's whole commit range in CI. Installing the commit-time hook is still worth doing: at
+  commit time there *is* a staged diff for it to read.
+- **mypy** is `stages: [pre-push]`, so it does not run at the commit stage `make hooks`
+  uses. It is bare `mypy` against this repo's own configuration — exactly what `make type`
+  runs, from the locked mypy rather than a second, unpinned copy.
+
 ### The optional `pdf` extra (tagged PDF/A export, EXP-06)
 `pip install -e '.[pdf]'` adds `weasyprint` (and `pypdf`, used only by
 `tests/test_pdf_export.py` to read the generated structure tree back out). This
@@ -48,16 +76,17 @@ itself cleanly (`pytest.importorskip`) when the extra isn't installed.
 ## Workflow
 ```bash
 make dev        # one-time setup
-make verify     # lint, type-check, coverage (>=85%), security, a11y, PWA tests, i18n gate
+make verify     # lint, pre-commit hooks, type-check, coverage (>=85%), security, a11y, PWA tests, i18n gate
 ```
 ### Local/CI parity
 
 This is the authoritative statement of how `make verify` and CI differ; `.github/workflows/ci.yml`
 and the rest of this file point here rather than restating it.
 
-`make verify` runs seven targets: `lint type cov security a11y pwa-test i18n`. CI invokes
-**four** of them as the Makefile target itself, so those cannot drift: `make lint`,
-`make type`, `make i18n`, `make pwa-test`. The other **three** run as separate CI steps:
+`make verify` runs eight targets: `lint hooks type cov security a11y pwa-test i18n`. CI invokes
+**five** of them as the Makefile target itself, so those cannot drift: `make lint`,
+`make hooks`, `make type`, `make i18n`, `make pwa-test`. The other **three** run as separate
+CI steps:
 
 | Target | How CI runs it instead | Why |
 | --- | --- | --- |

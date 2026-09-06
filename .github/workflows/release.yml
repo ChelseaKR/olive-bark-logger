@@ -51,6 +51,7 @@ jobs:
     name: re-verify at tagged commit (make verify)
     needs: authorize
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
         with:
@@ -94,6 +95,7 @@ jobs:
     name: build sdist/wheel · SBOM · provenance
     needs: [authorize, verify-at-tag]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write       # keyless OIDC identity for build provenance attestation
@@ -176,6 +178,7 @@ jobs:
   publish-release:
     needs: [authorize, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:

@@ -4,12 +4,13 @@
 PY ?= .venv/bin/python
 RUFF ?= .venv/bin/ruff
 MYPY ?= .venv/bin/mypy
+PRECOMMIT ?= .venv/bin/pre-commit
 UV ?= uv
 
-.PHONY: help venv dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check nightly-check verify clean
+.PHONY: help venv dev fmt lint hooks type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check nightly-check verify clean
 
 help:
-	@echo "Targets: dev fmt lint type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check nightly-check verify clean"
+	@echo "Targets: dev fmt lint hooks type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check nightly-check verify clean"
 
 venv:
 	@command -v $(UV) >/dev/null 2>&1 || { echo "uv not installed — see CONTRIBUTING.md#prerequisites"; exit 1; }
@@ -24,6 +25,28 @@ fmt:
 lint:
 	$(RUFF) check monitor store report tests scripts
 	$(RUFF) format --check monitor store report tests scripts
+
+# The committed pre-commit hook set (.pre-commit-config.yaml, CQ-12) run over every
+# tracked file, not just the staged ones. That file has existed since 2026-07-14 and
+# enforced nothing: the hooks fired only for a developer who had run `pre-commit
+# install`, so end-of-file, trailing-whitespace, YAML-syntax, line-ending and
+# large-file breakage could merge untouched. CI's `verify` job runs this same target,
+# so local and CI cannot drift (CICD-27); see CONTRIBUTING.md's "Local/CI parity".
+#
+# SKIP names exactly one hook and is set here, in the single place both callers read,
+# so neither can claim more than it runs. gitleaks' upstream hook entry is `gitleaks
+# protect --staged`: it reads the staged diff, which is empty under `--all-files` and
+# empty in a CI checkout, so it would report success without scanning a byte -- the
+# always-green-check defect this repo has already removed twice (see
+# .github/rulesets/README.md). Secrets are scanned for real by the `security` target's
+# `gitleaks detect` here and by gitleaks-action in CI, over the whole commit range.
+#
+# The config's mypy hook is `stages: [pre-push]`, so it does not run at this stage
+# either. It is bare `mypy` against this repo's own configuration -- exactly what
+# the `type` target below runs, from the locked mypy rather than a second, unpinned copy.
+hooks:
+	@$(PY) -m pip show pre-commit >/dev/null 2>&1 || { echo "pre-commit not installed — run 'make dev' (dependency-groups: dev)"; exit 1; }
+	SKIP=gitleaks $(PRECOMMIT) run --all-files --show-diff-on-failure
 
 type:
 	$(MYPY)
@@ -156,7 +179,7 @@ ruleset-check:
 nightly-check:
 	$(PY) scripts/check_nightly_macos.py
 
-verify: lint type cov security a11y pwa-test i18n
+verify: lint hooks type cov security a11y pwa-test i18n
 	@echo "All local gates passed."
 	@echo "Note: 'make ruleset-check' and 'make nightly-check' are separate (they need"
 	@echo "network + gh auth). CI runs both inside the required 'verify' job; locally"

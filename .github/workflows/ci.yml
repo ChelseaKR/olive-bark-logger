@@ -17,6 +17,7 @@ jobs:
   # (since 2026-08-26) the integrity of the merge gate itself — see steps 9a/9b.
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       # Step 9b reads the nightly workflow's runs and their jobs. `administration` is
@@ -55,6 +56,23 @@ jobs:
       #    as `make lint` (CICD-27: no more local/CI drift on this gate).
       - name: Lint & format
         run: make lint
+
+      # 1b. the committed pre-commit hook set — via `make hooks`, for the same parity
+      #     reason as step 1, and because the one hook that is skipped is named there
+      #     rather than in two places. `.pre-commit-config.yaml` has been in the tree
+      #     since 2026-07-14 and was enforced nowhere: it ran only for a developer who
+      #     had run `pre-commit install`, so its end-of-file, trailing-whitespace,
+      #     YAML-syntax, line-ending and large-file hooks gated nothing that merged
+      #     (GAP-CQ-1 / CQ-12). This runs them against every tracked file.
+      #
+      #     Not covered by this step, deliberately, and said out loud rather than left
+      #     to look covered: the gitleaks hook (its entry is `gitleaks protect
+      #     --staged`, and a CI checkout stages nothing, so it would pass without
+      #     reading a byte — see the Makefile, which is where the SKIP lives) and the
+      #     pre-push-staged mypy hook (bare `mypy` on this repo's config, which is
+      #     step 2 below). The real secret scan is gitleaks-action in step 4.
+      - name: Pre-commit hooks
+        run: make hooks
 
       # 2. type-check (strict) — via `make type` (same parity rationale).
       - name: Type-check
@@ -189,6 +207,7 @@ jobs:
         os: [ubuntu-latest]
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       # 0. egress monitoring (SEC-04), audit mode — see the `verify` job's identical
       #    step above for why this isn't block mode yet.
