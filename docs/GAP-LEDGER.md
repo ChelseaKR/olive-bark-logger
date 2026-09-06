@@ -223,20 +223,33 @@ Plan: implement the PyPI/GHCR/cosign slice when ready to cut `v0.1.0` and a regi
 decision has actually been made.
 
 ## GAP-DOC-1 — Documentation: vendor `/STANDARDS` as a pinned submodule, finish the ADR migration
-**Status: Partially open (2026-07-05).** Controls: DOC-01, DOC-02, DOC-03, DOC-04
-(scaffold landed this pass), DOC-05.
-- `docs/adr/` now exists with a MADR-style template and two real ADRs
-  (`0001-single-maintainer-review-posture.md`, `0002-python-39-floor.md`) — new
-  expensive-to-reverse decisions get a numbered file from here forward. The 13
-  decisions already embedded in `docs/ROADMAP.md` have **not** been mechanically
-  migrated into individual files yet.
+**Status: Partially open (2026-09-05).** Controls: DOC-01, DOC-02, DOC-03, DOC-04
+(closed 2026-09-05), DOC-05.
+
+> Until 2026-09-05 this entry read: "The 13 decisions already embedded in
+> `docs/ROADMAP.md` have **not** been mechanically migrated into individual files yet."
+> By then the roadmap held 25 of them, not 13 — the entry's own figure had aged along
+> with the gap it described.
+
+- **DOC-04 is closed.** The ADR migration is done: the 25 decisions embedded in
+  `docs/ROADMAP.md` §6 and §8 are now numbered, append-only records
+  (`0005`–`0029`) under `docs/adr/`, and those sections carry an index pointing at them
+  instead of a second copy of the prose. `tests/test_doc_figures.py` holds both halves —
+  the ADR count this ledger's sibling audit states, and the fact that every migrated ADR
+  is reachable from the roadmap's index.
+  The migration surfaced one live contradiction: §6 still stated fixed UTC-offset
+  bucketing (`tz_offset_hours`) as the decision in force, months after §8 replaced it
+  with DST-safe IANA zones and after the field itself left the codebase. It is now
+  ADR-0012, `Superseded by` ADR-0015, which is what an append-only record does that an
+  edited roadmap section did not.
 - DOC-01/02/03 (vendor `/STANDARDS` as a submodule pinned to a released tag, with CI
-  asserting a non-`heads/` ref and `git diff --exit-code`) is blocked on a
-  **portfolio-level prerequisite**: the `STANDARDS` repo has not published any version
-  tags yet. This repo's README links `../STANDARDS/` as a sibling path, which only
-  resolves inside the local portfolio checkout — that caveat stands until the
-  standards repo itself is tagged and this repo can point a submodule at a tag instead
-  of a branch head.
+  asserting a non-`heads/` ref and `git diff --exit-code`) is **still open**, and is what
+  keeps this entry from closing.
+  It is blocked on a **portfolio-level prerequisite**: the `STANDARDS` repo has not
+  published any version tags yet. This repo's README links `../STANDARDS/` as a sibling
+  path, which only resolves inside the local portfolio checkout — that caveat stands
+  until the standards repo itself is tagged and this repo can point a submodule at a tag
+  instead of a branch head.
 Plan: REMEDIATION.md P2-4.
 
 ## GAP-RTF-1 — Responsible-Tech Framework: per-section sign-off dates

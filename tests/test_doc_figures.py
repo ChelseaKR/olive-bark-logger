@@ -121,6 +121,34 @@ def test_the_adr_count_in_the_documentation_audit_is_current():
     )
 
 
+def test_every_migrated_adr_is_indexed_by_the_roadmap():
+    """The other half of the ADR migration's drift risk.
+
+    GAP-DOC-1 moved the decisions embedded in `docs/ROADMAP.md` into numbered files and
+    left index tables behind pointing at them. A hand-maintained index is the same shape
+    as every count in this file -- true the day it is typed, silently short after the next
+    addition -- and `tests/test_doc_links.py` only catches the direction where the index
+    names a file that is not there. This catches the direction that matters more: a
+    migrated ADR that no index row reaches, which is a decision the roadmap has stopped
+    mentioning at all.
+
+    Scoped by the ADRs' own `Migrated:` line rather than by a number range, so an ADR
+    written from scratch later (0001-0004 were) is not required to appear there.
+    """
+    roadmap = _text(ROOT / "docs" / "ROADMAP.md")
+    migrated = [
+        p
+        for p in sorted((ROOT / "docs" / "adr").glob("*.md"))
+        if re.search(r"\*\*Migrated:\*\*[^\n]*docs/ROADMAP\.md", _text(p))
+    ]
+    assert migrated, "no ADR records being migrated from docs/ROADMAP.md -- check the marker"
+    missing = [p.name for p in migrated if p.name not in roadmap]
+    assert not missing, (
+        f"ADRs migrated out of docs/ROADMAP.md that no index row there links: {missing}. "
+        "Add a row to the 'ADRs added during build' or 'Productionization ADRs' table."
+    )
+
+
 def test_the_validation_surface_counts_are_current():
     """Stated in two documents. Both are read, so correcting one and not the other fails."""
     pattern = re.compile(r"(\d+) Python/Node test files[;,] (?:and )?(\d+) workflow files?")
