@@ -12,9 +12,9 @@ This audit records the documentation sweep and remediation loop for this reposit
 | --- | --- | --- |
 | Entry docs | pass | `README.md` present |
 | Security/process docs | pass | CONTRIBUTING.md, SECURITY.md, CHANGELOG.md |
-| Architecture/planning docs | pass | 30 ADRs; canonical, research, and ideation roadmaps |
+| Architecture/planning docs | pass | 31 ADRs; canonical, research, and ideation roadmaps |
 | Safety/privacy/audit docs | pass | 9 safety/privacy/accessibility/audit docs |
-| Validation surface | pass | 51 Python/Node test files; 6 workflow files |
+| Validation surface | pass | 52 Python/Node test files; 6 workflow files |
 | Local doc links | pass | Every relative link, markdown anchor, and in-repo path citation checked on every run by `tests/test_doc_links.py`; 0 unresolved |
 
 ## Root-Level Documentation Audit
