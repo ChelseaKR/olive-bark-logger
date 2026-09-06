@@ -18,6 +18,16 @@ assertions hold in CI without network or a token. The live question is answered 
 Written the way the gate tests in this repo are written: not only "it passes on a good
 run", but a case for every way it must go red -- including the one that matters most,
 a sweep whose jobs did not run on macOS at all.
+
+Every test here pins `now` explicitly, because a fixture carries a calendar date and the
+check asks how old it is. When `main()` read the real clock instead, these payloads --
+dated 2026-08-26 -- aged out of the 168-hour freshness window on 2026-09-02, and the
+nightly went red on a date rather than on a commit. `NOW` below is the clock these
+fixtures were captured against, so their age is a fixed 15.5 hours forever.
+
+`test_the_default_clock_is_the_real_one` is the counterweight: freezing time in every
+test would let the production default rot into a constant unnoticed, so exactly one test
+exercises the un-injected path, with a fixture built relative to the real clock.
 """
 
 from __future__ import annotations
@@ -38,6 +48,9 @@ from check_nightly_macos import (
 from check_nightly_macos import main as nightly_main
 from check_ruleset import CANNOT_VERIFY, CannotVerify
 
+# The clock the fixtures below were captured against: 2026-08-26, ~15.5h after the
+# nightly run they describe finished. Passed to every `assess` and `main` call here, so
+# the suite's answer does not depend on the day it runs.
 NOW = datetime(2026, 8, 26, 22, 0, tzinfo=timezone.utc)
 
 # nightly.yml run 32938452292 on main, trimmed to the fields the check reads.
@@ -52,6 +65,17 @@ GOOD_RUN = {
     "updated_at": "2026-08-26T06:31:23Z",
     "html_url": "https://github.com/ChelseaKR/olive-bark-logger/actions/runs/32938452292",
 }
+
+
+def run_aged(age: timedelta) -> dict:
+    """`GOOD_RUN`, but finished `age` ago as measured by the real clock.
+
+    Only for the one test that deliberately does not inject `now`. Everywhere else the
+    frozen `NOW` is better: it pins the arithmetic instead of restating it.
+    """
+    finished = datetime.now(timezone.utc) - age
+    return {**GOOD_RUN, "updated_at": finished.strftime("%Y-%m-%dT%H:%M:%SZ")}
+
 
 # Its five jobs, as the jobs endpoint returned them. `labels` is the load-bearing field.
 GOOD_JOBS = [
@@ -89,6 +113,28 @@ def test_the_echo_that_used_to_satisfy_five_required_checks_does_not_pass_this_o
     problems = "\n".join(assess(GOOD_RUN, macos, NOW))
     assert "0 job(s)" in problems
     assert f"at least {MIN_MACOS_JOBS}" in problems
+
+
+def test_macos_jobs_is_what_filters_an_ubuntu_runner_out(monkeypatch):
+    """The test above states the contract but re-implements the filter in its own body, so
+    it holds even if `_ran_on_macos` waves everything through. This drives the real
+    `macos_jobs` over a mixed payload instead: the check's entire claim rests on that
+    label test, and nothing was exercising it.
+
+    Found by sabotage -- `_ran_on_macos` was stubbed to `return True` and the whole suite
+    stayed green.
+    """
+    import check_nightly_macos
+
+    monkeypatch.setattr(
+        check_nightly_macos,
+        "run_gh",
+        lambda _args: {"jobs": [*PLACEHOLDER_JOBS, *GOOD_JOBS]},
+    )
+    kept = macos_jobs(1, "owner/repo")
+    assert [job["name"] for job in kept] == [job["name"] for job in GOOD_JOBS]
+    assert all("macos" in job["labels"][0] for job in kept)
+    assert len(kept) == MIN_MACOS_JOBS, "the ubuntu-labelled twins must not be counted"
 
 
 def test_a_shrunken_sweep_is_caught():
@@ -201,7 +247,7 @@ def test_the_pass_message_states_what_it_does_not_cover(monkeypatch, capsys):
 
     monkeypatch.setattr(check_nightly_macos, "latest_completed_run", lambda *_a, **_k: GOOD_RUN)
     monkeypatch.setattr(check_nightly_macos, "macos_jobs", lambda *_a, **_k: GOOD_JOBS)
-    rc = nightly_main([])
+    rc = nightly_main([], now=NOW)
     out = capsys.readouterr().out
     assert rc == 0
     assert "real macOS runners" in out
@@ -209,14 +255,48 @@ def test_the_pass_message_states_what_it_does_not_cover(monkeypatch, capsys):
 
 
 def test_the_failure_message_names_the_remedy(monkeypatch, capsys):
+    """The failure this pins is a sweep with no macOS jobs, so the run must be fresh --
+    otherwise staleness fails it instead and the assertions below still hold, because
+    `REMEDY` prints on every failing path. That is exactly what happened between
+    2026-09-02 and the fix: this test stayed green while testing nothing."""
     import check_nightly_macos
 
     monkeypatch.setattr(check_nightly_macos, "latest_completed_run", lambda *_a, **_k: GOOD_RUN)
     monkeypatch.setattr(check_nightly_macos, "macos_jobs", lambda *_a, **_k: [])
-    rc = nightly_main([])
+    rc = nightly_main([], now=NOW)
     out = capsys.readouterr().out
     assert rc == 1
     assert "gh workflow run nightly.yml --ref main" in out
+    # Name the reason, not just the exit code: "it failed" is satisfied by any defect.
+    assert "0 job(s)" in out
+    assert "freshness window" not in out, "the fixture went stale; this is not testing macOS jobs"
+
+
+def test_the_default_clock_is_the_real_one(monkeypatch, capsys):
+    """The counterweight to freezing `now` everywhere else.
+
+    Injecting a clock buys determinism and costs coverage of the default, and a gate that
+    only ever runs against a frozen clock would not notice its production default rotting
+    into a constant. So this is the one test that omits `now`, driving the un-injected
+    path with fixtures built relative to real time -- fresh passes, 30 days stale fails
+    and says so. A frozen default could not report an age of "30 days" unless the constant
+    happened to be today.
+    """
+    import check_nightly_macos
+
+    monkeypatch.setattr(check_nightly_macos, "macos_jobs", lambda *_a, **_k: GOOD_JOBS)
+
+    monkeypatch.setattr(
+        check_nightly_macos, "latest_completed_run", lambda *_a, **_k: run_aged(timedelta(hours=1))
+    )
+    assert nightly_main([]) == 0
+    capsys.readouterr()
+
+    monkeypatch.setattr(
+        check_nightly_macos, "latest_completed_run", lambda *_a, **_k: run_aged(timedelta(days=30))
+    )
+    assert nightly_main([]) == 1
+    assert "30 days ago" in capsys.readouterr().out
 
 
 def test_the_workflow_it_watches_is_the_one_that_runs_macos():
