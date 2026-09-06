@@ -27,6 +27,14 @@ from report.aggregate import (
     summarize_ambient,
 )
 from report.charts import bar_chart, heatmap
+from report.sensitivity import (
+    SENSITIVITY_APPROXIMATION_NOTE,
+    SENSITIVITY_FLOOR_NOTE,
+    SENSITIVITY_SCALE_NOTE,
+    SENSITIVITY_UNAVAILABLE_NOTE,
+    Sensitivity,
+    sensitivity,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -254,6 +262,61 @@ def _ambient_html(ambient_days: list[AmbientDay]) -> str:
         '<thead><tr><th scope="col">Day</th><th scope="col">Min</th>'
         '<th scope="col">Median</th><th scope="col">Max</th><th scope="col">L90</th>'
         '<th scope="col">Minutes covered</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def _fmt_delta(delta_db: float) -> str:
+    """A signed dB offset a reader can scan: "-6", "0" (the configured one), "+3"."""
+    if delta_db == 0:
+        return "0 (configured)"
+    return f"{delta_db:+.0f}"
+
+
+def _sensitivity_html(result: Sensitivity | None) -> str:
+    """EXP-03: the threshold-sensitivity exhibit, or the reason there is not one.
+
+    `None` means the reader asked for the report without it (`--sensitivity off`) and the
+    section is omitted entirely. Otherwise the section always renders, including when the
+    ambient ledger is off -- an absent section would leave a reader unable to tell an
+    untested threshold from one that was tested and held, which is the whole point of
+    publishing this before anyone asks for it.
+
+    The event column is empty below the configured threshold and carries the floor phrase
+    instead of a number; see `report/sensitivity.py` for why a number there would be a
+    fabrication rather than a measurement.
+    """
+    if result is None:
+        return ""
+    heading = "\n<h2>Threshold sensitivity</h2>\n"
+    if not result.available:
+        return heading + f'<p class="note">{escape(SENSITIVITY_UNAVAILABLE_NOTE)}</p>'
+
+    rows = "".join(
+        f'<tr><th scope="row">{escape(_fmt_delta(r.delta_db))}</th>'
+        f"<td>{r.threshold_dbfs:.1f} dBFS</td>"
+        + (
+            f"<td>{r.events_at_or_above}</td>"
+            if r.events_at_or_above is not None
+            else f"<td>at least {result.headline_event_count} (not recorded)</td>"
+        )
+        + f"<td>{r.loud_minutes}</td></tr>"
+        for r in result.rows
+    )
+    return (
+        heading + "<p>What the record would look like if the loudness threshold had been set "
+        "differently, recounted from data already stored. The configured row is the "
+        "report&#8217;s own numbers; the others are there so a reader can see whether the "
+        "pattern holds when the threshold moves, rather than having to take the chosen "
+        "threshold on trust.</p>\n"
+        f'<p class="note">{escape(SENSITIVITY_APPROXIMATION_NOTE)}</p>\n'
+        f'<p class="note">{escape(SENSITIVITY_FLOOR_NOTE)}</p>\n'
+        f'<p class="note">{escape(SENSITIVITY_SCALE_NOTE)}</p>\n'
+        "<table><caption>Event and loud-minute counts at alternative thresholds "
+        f"({result.minutes_covered} ambient-ledger minutes)</caption>"
+        '<thead><tr><th scope="col">Offset (dB)</th><th scope="col">Threshold</th>'
+        '<th scope="col">Events at or above</th>'
+        '<th scope="col">Loud minutes</th></tr></thead>'
         f"<tbody>{rows}</tbody></table>"
     )
 
@@ -610,6 +673,7 @@ def build_report(
     wall_clock_hours: float | None = None,
     clock_anomaly_lines: list[str] | None = None,
     ambient_days: list[AmbientDay] | None = None,
+    sensitivity_result: Sensitivity | None = None,
     back_applied: BackApplied | None = None,
     title: str = "Olive's Bark Logger — Noise Report",
 ) -> str:
@@ -636,6 +700,7 @@ def build_report(
     conditions_html = _conditions_html(session)
     clock_html = _clock_anomalies_html(clock_anomaly_lines or [])
     ambient_html = _ambient_html(ambient_days or [])
+    sensitivity_html = _sensitivity_html(sensitivity_result)
 
     hour_chart = bar_chart(
         chart_id="by-hour",
@@ -850,7 +915,7 @@ transmitted to produce it.</p>
 <h2>Distributions</h2>
 {hour_chart}
 {day_chart}
-{calendar_section}{ambient_html}
+{calendar_section}{ambient_html}{sensitivity_html}
 
 {tags_section}
 <h2>Quiet hours</h2>
@@ -1105,8 +1170,15 @@ def generate_report_from_db(
     config: Config,
     *,
     generated_at: str,
+    include_sensitivity: bool = True,
 ) -> str:
-    """Read events from the store and render the report. Deterministic given inputs."""
+    """Read events from the store and render the report. Deterministic given inputs.
+
+    `include_sensitivity` (EXP-03, `olive-report --sensitivity off`) controls the
+    threshold-sensitivity section. On by default, and when on the section renders even
+    without an ambient ledger -- saying it could not be computed, rather than vanishing.
+    Turning it off omits the section entirely, for a reader who asked for the plain report.
+    """
     from store import EventStore
 
     anomalies: list[ClockAnomaly]
@@ -1138,6 +1210,22 @@ def generate_report_from_db(
         _apply_offset_minute(m, off) for m, off in zip(minute_levels, minute_offsets)
     ]
     ambient_days = summarize_ambient(adjusted_minutes, tz=tz)
+
+    # Threshold sensitivity (EXP-03) is computed on the RAW events and RAW minutes against
+    # the RAW threshold, deliberately not on the calibrated ones above: `threshold_dbfs` is
+    # defined on the stored scale and calibration is a render-time presentation offset
+    # (ADR-0003), so adjusting one side of the comparison and not the other would move
+    # every row. `_sensitivity_html` prints SENSITIVITY_SCALE_NOTE to say which scale it is.
+    latest_params = _param_epochs(sessions)[-1] if _param_epochs(sessions) else None
+    sensitivity_result = (
+        sensitivity(
+            events,
+            minute_levels,
+            threshold_dbfs=float(_param_or(latest_params, "threshold_dbfs", config.threshold_dbfs)),
+        )
+        if include_sensitivity
+        else None
+    )
 
     # Monitoring-gap honesty: unmonitored heatmap buckets plus monitored-vs-wall-clock
     # coverage, rendered on both the single-offset and multi-epoch paths. "Unmonitored"
@@ -1181,6 +1269,7 @@ def generate_report_from_db(
             wall_clock_hours=wall_clock_hours,
             clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
             ambient_days=ambient_days,
+            sensitivity_result=sensitivity_result,
             back_applied=back_applied,
         )
 
@@ -1205,6 +1294,7 @@ def generate_report_from_db(
         wall_clock_hours=wall_clock_hours,
         clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
         ambient_days=ambient_days,
+        sensitivity_result=sensitivity_result,
         back_applied=back_applied,
     )
 
@@ -1248,6 +1338,17 @@ def main(argv: list[str] | None = None) -> int:
         help="timestamp string for the report header (default: now, UTC)",
     )
     parser.add_argument(
+        "--sensitivity",
+        choices=("on", "off"),
+        default="on",
+        help=(
+            "threshold-sensitivity section (EXP-03): recount events and loud minutes at "
+            "+/-3 and +/-6 dB from the configured threshold, from data already stored. "
+            "'on' (default) renders it, and says so explicitly when the ambient ledger is "
+            "not enabled and it cannot be computed; 'off' omits the section entirely."
+        ),
+    )
+    parser.add_argument(
         "--csv", type=Path, default=None, help="also export the event log to this CSV path"
     )
     parser.add_argument(
@@ -1285,7 +1386,12 @@ def main(argv: list[str] | None = None) -> int:
     db_path = args.db or config.db_path
     generated_at = args.generated_at or datetime.now(config.tzinfo()).strftime("%Y-%m-%d %H:%M %Z")
 
-    html = generate_report_from_db(db_path, config, generated_at=generated_at)
+    html = generate_report_from_db(
+        db_path,
+        config,
+        generated_at=generated_at,
+        include_sensitivity=args.sensitivity == "on",
+    )
     args.out.write_text(html, encoding="utf-8")
     print(f"Wrote {args.out} ({len(html)} bytes).")
 

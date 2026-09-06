@@ -248,6 +248,34 @@ release" defect this file's absence let stand.
   fails on both a real omission and a decoy mention outside the array.
 
 ### Added
+- **A threshold-sensitivity section in the report** (issue #99, EXP-03). The strongest
+  attack on a level-only record is "you picked the threshold that flatters you". The
+  report now answers it before it is asked: `report/sensitivity.py` recounts the record at
+  ±3 and ±6 dB from the configured threshold, offline and deterministically, from data
+  already stored — per-event peaks and the ambient ledger's per-minute maxima (EXP-01).
+  On by default; `olive-report --sensitivity off` omits the section.
+  **The headline counts never move**, and `tests/test_sensitivity.py` asserts that every
+  byte outside the section is unchanged when it is added.
+  Three things the exhibit refuses to state as measurements, because the stored record
+  cannot support them:
+  - **Below the configured threshold the event column is a floor, not a count.** An event
+    that never crossed the threshold was never written down, so no count of stored events
+    can say how many a lower threshold would have found. The number that *is* derivable
+    there — the events already recorded, every one of which clears any lower threshold —
+    equals the headline exactly, on every log, and a flat column in a sensitivity table
+    reads as "insensitive". It renders as "at least N (not recorded)" instead, and the
+    ambient ledger, which can answer downward, carries the signal.
+  - **With no ambient ledger the section says so**, rather than rendering a table of zeros
+    (which claims the threshold was tested) or vanishing (which leaves a reader unable to
+    tell an untested threshold from one that held).
+  - **The recount runs on the raw dBFS scale detection used**, not the calibrated scale the
+    report shows a reader: `threshold_dbfs` is defined against the stored scale and
+    calibration is a render-time offset (ADR-0003), so adjusting one side of the comparison
+    would move every row. A test plants a +12 dB calibration and fails if it leaks in.
+  Shipping the code does **not** close EXP-03's acoustics-SME wording review; that human
+  gate stays open in `docs/ideation/04-impact-and-sequencing.md`, and a test fails if the
+  row is removed.
+
 - **Static analysis of the workflows themselves** (issue #84, GAP-CICD-1 / CICD-19,
   CICD-20). `make workflows` runs zizmor over `.github/workflows/`, is a prerequisite of
   `make verify`, and is a step in the required `verify` CI job, so the local and CI
