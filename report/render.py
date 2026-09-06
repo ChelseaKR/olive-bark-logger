@@ -261,9 +261,16 @@ def _drift_html(check: DriftCheck, *, recorded: int) -> str:
     )
     if check.status == DRIFT_UNAVAILABLE:
         reason = check.reason or "reason not recorded"
+        # Two paragraphs, not one, and the reason is not stylistic. The PDF export
+        # keeps `.note` blocks off page boundaries (`report/pdf_export.py`'s
+        # `_PDF_LAYOUT_STYLE`), which is safe only while a note is compact enough to
+        # fit in what is left of a page. One long unbreakable note pushes itself
+        # whole to the next page and drags a table across a boundary, which is the
+        # layout WeasyPrint 66-69 crashes on. Two short notes carry the same words
+        # and each can be placed on its own.
         return (
-            f'<p class="note">{escape(DRIFT_UNAVAILABLE_PREFIX)}'
-            f"{escape(reason)}. {escape(DRIFT_UNAVAILABLE_NOTE)}</p>{history}"
+            f'<p class="note">{escape(DRIFT_UNAVAILABLE_PREFIX)}{escape(reason)}.</p>\n'
+            f'<p class="note">{escape(DRIFT_UNAVAILABLE_NOTE)}</p>{history}'
         )
     if check.advisory is None:
         return f'<p class="note">{escape(DRIFT_STEADY_NOTE)}</p>{history}'
