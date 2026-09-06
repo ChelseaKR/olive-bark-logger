@@ -70,15 +70,50 @@ Plan: REMEDIATION.md P2-3.
 Plan: REMEDIATION.md P1-3, P1-5, P2-4, P3.
 
 ## GAP-SEC-1 — Security & Supply-Chain: harden-runner block-mode, CodeQL, osv-scanner, TruffleHog, SBOM+signing, Scorecard
-**Status: Partially open (updated 2026-07-14).** Controls: SEC-04 (audit-mode landed,
-block-mode still open), SEC-08, SEC-19, SEC-27, SEC-29, SEC-35..38.
+**Status: Partially open (updated 2026-09-06).** Controls: SEC-04 (audit-mode landed,
+block-mode still open), SEC-08, SEC-19, SEC-27 (**closed 2026-07-10**, recorded here
+2026-09-06), SEC-29 (**closed 2026-07-10** in its keyless variant, recorded here
+2026-09-06), SEC-35..38.
 - `step-security/harden-runner` now runs in `audit` mode on both CI jobs (this pass) —
   it logs egress instead of blocking it. Flipping to `egress-policy: block` needs one
   collected audit run to build the allow-list first (README Standards Conformance
   table, Security row).
-- No CodeQL workflow, no scheduled TruffleHog full-history scan, no SBOM/signing (no
-  release pipeline exists to attach them to — see Release & Versioning row), no
-  OpenSSF Scorecard workflow/report.
+
+Correction, 2026-09-06: **two of the items this entry listed as absent had been in the
+tree since 2026-07-10.**
+
+> Until 2026-09-06 the line below read: "No CodeQL workflow, no scheduled TruffleHog
+> full-history scan, no SBOM/signing (no release pipeline exists to attach them to — see
+> Release & Versioning row), no OpenSSF Scorecard workflow/report."
+
+The parenthesis was the load-bearing error: `.github/workflows/release.yml` has existed
+since the 2026-07-10 conformance pass, and GAP-REL-1 in this same file records it. So the
+premise "no release pipeline exists to attach them to" was false when it was written here,
+and the two items it justified were already built:
+
+- **SEC-27 — SBOM.** `release.yml`'s `build` job installs the built wheel into a clean
+  venv and runs `cyclonedx-py environment` over it, publishing `dist/sbom.cdx.json` as a
+  release asset.
+- **SEC-29 — signing, keyless variant.** `actions/attest-build-provenance` binds the
+  workflow run to the wheel, the sdist and the SBOM through OIDC, with no long-lived key
+  to protect. Verifiable with `gh attestation verify`.
+
+Neither has *fired*, because no `v*` tag exists (GAP-REL-1). "Built but never run" is a
+weaker claim than "shipped" and a much stronger one than "absent", and this entry was
+making the wrong one of the three.
+
+**Still open:**
+- `egress-policy: block` (SEC-04) — needs one audit run's collected egress list first.
+- **CodeQL over the Python code.** `.github/workflows/codeql.yml` exists as of
+  2026-09-06 but analyses `language: actions` only, and it reports rather than gates —
+  see GAP-CICD-1 for both limits.
+- No scheduled TruffleHog full-history scan. Worth writing carefully when it lands:
+  `--only-verified` cannot fail on a credential that has already been revoked, so a
+  history scan configured that way reports clean on exactly the leak that was cleaned up
+  after the fact.
+- No OpenSSF Scorecard workflow or published report.
+- cosign key-based signing, and the PyPI/GHCR publish decisions — all in GAP-REL-1's
+  externally-visible-action set, not this one's.
 Plan: REMEDIATION.md P1-2, P1-3, P1-4, P1-6, P2-1.
 
 ## GAP-CICD-1 — CI/CD: reconcile the live branch ruleset with the committed one, add zizmor + CodeQL-actions

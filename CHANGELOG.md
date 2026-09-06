@@ -16,6 +16,18 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **`docs/GAP-LEDGER.md` listed two supply-chain items as absent that had been in the
+  tree for eight weeks.** GAP-SEC-1 said "no SBOM/signing (no release pipeline exists to
+  attach them to)". The parenthesis was the error: `.github/workflows/release.yml` landed
+  in the 2026-07-10 conformance pass and GAP-REL-1 in the same file records it. Its
+  `build` job generates a CycloneDX SBOM from the installed wheel (SEC-27) and attests
+  build provenance for the wheel, the sdist and the SBOM through keyless OIDC (SEC-29).
+  Neither has fired, because no `v*` tag exists — "built but never run" is a weaker claim
+  than "shipped" and a much stronger one than "absent", and the entry was making the
+  wrong one of the three. Corrected in place with the superseded sentence quoted beside
+  it, and the still-open list rewritten to what is actually missing: `egress-policy:
+  block`, CodeQL over the Python code, a TruffleHog history scan (with a note that
+  `--only-verified` cannot fail on an already-revoked credential), and OpenSSF Scorecard.
 - **`make verify` and CI ran different `pip-audit` commands, and the document that exists
   to list every such difference did not mention it.** `make security` passes
   `PIP_AUDIT_WAIVERS` (twelve `--ignore-vuln` flags); `ci.yml`'s "Dependency audit" step
