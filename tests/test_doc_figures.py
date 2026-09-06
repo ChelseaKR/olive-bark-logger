@@ -339,6 +339,60 @@ def test_no_document_implies_a_release_exists_while_none_does():
     )
 
 
+# --- F5b: the two `pip-audit` runs are not the same command --------------------------
+
+
+def _ignored_vulns(text: str) -> set[str]:
+    return set(re.findall(r"--ignore-vuln\s+(\S+)", text))
+
+
+def ci_dependency_audit_command() -> str:
+    """The `run:` line of ci.yml's dependency-audit step, whatever it is called."""
+    steps = re.split(r"^      - name: ", _text(CI), flags=re.MULTILINE)
+    for step in steps:
+        if step.lower().startswith("dependency audit"):
+            return step.split("\n", 1)[1] if "\n" in step else ""
+    return ""
+
+
+def test_the_parity_table_names_the_pip_audit_waiver_divergence():
+    """CONTRIBUTING.md calls itself "the authoritative statement of how `make verify` and
+    CI differ", and its `security` row explained only the gitleaks difference. There is a
+    second one, in the argument list: `make security` runs `pip-audit` with twelve
+    `--ignore-vuln` flags and CI runs it with none.
+
+    That is not a bug in either command -- the waivers are a >=3.9 accommodation and CI
+    runs 3.12, where `uv.lock` resolves the fixed versions -- but it does mean a green
+    `make verify` does not predict a green CI, which is precisely what the parity section
+    exists to tell a contributor. Derive it, so the sentence cannot rot once the two
+    argument lists are made to agree, or diverge further.
+    """
+    makefile_waivers = _ignored_vulns(_text(MAKEFILE))
+    ci_waivers = _ignored_vulns(ci_dependency_audit_command())
+    if makefile_waivers == ci_waivers:
+        return  # the two commands now agree; there is nothing left to disclose
+
+    # Stop at the next heading of any level: the disclosure has to be in the parity
+    # section itself, not somewhere further down the file that happens to mention it.
+    parity = _claims(CONTRIBUTING).split("Local/CI parity")[1].split("\n#")[0]
+    assert "PIP_AUDIT_WAIVERS" in parity, (
+        "`make security` and ci.yml run `pip-audit` with different `--ignore-vuln` sets "
+        f"(Makefile {len(makefile_waivers)}, CI {len(ci_waivers)}), and CONTRIBUTING.md's "
+        "Local/CI parity section does not mention it. A contributor is told the two gates "
+        "agree everywhere that section does not list."
+    )
+
+
+def test_the_waiver_scanner_reads_the_makefile_and_the_workflow():
+    """Canary: both halves of the comparison above must actually find their text, or the
+    divergence check passes by reading two empty sets."""
+    assert _ignored_vulns(_text(MAKEFILE)), "no --ignore-vuln flags found in the Makefile"
+    assert ci_dependency_audit_command().strip(), (
+        "ci.yml has no step named 'Dependency audit'; the comparison above has no CI side"
+    )
+    assert _ignored_vulns("--ignore-vuln A-1 --ignore-vuln A-2") == {"A-1", "A-2"}
+
+
 # --- F11: the workflow static-analysis gate --------------------------------------------
 
 

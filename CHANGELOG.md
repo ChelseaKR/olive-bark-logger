@@ -16,6 +16,23 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **`make verify` and CI ran different `pip-audit` commands, and the document that exists
+  to list every such difference did not mention it.** `make security` passes
+  `PIP_AUDIT_WAIVERS` (twelve `--ignore-vuln` flags); `ci.yml`'s "Dependency audit" step
+  passes none. Measured on the committed dev venv: bare `pip-audit` reports **12 known
+  vulnerabilities in 7 packages**, and the same run with the waivers reports **none, 12
+  ignored**. Neither command is wrong — the waivers are an accommodation for the
+  documented `>=3.9` floor (CQ-01), under which no fix version installs, while CI runs
+  3.12 where `uv.lock` resolves the fixed versions, so CI is *fixed, not waived* and is
+  deliberately the stricter side. The defect was that `CONTRIBUTING.md`, which calls
+  itself "the authoritative statement of how `make verify` and CI differ", explained only
+  the gitleaks difference in its `security` row — so a contributor reading it was told
+  the two gates otherwise agree, and a green `make verify` looked like a prediction of a
+  green CI. The row now names the divergence and gives the command that reproduces CI's
+  run locally (`make security PIP_AUDIT_WAIVERS=`), `ci.yml` says why the waivers are
+  kept out of it, and `tests/test_doc_figures.py` compares the two argument lists and
+  fails if they differ while the parity section is silent — including if they are ever
+  made to agree and the sentence is left behind.
 - **`check_ruleset.py` compared `bypass_actors` by equality, which is the one comparison
   that cannot see a lockout.** Recording the owner's standing bypass in
   `.github/rulesets/main.json` (2026-08-27) fixed the claim but not the check. Two wrong
