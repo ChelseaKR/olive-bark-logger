@@ -54,7 +54,14 @@ jobs:
           version: "0.11.28"
           enable-cache: true
           cache-dependency-glob: uv.lock
+      # The matrix value reaches the shell through the environment, not through
+      # template expansion into the `run:` text. It is a workflow-controlled literal
+      # today, so this is not a live injection -- but the shape is the one that becomes
+      # one the moment the value comes from anywhere else, and it is what zizmor's
+      # template-injection audit flags. Same fix in the other matrix job.
       - name: Install
-        run: uv sync --locked --group dev --python "${{ matrix.python-version }}"
+        env:
+          UV_PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv sync --locked --group dev --python "$UV_PYTHON_VERSION"
       - name: Tests & coverage
         run: .venv/bin/pytest --cov --cov-report=term-missing --cov-fail-under=85

@@ -23,7 +23,7 @@ jobs:
       # Step 9b reads the nightly workflow's runs and their jobs. `administration` is
       # deliberately absent and cannot be requested here at all, which is why step 9a
       # runs `--scope public` and says out loud what that leaves unchecked.
-      actions: read
+      actions: read     # step 9b lists nightly.yml's runs and their jobs; read-only
     steps:
       # 0. egress monitoring (SEC-04). AUDIT mode: logs, does not block yet — this
       #    repo's actual outbound needs (pypi.org, files.pythonhosted.org, npm for
@@ -73,6 +73,24 @@ jobs:
       #     step 2 below). The real secret scan is gitleaks-action in step 4.
       - name: Pre-commit hooks
         run: make hooks
+
+      # 1c. static analysis of the workflows themselves (GAP-CICD-1 / CICD-19) — via
+      #     `make workflows`, same parity rationale, and because the zizmor version is
+      #     pinned in one place there rather than two. It runs inside this already-
+      #     required job rather than as a new required context: five required checks
+      #     that could not fail were removed from this repository on 2026-08-26, and
+      #     the lesson recorded then was that adding a context name is how such a check
+      #     gets in.
+      #
+      #     Not covered by this step, deliberately: zizmor's default persona hides
+      #     informational findings and prints "(N suppressed)". The target echoes what
+      #     `--persona=auditor` reports so the hidden count is visible in the log; that
+      #     line is a disclosure, not a gate, and the three findings it currently
+      #     reports are recorded in docs/GAP-LEDGER.md#gap-cicd-1 with the reason each
+      #     is not acted on. CodeQL over the same surface runs in codeql.yml, which
+      #     reports to code scanning and does not block a merge.
+      - name: Workflow static analysis (zizmor)
+        run: make workflows
 
       # 2. type-check (strict) — via `make type` (same parity rationale).
       - name: Type-check
@@ -225,7 +243,14 @@ jobs:
           version: "0.11.28"
           enable-cache: true
           cache-dependency-glob: uv.lock
+      # The matrix value reaches the shell through the environment, not through
+      # template expansion into the `run:` text. It is a workflow-controlled literal
+      # today, so this is not a live injection -- but the shape is the one that becomes
+      # one the moment the value comes from anywhere else, and it is what zizmor's
+      # template-injection audit flags. Same fix in the other matrix job.
       - name: Install
-        run: uv sync --locked --group dev --python "${{ matrix.python-version }}"
+        env:
+          UV_PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv sync --locked --group dev --python "$UV_PYTHON_VERSION"
       - name: Tests & coverage
         run: .venv/bin/pytest --cov --cov-report=term-missing --cov-fail-under=85

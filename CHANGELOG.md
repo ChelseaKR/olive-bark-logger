@@ -219,6 +219,28 @@ release" defect this file's absence let stand.
   fails on both a real omission and a decoy mention outside the array.
 
 ### Added
+- **Static analysis of the workflows themselves** (issue #84, GAP-CICD-1 / CICD-19,
+  CICD-20). `make workflows` runs zizmor over `.github/workflows/`, is a prerequisite of
+  `make verify`, and is a step in the required `verify` CI job, so the local and CI
+  verdicts are the same command; the zizmor version is pinned in the `Makefile`, because
+  a linter that floats to its newest release changes its verdict with no commit to blame.
+  It runs *inside* `verify` rather than as a new required context, for the reason the
+  2026-08-26 required-check removal recorded. `.github/workflows/codeql.yml` adds CodeQL
+  over the same surface (`language: actions`) and is recorded as **reporting, not
+  gating**: `codeql-action/analyze` fails only when the analysis errors, so a finding
+  becomes a code-scanning alert while the job exits 0. Making it blocking changes the
+  required-check list and is left as an explicit open decision rather than implied by the
+  workflow's presence. `make workflows` also echoes what zizmor's default persona hides:
+  that persona prints `No findings to report (N suppressed)`, and the count of what it
+  suppressed is the part worth seeing — `make workflows-auditor` prints those in full.
+  Four findings that were actionable were fixed rather than suppressed: two
+  `template-injection` (the matrix Python version now reaches the shell through `env:`
+  instead of being expanded into the `run:` text), two `undocumented-permissions`, and
+  `release.yml`'s `publish-release` job was given a `name:`. The three that remain are
+  informational `anonymous-definition` findings on `verify`, `test-matrix` and
+  `test-matrix-macos`, and are left alone on purpose: a job's `name:` is its status-check
+  context, so naming those renames six required checks and blocks every merge until the
+  ruleset is edited to match.
 - **The committed pre-commit hook set is now a gate** (issue #82, GAP-CQ-1 / CQ-12).
   `.pre-commit-config.yaml` had been in the tree since 2026-07-14 and ran nowhere except
   in a clone whose owner had happened to run `pre-commit install` — so its end-of-file,

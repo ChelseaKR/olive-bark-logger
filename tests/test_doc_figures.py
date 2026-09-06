@@ -339,6 +339,79 @@ def test_no_document_implies_a_release_exists_while_none_does():
     )
 
 
+# --- F11: the workflow static-analysis gate --------------------------------------------
+
+
+RULESET = ROOT / ".github" / "rulesets" / "main.json"
+
+
+def test_the_workflow_linter_is_pinned_to_a_version():
+    """A gate whose verdict can change without a commit is the defect
+    `scripts/check_nightly_macos.py` was rewritten to stop having, in its other shape.
+
+    `make workflows` shells out to a tool this repo does not lock, so the pin is the only
+    thing making today's "no findings" reproducible tomorrow. `uvx --from zizmor zizmor`
+    would silently move to the newest release; the next new audit would then read as a
+    regression in a pull request that did not touch a workflow.
+    """
+    makefile = _text(MAKEFILE)
+    assert re.search(r"^workflows:$", makefile, re.MULTILINE), (
+        "the `workflows` target is gone; docs/GAP-LEDGER.md#gap-cicd-1 records it as the "
+        "enforced floor for the workflow surface"
+    )
+    requirements = re.findall(r"zizmor==(\S+)", makefile)
+    assert requirements, (
+        "the Makefile invokes zizmor without `==<version>`, so the gate's verdict can "
+        "change with no commit in this repository to explain it"
+    )
+    # The pin may be written through a make variable; resolve one level of `$(NAME)`
+    # rather than requiring a literal, so the version can stay a named constant.
+    assignments = dict(
+        re.findall(r"^([A-Z_]+)\s*[:?]?=\s*(\S+)\s*$", makefile, re.MULTILINE)
+    )
+    versions = set()
+    for req in requirements:
+        var = re.fullmatch(r"\$\(([A-Z_]+)\)", req)
+        versions.add(assignments.get(var.group(1), "") if var else req)
+    unpinned = sorted(v for v in versions if not re.fullmatch(r"\d+\.\d+\.\d+", v))
+    assert not unpinned, (
+        f"zizmor's version does not resolve to a literal release: {unpinned}. A linter "
+        "that floats changes its verdict with no commit here to explain it."
+    )
+    assert len(versions) == 1, f"zizmor is pinned to more than one version: {sorted(versions)}"
+
+
+def test_codeql_is_not_described_as_a_gate_while_it_is_not_one():
+    """The documents say CodeQL *reports* rather than gates, because
+    `codeql-action/analyze` exits 0 on a finding. That is only true while the context is
+    absent from the required-check list -- and if it is ever added, three documents start
+    understating the gate instead. Derive it from the committed ruleset rather than
+    trusting either side's prose.
+    """
+    import json
+
+    workflow = ROOT / ".github" / "workflows" / "codeql.yml"
+    if not workflow.exists():
+        return  # nothing to describe
+
+    contexts = {
+        check.get("context")
+        for rule in json.loads(_text(RULESET)).get("rules", [])
+        if rule.get("type") == "required_status_checks"
+        for check in rule.get("parameters", {}).get("required_status_checks", [])
+    }
+    codeql_required = any(c and c.startswith("codeql") for c in contexts)
+
+    ledger = _claims(ROOT / "docs" / "GAP-LEDGER.md")
+    entry = ledger.split("## GAP-CICD-1")[1].split("## GAP-A11Y-1")[0]
+    says_reporting = "reporting" in entry or "does not block a merge" in entry
+    assert codeql_required != says_reporting, (
+        "docs/GAP-LEDGER.md#gap-cicd-1 and .github/rulesets/main.json disagree about "
+        f"whether CodeQL blocks a merge: required contexts {sorted(c for c in contexts if c)}, "
+        f"ledger describes it as reporting-only: {says_reporting}"
+    )
+
+
 # --- canaries ------------------------------------------------------------------------
 
 

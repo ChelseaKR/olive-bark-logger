@@ -27,6 +27,11 @@ single dependency snapshot used by local, CI, and release verification. One tool
   `make verify` to pass locally — CI runs it either way via `gitleaks-action`, but the
   local gate hard-fails without it (no more silent skipping, see `Makefile`).
 - **Node.js 20+**: needed for `make pwa-test` and the pa11y/axe pass in `make a11y`.
+- **uvx** (workflow static analysis): ships with `uv`, so installing uv covers it.
+  `make workflows` runs `uvx --from zizmor==<pinned> zizmor` over `.github/workflows/`,
+  which fetches zizmor on first use and then serves it from uv's cache. The version is
+  pinned in the `Makefile` (`ZIZMOR_VERSION`) so the verdict cannot change without a
+  commit. Offline mode is the default and is what CI runs, so no token is needed.
 - **Docker**: only needed for `docker build .` / the container smoke test; not required
   for the Python test suite.
 - **veraPDF** (optional, PDF/A-3a conformance validation): a Java tool, not a
@@ -76,17 +81,18 @@ itself cleanly (`pytest.importorskip`) when the extra isn't installed.
 ## Workflow
 ```bash
 make dev        # one-time setup
-make verify     # lint, pre-commit hooks, type-check, coverage (>=85%), security, a11y, PWA tests, i18n gate
+make verify     # lint, pre-commit hooks, workflow static analysis, type-check, coverage (>=85%), security, a11y, PWA tests, i18n gate
 ```
 ### Local/CI parity
 
 This is the authoritative statement of how `make verify` and CI differ; `.github/workflows/ci.yml`
 and the rest of this file point here rather than restating it.
 
-`make verify` runs eight targets: `lint hooks type cov security a11y pwa-test i18n`. CI invokes
-**five** of them as the Makefile target itself, so those cannot drift: `make lint`,
-`make hooks`, `make type`, `make i18n`, `make pwa-test`. The other **three** run as separate
-CI steps:
+`make verify` runs nine targets: `lint hooks workflows type cov security a11y pwa-test i18n`.
+CI invokes
+**six** of them as the Makefile target itself, so those cannot drift: `make lint`,
+`make hooks`, `make workflows`, `make type`, `make i18n`, `make pwa-test`. The other
+**three** run as separate CI steps:
 
 | Target | How CI runs it instead | Why |
 | --- | --- | --- |
@@ -100,7 +106,13 @@ and the two self-checks (`scripts/check_ruleset.py`, `scripts/check_nightly_maco
 `make ruleset-check` / `make nightly-check` run locally only on demand, because they need
 network and `gh` auth.
 
-`tests/test_doc_figures.py` derives that four/three split from `ci.yml` and the `Makefile`,
+`.github/workflows/codeql.yml` is outside `verify` in the other direction: it analyses the
+same workflow surface `make workflows` does, but it uploads its result to code scanning
+instead of failing a job, so it reports rather than gates. `make workflows` is the enforced
+floor there. Making CodeQL blocking is a required-check decision recorded in
+`docs/GAP-LEDGER.md`.
+
+`tests/test_doc_figures.py` derives that six/three split from `ci.yml` and the `Makefile`,
 so this table fails a build if either side changes. It previously said there was "the one
 place" the two disagree and pointed at `docs/GAP-LEDGER.md#gap-cicd-1`, an entry about the
 branch ruleset that never mentions parity.
