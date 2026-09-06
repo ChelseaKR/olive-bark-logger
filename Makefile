@@ -6,11 +6,17 @@ RUFF ?= .venv/bin/ruff
 MYPY ?= .venv/bin/mypy
 PRECOMMIT ?= .venv/bin/pre-commit
 UV ?= uv
+UVX ?= uvx
+# Pinned, like every action SHA in .github/workflows/: a static-analysis gate that
+# floats to the newest release changes its verdict without a commit, which is the
+# failure mode `scripts/check_nightly_macos.py` was just rewritten to avoid.
+ZIZMOR_VERSION ?= 1.29.0
+ZIZMOR ?= $(UVX) --from zizmor==$(ZIZMOR_VERSION) zizmor
 
-.PHONY: help venv dev fmt lint hooks type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check nightly-check verify clean
+.PHONY: help venv dev fmt lint hooks workflows workflows-auditor type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check nightly-check verify clean
 
 help:
-	@echo "Targets: dev fmt lint hooks type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check nightly-check verify clean"
+	@echo "Targets: dev fmt lint hooks workflows type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check nightly-check verify clean"
 
 venv:
 	@command -v $(UV) >/dev/null 2>&1 || { echo "uv not installed — see CONTRIBUTING.md#prerequisites"; exit 1; }
@@ -161,6 +167,40 @@ i18n:
 	@grep -Eq '^Reason: .+' docs/I18N.md || { echo "docs/I18N.md missing a non-empty 'Reason:' line"; exit 1; }
 	@echo "i18n: N/A declaration present."
 
+# Static analysis of the workflows themselves (GAP-CICD-1, CICD-19). zizmor reads
+# .github/workflows/ for the mistakes a linter can see and a reviewer stops seeing: an
+# expression interpolated into a `run:` block, a token wider than the job needs, an
+# action pinned to a tag rather than a commit. Offline mode is the default and is what
+# CI runs, so the local and remote answers match without a token.
+#
+# Part of `verify`, and deliberately NOT a new required status check. Five required
+# checks that could not fail were removed from this repository on 2026-08-26, and the
+# lesson recorded then was that adding a context name is how such a check gets in. This
+# one runs inside the gate that already exists.
+#
+# The second half is a disclosure, not a gate, and is marked as such. zizmor's default
+# persona shows only what it considers actionable and prints "(N suppressed)" for the
+# rest, so a bare "No findings to report" is a smaller claim than it reads as -- the
+# same shape as a status page reporting 100% coverage before a frame was read (#61).
+# The `-` prefix means make ignores this line's exit status: the enforced verdict is
+# the unguarded command above it, and only that one. Run
+# `make workflows-auditor` to see the hidden findings in full.
+workflows:
+	@command -v $(UVX) >/dev/null 2>&1 || { echo "uvx not installed — see CONTRIBUTING.md#prerequisites"; exit 1; }
+	$(ZIZMOR) --format=plain .github/workflows/
+	@echo "--- not enforced by the run above ---"
+	@echo "zizmor's default persona hides informational findings. Under --persona=auditor:"
+	-@$(ZIZMOR) --format=plain --persona=auditor .github/workflows/ | tail -n 1
+	@echo "Those are recorded in docs/GAP-LEDGER.md#gap-cicd-1, not silently dropped."
+
+# The hidden half of `make workflows`, in full. Not part of `verify`: it reports
+# informational findings this repository has a stated reason not to act on (naming the
+# `verify` and `test-matrix` jobs would rename the required status-check contexts and
+# lock `main`), so gating on it would be gating on a decision, not on a defect.
+workflows-auditor:
+	@command -v $(UVX) >/dev/null 2>&1 || { echo "uvx not installed — see CONTRIBUTING.md#prerequisites"; exit 1; }
+	$(ZIZMOR) --format=plain --persona=auditor .github/workflows/
+
 # Diff the LIVE branch ruleset on main against .github/rulesets/main.json. Exits 1 on any
 # difference and 2 ("CANNOT VERIFY") when gh is missing, unauthenticated, or the API
 # errors — never 0 without having read the live configuration. Deliberately NOT part of
@@ -179,7 +219,7 @@ ruleset-check:
 nightly-check:
 	$(PY) scripts/check_nightly_macos.py
 
-verify: lint hooks type cov security a11y pwa-test i18n
+verify: lint hooks workflows type cov security a11y pwa-test i18n
 	@echo "All local gates passed."
 	@echo "Note: 'make ruleset-check' and 'make nightly-check' are separate (they need"
 	@echo "network + gh auth). CI runs both inside the required 'verify' job; locally"

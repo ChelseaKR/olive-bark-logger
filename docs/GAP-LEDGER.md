@@ -1,6 +1,6 @@
 # Gap Ledger
 
-**Last verified: 2026-09-05 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+**Last verified: 2026-09-06 · Recheck cadence: every remediation pass (see `docs/audits/`).**
 
 > The stamp above read `2026-08-15` until 2026-08-29, while entries below carried updates
 > dated 2026-08-21, 2026-08-26 and 2026-08-27 — three remediation passes edited this file
@@ -82,8 +82,9 @@ block-mode still open), SEC-08, SEC-19, SEC-27, SEC-29, SEC-35..38.
 Plan: REMEDIATION.md P1-2, P1-3, P1-4, P1-6, P2-1.
 
 ## GAP-CICD-1 — CI/CD: reconcile the live branch ruleset with the committed one, add zizmor + CodeQL-actions
-**Status: Partially open (updated 2026-08-15).** Controls: CICD-11, CICD-13, CICD-14,
-CICD-15, CICD-16, CICD-19, CICD-20.
+**Status: Partially open (updated 2026-09-06).** Controls: CICD-11, CICD-13, CICD-14,
+CICD-15, CICD-16, CICD-19 (**closed 2026-09-06**), CICD-20 (**partially closed
+2026-09-06** — the workflow exists and reports; it does not block a merge).
 
 Correction to this entry as written on 2026-07-05: it said the ruleset "has not been
 **applied**". **A ruleset has been active on `main` since 2026-07-09** — `protect-main`
@@ -172,8 +173,52 @@ reapply procedure: following it while the file said `[]` would itself have cause
 lockout, so the file is now checked as a thing that will be applied, not only as a
 description of what is live.
 
+Update 2026-09-06: **the two static-analysis halves landed, and one of them is
+reporting rather than gating — recorded here rather than counted as closed.**
+
+> Until 2026-09-06 this entry's Still-open list read: "No zizmor workflow-linter step;
+> no CodeQL `language: actions` workflow."
+
+- **CICD-19, zizmor — closed.** `make workflows` runs zizmor over `.github/workflows/`
+  and is a prerequisite of `make verify` and a step in the required `verify` CI job, so
+  the local and CI verdicts are the same command. The version is pinned in the
+  `Makefile` (`ZIZMOR_VERSION`), because a linter that floats to its newest release
+  changes its verdict with no commit to blame — the same defect
+  `scripts/check_nightly_macos.py` was rewritten on 2026-09-06 to stop having.
+  It runs **inside** `verify` rather than as a new required context, for the reason the
+  2026-08-26 entry above gives.
+- **CICD-20, CodeQL `language: actions` — the workflow exists; it is not a gate.**
+  `.github/workflows/codeql.yml` analyses the workflow surface on push, pull request and
+  weekly. `codeql-action/analyze` fails only when the analysis errors: a finding becomes
+  a code-scanning alert and the job still exits 0. Recording that plainly because a
+  green `codeql (actions)` check that cannot fail on a finding is exactly the shape this
+  repository removed five of on 2026-08-26. `make workflows` is the enforced floor for
+  this surface until the follow-up below is decided.
+
+**What zizmor actually reports, and what it hides.** On the tree as of 2026-09-06 the
+default persona reports `No findings to report. Good job! (3 suppressed)`. That
+parenthesis is the load-bearing part: the default persona shows only what it rates
+actionable. `--persona=auditor` reports **3 findings: 3 informational, 0 low, 0 medium,
+0 high**, and `make workflows` echoes that count on every run so "no findings" is never
+read as "nothing there"; `make workflows-auditor` prints them in full. All three are
+`anonymous-definition` — a job without a `name:` — on `ci.yml`'s `verify` and
+`test-matrix` jobs and `nightly.yml`'s `test-matrix-macos`. **They are not being
+fixed, and the reason is specific:** a job's `name:` is what GitHub uses as the status-
+check context, so naming `verify` or `test-matrix` renames six of the required contexts
+in `.github/rulesets/main.json` and blocks every merge until the ruleset is edited to
+match; `test-matrix-macos` is the job `scripts/check_nightly_macos.py` reports on by
+name. Four findings that *were* actionable were fixed in the same pass rather than
+suppressed: two `template-injection` (the matrix Python version now reaches the shell
+through `env:` instead of being expanded into the `run:` text, in `ci.yml` and
+`nightly.yml`), two `undocumented-permissions` (`actions: read` in `ci.yml`,
+`contents: write` in `release.yml`), and `publish-release` in `release.yml` — the one
+anonymous job whose name is not load-bearing — was given one.
+
 **Still open:**
-- No zizmor workflow-linter step; no CodeQL `language: actions` workflow.
+- Whether CodeQL becomes merge-blocking. That means either a code-scanning
+  merge-protection rule or adding `codeql (actions)` to `.github/rulesets/main.json`,
+  and it changes the required-check list, which this repository does deliberately and
+  not as a side effect of adding a workflow. Owner decision.
 
 Plan: REMEDIATION.md P0-2 (now a reconciliation, not an activation), P1-2, P1-6
 (revisit required-check list after these land).
