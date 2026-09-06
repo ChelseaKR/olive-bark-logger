@@ -1,0 +1,75 @@
+name: scorecard
+
+# GAP-SEC-1 (SEC-35..38): OpenSSF Scorecard. The gap ledger has listed "no
+# OpenSSF Scorecard workflow/report" as open since 2026-07-05. This is that
+# workflow.
+#
+# `pull_request` is deliberately not a trigger. Scorecard's value here is the
+# published, dated result for the default branch, and it cannot publish from a
+# pull-request context; a check that runs on PRs and cannot do its job there is
+# noise on every PR in exchange for nothing. The cost is that this workflow's
+# first real run is the one after it merges. It is not a required status check
+# and nothing gates on it, so that first run failing is visible and harmless --
+# which is the trade this repository has already made explicit for `standards`-
+# shaped, push-only workflows elsewhere in the portfolio.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 5 * * 1" # Mondays 05:41 UTC, clear of the 06:17 nightly and the 07:17 codeql run
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keyed on the commit, not on `github.ref`. Every push to main has
+  # `github.ref == refs/heads/main`, so a ref-only key puts them all in one
+  # group, where a third run in flight evicts the pending one with zero jobs
+  # dispatched and the commit ends `cancelled` -- which is not `failure` and
+  # reads as nothing having gone wrong. See the longer note in ci.yml.
+  group: scorecard-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  scorecard:
+    name: OpenSSF Scorecard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read           # Scorecard's Token-Permissions and Pinned-Dependencies checks read workflows
+      contents: read
+      id-token: write         # Sigstore signing of the published result
+      security-events: write  # SARIF upload to code scanning
+    steps:
+      # Egress monitoring (SEC-04), AUDIT mode -- the same posture as ci.yml and
+      # codeql.yml, and for the same stated reason: this repository flips a job to
+      # `egress-policy: block` only after a completed audit run has produced the
+      # allowlist, never from a guess. A candidate list for the flip, taken from
+      # the identically-shaped job in a sibling repository, is recorded in
+      # docs/GAP-LEDGER.md#gap-sec-1 so the flip is a one-line change once this
+      # job has run here.
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411  # v2.19.4
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc  # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+      - name: Upload results to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938  # v4.37.9
+        with:
+          sarif_file: results.sarif
+      - name: Preserve the dated evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 30

@@ -52,6 +52,8 @@ GitHub workflow files checked:
 - `.github/workflows/codeql.yml`
 - `.github/workflows/nightly.yml`
 - `.github/workflows/release.yml`
+- `.github/workflows/scorecard.yml`
+- `.github/workflows/secret-scan-scheduled.yml`
 
 ## Trust Boundaries
 
@@ -67,7 +69,7 @@ GitHub workflow files checked:
 
 ## Docs And Evidence Checked
 
-This pass checked 37 hand-authored doc or metadata files (a point-in-time figure from the 2026-07-12 pass; its "hand-authored" boundary excludes vendored provider licenses, dependency folders, generated cache files, and generated artifacts, which no mechanical rule here reproduces, so it is not derived and may have drifted). The tree currently holds 51 Python/Node test files, and 4 workflow files, on `main` — those two are derived from the tree by `tests/test_doc_figures.py`, so they cannot go stale in silence. They read 33 and 1 until 2026-08-29.
+This pass checked 37 hand-authored doc or metadata files (a point-in-time figure from the 2026-07-12 pass; its "hand-authored" boundary excludes vendored provider licenses, dependency folders, generated cache files, and generated artifacts, which no mechanical rule here reproduces, so it is not derived and may have drifted). The tree currently holds 51 Python/Node test files, and 6 workflow files, on `main` — those two are derived from the tree by `tests/test_doc_figures.py`, so they cannot go stale in silence. They read 33 and 1 until 2026-08-29.
 
 Primary docs checked:
 

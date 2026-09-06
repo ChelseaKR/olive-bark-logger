@@ -107,11 +107,45 @@ making the wrong one of the three.
 - **CodeQL over the Python code.** `.github/workflows/codeql.yml` exists as of
   2026-09-06 but analyses `language: actions` only, and it reports rather than gates —
   see GAP-CICD-1 for both limits.
-- No scheduled TruffleHog full-history scan. Worth writing carefully when it lands:
-  `--only-verified` cannot fail on a credential that has already been revoked, so a
-  history scan configured that way reports clean on exactly the leak that was cleaned up
-  after the fact.
-- No OpenSSF Scorecard workflow or published report.
+- ~~No scheduled TruffleHog full-history scan.~~ **Closed 2026-09-06.**
+  `.github/workflows/secret-scan-scheduled.yml` re-reads every commit reachable from
+  every ref, weekly and on dispatch, with the pinned 3.95.8 binary verified against the
+  release checksum file and `fetch-depth: 0` so it is not scanning one commit and calling
+  it a history.
+
+  > The warning this row carried was right and was not the whole of it. It said
+  > `--only-verified` cannot fail on a credential that has already been revoked. A
+  > negative control run before the workflow was written found that
+  > `--results=verified,unknown` — the setting a sibling repository in this portfolio
+  > uses, and the obvious way to write the fix — cannot either, because it excludes the
+  > same tier under a different name. TruffleHog files a revoked credential as
+  > `unverified`: it asked the service and the service said no, which is what revocation
+  > means. Measured on a throwaway clone with an AWS key planted in one commit and
+  > deleted in the next: `--results=verified,unknown` exits 0 reporting nothing;
+  > `--results=verified,unknown,unverified` exits 183 with `unverified_secrets: 1`.
+  > The workflow uses all three tiers. The usual reason to drop `unverified` is
+  > committed placeholder fixtures; that was checked rather than assumed — this
+  > repository's full history scans clean under all three tiers (2,410 chunks, 0
+  > findings), so the exclusion bought nothing and cost the whole point of the job.
+- ~~No OpenSSF Scorecard workflow or published report.~~ **Closed 2026-09-06**, for the
+  workflow half: `.github/workflows/scorecard.yml` runs on push to `main`, weekly, and on
+  dispatch, uploads SARIF to code scanning and keeps a dated artifact. The *published
+  report* half depends on that workflow's first run on `main` succeeding, which has not
+  happened yet — "built but never run" is a weaker claim than "shipped" and a stronger one
+  than "absent", and this row says which of the three it is.
+- **New, and open:** both workflows above start in `egress-policy: audit`, like every
+  other job here, per the first bullet's own rule that block-mode follows a collected
+  audit run and never a guess. The candidate allowlist for the scorecard job, from the
+  identically-shaped job in the `ledger` repository, is: `github.com:443`,
+  `api.github.com:443`, `raw.githubusercontent.com:443`,
+  `release-assets.githubusercontent.com:443`, `objects.githubusercontent.com:443`,
+  `*.actions.githubusercontent.com:443`, `*.blob.core.windows.net:443`,
+  `*.githubapp.com:443`, `codeload.github.com:443`, `api.osv.dev:443`,
+  `api.deps.dev:443`, `api.scorecard.dev:443`, `www.bestpractices.dev:443`,
+  `oss-fuzz-build-logs.storage.googleapis.com:443`, `fulcio.sigstore.dev:443`,
+  `rekor.sigstore.dev:443`, `tuf-repo-cdn.sigstore.dev:443`. The secret-scan job needs
+  the first eight of those and nothing else. Neither list is observed *here* yet, which
+  is why neither is applied.
 - cosign key-based signing, and the PyPI/GHCR publish decisions — all in GAP-REL-1's
   externally-visible-action set, not this one's.
 Plan: REMEDIATION.md P1-2, P1-3, P1-4, P1-6, P2-1.
