@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING
 from monitor.ambient import percentile
 from monitor.config import QuietSchedule
 from monitor.detector import Event
+from monitor.drift import DriftAdvisory
 
 if TYPE_CHECKING:
-    from store import ClockAnomaly, MinuteLevel
+    from store import ClockAnomaly, DriftAdvisoryRecord, MinuteLevel
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,50 @@ def describe_clock_anomalies(
             f"Clock jumped {direction} by {abs(a.delta):.1f} s (wall time {before} → {after})."
         )
     return lines
+
+
+DRIFT_STEADY_NOTE = (
+    "Drift watch: the ambient baseline has not moved more than the configured tolerance "
+    "since the current calibration. Levels here mean the same thing they meant when the "
+    "device was calibrated."
+)
+
+DRIFT_UNAVAILABLE_PREFIX = "Drift watch unavailable: "
+
+DRIFT_UNAVAILABLE_NOTE = (
+    "An unavailable drift watch is not a steady one. Nothing below has been checked "
+    "against the calibration epoch, so this report cannot say whether the microphone "
+    "has moved."
+)
+
+
+def describe_drift_advisories(
+    advisories: list[DriftAdvisoryRecord], *, tz: tzinfo = timezone.utc
+) -> list[str]:
+    """Plain-language disclosure lines for recorded drift advisories, wall times in `tz`.
+
+    Empty input yields an empty list. The renderer must not read that as "steady": an
+    advisory is only written when a comparison ran *and* tripped, so no rows can also
+    mean no comparison ever ran. The renderer pairs this with the availability state.
+    """
+    return [describe_drift_advisory(a, tz=tz) for a in advisories]
+
+
+def describe_drift_advisory(
+    advisory: DriftAdvisoryRecord | DriftAdvisory, *, tz: tzinfo = timezone.utc
+) -> str:
+    """One advisory as a sentence an operator can act on."""
+    calibrated = datetime.fromtimestamp(advisory.calibration_epoch, tz=tz).strftime("%Y-%m-%d")
+    delta = advisory.largest_delta_db
+    direction = "up" if delta > 0 else "down"
+    return (
+        f"Ambient baseline moved {delta:+.1f} dB ({direction}) since calibration on "
+        f"{calibrated}; the microphone may have moved or drifted — re-run "
+        f"`olive-calibrate`. Median {advisory.median_delta_db:+.1f} dB, L90 "
+        f"{advisory.l90_delta_db:+.1f} dB, tolerance {advisory.tolerance_db:.1f} dB, "
+        f"over {advisory.reference_minutes} reference and {advisory.recent_minutes} "
+        f"recent ambient minutes. This is advisory: no detection parameter was changed."
+    )
 
 
 def summarize(

@@ -18,11 +18,19 @@ from typing import TYPE_CHECKING
 from monitor import __version__
 from monitor.config import Config
 from monitor.detector import Event
+from monitor.drift import REASON_LEDGER_DISABLED as DRIFT_LEDGER_DISABLED
+from monitor.drift import UNAVAILABLE as DRIFT_UNAVAILABLE
+from monitor.drift import DriftCheck
+from monitor.drift import evaluate as evaluate_drift
 
 from report.aggregate import (
+    DRIFT_STEADY_NOTE,
+    DRIFT_UNAVAILABLE_NOTE,
+    DRIFT_UNAVAILABLE_PREFIX,
     AmbientDay,
     Summary,
     describe_clock_anomalies,
+    describe_drift_advisory,
     summarize,
     summarize_ambient,
 )
@@ -56,6 +64,11 @@ NO_SOURCE_NOTE = (
     "where it came from; it does not record or identify any voice or source."
 )
 NO_CLOCK_ANOMALY_NOTE = "No clock anomalies detected during the measurement window."
+
+#: Why the drift block says nothing when a caller renders a report without evaluating
+#: the watch. The default has to be "unavailable", never "steady": a caller that forgot
+#: to pass a check must not thereby publish a clean bill of health.
+DRIFT_NOT_EVALUATED = "no drift comparison was run for this report"
 
 #: What a peak or duration figure reads when there were no events to take it from.
 NO_EVENTS_VALUE = "no events"
@@ -209,6 +222,57 @@ def _conditions_html(session: Session | None) -> str:
     return (
         f"<p>Captured by device <strong>{escape(session.device_label)}</strong>{mic}."
         f"{placement}{coverage}</p>"
+    )
+
+
+def _unevaluated_drift(config: Config) -> DriftCheck:
+    """The drift state of a report whose caller did not run the watch.
+
+    Always ``unavailable``, never ``steady``, and where the config already settles the
+    question -- the ambient ledger is off, so nothing could have been compared -- it
+    reports that reason rather than the vaguer one, because it is the reason the
+    operator can act on.
+    """
+    reason = DRIFT_LEDGER_DISABLED if not config.ambient_ledger else DRIFT_NOT_EVALUATED
+    return DriftCheck(status=DRIFT_UNAVAILABLE, reason=reason)
+
+
+def _drift_html(check: DriftCheck, *, recorded: int) -> str:
+    """Disclose the advisory drift watch: what it found, or that it could not look.
+
+    Three outcomes, kept apart on purpose. An unavailable watch prints the reason and
+    says in terms that it is not a clean bill of health, because "no advisory" and
+    "nothing was checked" would otherwise render identically and the second would read
+    as the first.
+
+    The status is recomputed here from the stored ambient minutes rather than read from
+    the advisory table, so the block cannot go stale and cannot mistake an empty table
+    for a steady baseline: the monitor writes a row only when a comparison *ran and
+    tripped*, so no rows is exactly the ambiguous case. ``recorded`` is reported
+    alongside as history, never as the finding.
+    """
+    history = (
+        ""
+        if recorded == 0
+        else (
+            f'\n<p class="note">The monitor recorded {recorded} drift '
+            f"{'advisory' if recorded == 1 else 'advisories'} during this window.</p>"
+        )
+    )
+    if check.status == DRIFT_UNAVAILABLE:
+        reason = check.reason or "reason not recorded"
+        return (
+            f'<p class="note">{escape(DRIFT_UNAVAILABLE_PREFIX)}'
+            f"{escape(reason)}. {escape(DRIFT_UNAVAILABLE_NOTE)}</p>{history}"
+        )
+    if check.advisory is None:
+        return f'<p class="note">{escape(DRIFT_STEADY_NOTE)}</p>{history}'
+    return (
+        '<p class="note">The ambient baseline has moved since the device was '
+        "calibrated, so a level today may not mean what the same level meant then. "
+        "This is a prompt to re-check the microphone, not a measurement of the "
+        f"neighbour.</p>\n<ul><li>{escape(describe_drift_advisory(check.advisory))}</li>"
+        f"</ul>{history}"
     )
 
 
@@ -672,6 +736,8 @@ def build_report(
     monitored_hours: float | None = None,
     wall_clock_hours: float | None = None,
     clock_anomaly_lines: list[str] | None = None,
+    drift: DriftCheck | None = None,
+    drift_advisories_recorded: int = 0,
     ambient_days: list[AmbientDay] | None = None,
     sensitivity_result: Sensitivity | None = None,
     back_applied: BackApplied | None = None,
@@ -699,6 +765,9 @@ def build_report(
     calibrated = offset != 0.0
     conditions_html = _conditions_html(session)
     clock_html = _clock_anomalies_html(clock_anomaly_lines or [])
+    drift_html = _drift_html(
+        drift or _unevaluated_drift(config), recorded=drift_advisories_recorded
+    )
     ambient_html = _ambient_html(ambient_days or [])
     sensitivity_html = _sensitivity_html(sensitivity_result)
 
@@ -911,6 +980,7 @@ transmitted to produce it.</p>
 <h2>Measurement conditions</h2>
 {conditions_html}
 {clock_html}
+{drift_html}
 
 <h2>Distributions</h2>
 {hour_chart}
@@ -1190,6 +1260,21 @@ def generate_report_from_db(
         gaps = store.gaps()
         sessions = store.sessions()
         minute_levels = store.minute_levels()  # EXP-01, opt-in; usually empty
+        # Advisory drift watch (EXP-04). Recomputed from the stored minutes rather than
+        # read from the advisory table, because an empty table means either "checked and
+        # steady" or "never checked" and the report must not print the reassuring one for
+        # the ambiguous case. `now` is the last recorded moment in the store, not the wall
+        # clock, so the same database always renders the same report.
+        drift_now = (minute_levels[-1].minute_start + 60.0) if minute_levels else 0.0
+        drift_check = evaluate_drift(
+            store,
+            calibration_epoch=history[-1].effective_from if history else None,
+            now=drift_now,
+            window_hours=config.drift_window_hours,
+            tolerance_db=config.drift_tolerance_db,
+            ledger_enabled=config.ambient_ledger,
+        )
+        drift_recorded = len(store.drift_advisories())
 
     # Which epochs actually cover the events in this window? Only those drive the choice
     # between the single-offset path and the multi-epoch disclosure. Levels are always
@@ -1268,6 +1353,8 @@ def generate_report_from_db(
             monitored_hours=monitored_hours,
             wall_clock_hours=wall_clock_hours,
             clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
+            drift=drift_check,
+            drift_advisories_recorded=drift_recorded,
             ambient_days=ambient_days,
             sensitivity_result=sensitivity_result,
             back_applied=back_applied,
@@ -1293,6 +1380,8 @@ def generate_report_from_db(
         monitored_hours=monitored_hours,
         wall_clock_hours=wall_clock_hours,
         clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
+        drift=drift_check,
+        drift_advisories_recorded=drift_recorded,
         ambient_days=ambient_days,
         sensitivity_result=sensitivity_result,
         back_applied=back_applied,

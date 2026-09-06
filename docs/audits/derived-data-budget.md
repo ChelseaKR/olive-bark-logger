@@ -12,9 +12,9 @@ reconstructed. This budget makes that boundary reviewable and testable.
 ## Enforced ceiling
 
 - Persisted datasets are limited to events, capture sessions, calibration epochs,
-  monitoring gaps, clock anomalies, the opt-in ambient-minute ledger, and migration
-  bookkeeping. A new table is a privacy-budget change and must update the gate in
-  `tests/test_privacy_budget.py`.
+  monitoring gaps, clock anomalies, the opt-in ambient-minute ledger, drift advisories,
+  and migration bookkeeping. A new table is a privacy-budget change and must update the
+  gate in `tests/test_privacy_budget.py`.
 - Each event may carry at most five signal-derived scalars: `peak_level`, `avg_level`,
   `rise_time_s`, `loud6_s`, and `longest_run_s`. Timestamps, duration, and `session_id`
   are timing/lineage metadata; `coarse_tag` is one optional categorical hint.
@@ -23,6 +23,15 @@ reconstructed. This budget makes that boundary reviewable and testable.
   `l90_dbfs`. `minute_start` and `session_id` are timing/lineage metadata;
   `frame_count` is a coverage counter (how many readings the summary was computed
   over), the same category as `sessions.frames_seen`, not signal content.
+- Each drift advisory (`drift_advisories`, EXP-04) carries two signal-derived numbers,
+  `median_delta_db` and `l90_delta_db`, and both are *differences of two aggregates of
+  the ambient-minute ledger above*. No new measurement of the room enters the store
+  through this table, which is why it adds nothing to the per-minute ceiling; the rest
+  of the row is two window pairs, two minute counts, a tolerance and lineage.
+  `tests/test_privacy_budget.py` asserts that each drift field is the delta of a
+  minute-level field already declared here, so a future edit cannot smuggle a new
+  quantity in as an advisory. Rows are written only when a comparison trips, at most
+  once per `drift_check_interval_s`, so the cadence is bounded well below the ledger's.
 - Signal-derived values are bounded per-event or per-minute summaries only. Per-frame
   or sub-minute periodic level rows, sample arrays, histograms, frequency bins,
   spectra, embeddings, and fingerprints are outside the budget.
@@ -87,8 +96,9 @@ instant:
 
 A qualified audio-privacy or re-identification reviewer must assess whether the five
 signal-derived scalars per event, the four signal-derived scalars per ambient-ledger
-minute, and the possible event/minute rate together create a practical speech-activity
-or occupancy risk beyond the stated posture. Until that review is committed, this
+minute, the two derived deltas per drift advisory, and the possible event/minute rate
+together create a practical speech-activity or occupancy risk beyond the stated
+posture. Until that review is committed, this
 document is an enforced engineering limit, not a claim of expert-validated safety —
 consistent with how EXP-06's PDF/UA claim and FIX-13's original ceiling are each
 marked human-gated rather than silently treated as done.

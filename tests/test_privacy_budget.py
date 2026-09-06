@@ -15,6 +15,7 @@ EXPECTED_TABLES = {
     "gaps",
     "clock_anomalies",
     "minute_levels",
+    "drift_advisories",
 }
 
 EVENT_COLUMNS = {
@@ -59,6 +60,31 @@ SIGNAL_DERIVED_MINUTE_FIELDS = {
     "l90_dbfs",
 }
 MAX_SIGNAL_SCALARS_PER_MINUTE = 4
+
+# Advisory drift watch (EXP-04). Rows are written only when a comparison trips, and they
+# hold *differences between two aggregates of the minute ledger* rather than any new
+# reading: two dB deltas, a tolerance, two minute counts and four window bounds. No new
+# signal-derived quantity enters the store here, which is why this table adds nothing to
+# the per-minute ceiling above. See docs/audits/derived-data-budget.md.
+DRIFT_ADVISORY_COLUMNS = {
+    "id",
+    "session_id",
+    "detected_at",
+    "calibration_epoch",
+    "reference_start",
+    "reference_end",
+    "recent_start",
+    "recent_end",
+    "reference_minutes",
+    "recent_minutes",
+    "median_delta_db",
+    "l90_delta_db",
+    "tolerance_db",
+}
+# Every signal-derived number in a drift row is a difference of two `minute_levels`
+# statistics that are already inside the budget above. Nothing here is a fresh
+# measurement of the room.
+SIGNAL_DERIVED_DRIFT_FIELDS = {"median_delta_db", "l90_delta_db"}
 
 
 def _schema(db_path) -> dict[str, set[str]]:
@@ -112,3 +138,23 @@ def test_schema_has_no_spectral_or_reconstruction_fields(tmp_path):
         if any(word in column for word in forbidden)
     }
     assert not offenders, f"fields exceed the derived-data privacy budget: {offenders}"
+
+
+def test_drift_advisory_shape_matches_budget(tmp_path):
+    """EXP-04 stores differences of already-budgeted aggregates, and nothing else.
+
+    The check that matters is not the column count but what the columns *are*: a drift
+    row must never smuggle in a new per-minute or per-frame quantity under the cover of
+    an advisory.
+    """
+    schema = _schema(tmp_path / "olive.db")
+    assert schema["drift_advisories"] == DRIFT_ADVISORY_COLUMNS, (
+        "drift_advisories schema changed; review the privacy budget"
+    )
+    assert schema["drift_advisories"] >= SIGNAL_DERIVED_DRIFT_FIELDS
+    # Each signal-derived drift field is a delta of a field already declared above.
+    for field in SIGNAL_DERIVED_DRIFT_FIELDS:
+        base = field.removesuffix("_delta_db") + "_dbfs"
+        assert base in SIGNAL_DERIVED_MINUTE_FIELDS, (
+            f"{field} is not a difference of an already-budgeted minute statistic"
+        )

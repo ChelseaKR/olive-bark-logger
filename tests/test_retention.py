@@ -27,6 +27,7 @@ import monitor.capture_live as capture_live
 from monitor.ambient import MinuteLevel
 from monitor.capture import LoudRegion, synthetic_session
 from monitor.detector import Event
+from monitor.drift import DriftAdvisory
 from monitor.service import main as monitor_main
 from store import PRUNED_TABLES, RETENTION_EXEMPT_TABLES, EventStore
 
@@ -36,6 +37,22 @@ HORIZON = 1_000_000.0  # unix seconds; "older than" means strictly before this
 
 def _ev(start: float) -> Event:
     return Event(start, start + 2.0, 2.0, -10.0, -14.0)
+
+
+def _advisory(epoch: float) -> DriftAdvisory:
+    """A drift advisory whose numbers are irrelevant here; only its time matters."""
+    return DriftAdvisory(
+        calibration_epoch=epoch,
+        reference_start=epoch,
+        reference_end=epoch + 3600.0,
+        recent_start=epoch + 7200.0,
+        recent_end=epoch + 10800.0,
+        reference_minutes=60,
+        recent_minutes=60,
+        median_delta_db=8.0,
+        l90_delta_db=7.0,
+        tolerance_db=5.0,
+    )
 
 
 def _minute(start: float) -> MinuteLevel:
@@ -114,6 +131,11 @@ def test_prune_reaches_every_time_keyed_table_and_reports_each(tmp_path):
             detected_at=HORIZON + DAY,
         )
 
+        store.add_drift_advisory(
+            _advisory(HORIZON - 2 * DAY), session_id=old_sid, detected_at=HORIZON - DAY
+        )
+        store.add_drift_advisory(_advisory(HORIZON), session_id=new_sid, detected_at=HORIZON + DAY)
+
         result = store.prune(before=HORIZON)
 
         assert result.as_dict() == {
@@ -121,13 +143,15 @@ def test_prune_reaches_every_time_keyed_table_and_reports_each(tmp_path):
             "minute_levels": 3,
             "gaps": 1,
             "clock_anomalies": 1,
+            "drift_advisories": 1,
             "sessions": 1,
         }
-        assert result.total == 7
+        assert result.total == 8
         assert [e.start for e in store.events()] == [HORIZON + DAY]
         assert [m.minute_start for m in store.minute_levels()] == [HORIZON + DAY]
         assert [g.start for g in store.gaps()] == [HORIZON - 300]  # straddling gap kept
         assert [a.detected_at for a in store.clock_anomalies()] == [HORIZON + DAY]
+        assert [d.detected_at for d in store.drift_advisories()] == [HORIZON + DAY]
         assert [s.id for s in store.sessions()] == [new_sid]
         # Calibration history is exempt by design and must survive a prune untouched.
         store.add_calibration(48.0, "test", effective_from=HORIZON - 10 * DAY)
@@ -192,6 +216,7 @@ def test_json_retention_line_carries_per_table_counts(tmp_path, monkeypatch, cap
         "minute_levels": 2,
         "gaps": 0,
         "clock_anomalies": 0,
+        "drift_advisories": 0,
         "sessions": 0,
     }
     assert retention[0]["pruned"] == 2

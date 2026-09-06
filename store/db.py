@@ -30,10 +30,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from monitor import drift
 from monitor.ambient import MinuteLevel
 from monitor.detector import Event
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Ordered migrations. Each entry upgrades the database from version i to i+1. A fresh
 # database (user_version 0) runs them all; an existing one runs only the new ones.
@@ -160,6 +161,30 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_minute_levels_start ON minute_levels(minute_start);
     """,
+    # 8 -> 9: advisory drift watch (EXP-04). One row per observation that the ambient
+    # baseline has moved away from the window right after the current calibration
+    # epoch. Numbers and two window bounds only, never audio and never a per-frame
+    # reading: the deltas are computed from the minute ledger above, which is itself
+    # already inside the derived-data budget. Advisory by design -- nothing here ever
+    # changes a detection parameter; see docs/adr/0030.
+    """
+    CREATE TABLE drift_advisories (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id        INTEGER,
+        detected_at       REAL NOT NULL,   -- wall time the comparison was made
+        calibration_epoch REAL NOT NULL,   -- effective_from of the epoch compared against
+        reference_start   REAL NOT NULL,
+        reference_end     REAL NOT NULL,
+        recent_start      REAL NOT NULL,
+        recent_end        REAL NOT NULL,
+        reference_minutes INTEGER NOT NULL,
+        recent_minutes    INTEGER NOT NULL,
+        median_delta_db   REAL NOT NULL,   -- recent - reference; + means louder
+        l90_delta_db      REAL NOT NULL,
+        tolerance_db      REAL NOT NULL
+    );
+    CREATE INDEX idx_drift_detected ON drift_advisories(detected_at);
+    """,
 ]
 
 
@@ -241,11 +266,19 @@ class PruneResult:
     minute_levels: int
     gaps: int
     clock_anomalies: int
+    drift_advisories: int
     sessions: int
 
     @property
     def total(self) -> int:
-        return self.events + self.minute_levels + self.gaps + self.clock_anomalies + self.sessions
+        return (
+            self.events
+            + self.minute_levels
+            + self.gaps
+            + self.clock_anomalies
+            + self.drift_advisories
+            + self.sessions
+        )
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -253,6 +286,7 @@ class PruneResult:
             "minute_levels": self.minute_levels,
             "gaps": self.gaps,
             "clock_anomalies": self.clock_anomalies,
+            "drift_advisories": self.drift_advisories,
             "sessions": self.sessions,
         }
 
@@ -267,7 +301,14 @@ RETENTION_EXEMPT_TABLES: dict[str, str] = {
     "sqlite_sequence": "SQLite AUTOINCREMENT bookkeeping",
 }
 
-PRUNED_TABLES: tuple[str, ...] = ("events", "minute_levels", "gaps", "clock_anomalies", "sessions")
+PRUNED_TABLES: tuple[str, ...] = (
+    "events",
+    "minute_levels",
+    "gaps",
+    "clock_anomalies",
+    "drift_advisories",
+    "sessions",
+)
 
 
 @dataclass(frozen=True)
@@ -281,6 +322,38 @@ class ClockAnomaly:
     wall_after: float
     delta: float
     detected_at: float
+
+
+@dataclass(frozen=True)
+class DriftAdvisoryRecord:
+    """One stored observation that the ambient baseline moved away from calibration.
+
+    Advisory only: nothing reads these back to change a detection parameter. See
+    ``monitor/drift.py`` and ADR 0030. Numbers and window bounds — never audio.
+    """
+
+    id: int
+    session_id: int | None
+    detected_at: float
+    calibration_epoch: float
+    reference_start: float
+    reference_end: float
+    recent_start: float
+    recent_end: float
+    reference_minutes: int
+    recent_minutes: int
+    median_delta_db: float
+    l90_delta_db: float
+    tolerance_db: float
+
+    @property
+    def largest_delta_db(self) -> float:
+        """The signed delta that tripped the tolerance (the larger in magnitude)."""
+        return (
+            self.median_delta_db
+            if abs(self.median_delta_db) >= abs(self.l90_delta_db)
+            else self.l90_delta_db
+        )
 
 
 @dataclass(frozen=True)
@@ -426,6 +499,9 @@ class EventStore:
         - ``gaps`` that ended before it. A gap straddling the horizon still says
           something about retained time and stays.
         - ``clock_anomalies`` detected before it.
+        - ``drift_advisories`` detected before it. They are derived from the minute
+          ledger, so keeping them past the minutes they summarize would outlive the
+          data that justifies them.
         - ``sessions`` whose last vouched-for moment (`Session.last_vouched_at`: the
           recorded end, or for a crashed run the end its frame counters prove) is
           before it, *and* that no retained row still references. A session row carries
@@ -449,6 +525,9 @@ class EventStore:
             anomalies = conn.execute(
                 "DELETE FROM clock_anomalies WHERE detected_at < ?", (before,)
             ).rowcount
+            drift = conn.execute(
+                "DELETE FROM drift_advisories WHERE detected_at < ?", (before,)
+            ).rowcount
             # Sessions: the vouched-for end is a Python rule (it reads the frame
             # counters), so select candidates by start and decide in Python.
             candidates = [
@@ -462,8 +541,9 @@ class EventStore:
                     "SELECT 1 FROM events WHERE session_id = ? "
                     "UNION ALL SELECT 1 FROM minute_levels WHERE session_id = ? "
                     "UNION ALL SELECT 1 FROM gaps WHERE session_id = ? "
-                    "UNION ALL SELECT 1 FROM clock_anomalies WHERE session_id = ? LIMIT 1",
-                    (sid, sid, sid, sid),
+                    "UNION ALL SELECT 1 FROM clock_anomalies WHERE session_id = ? "
+                    "UNION ALL SELECT 1 FROM drift_advisories WHERE session_id = ? LIMIT 1",
+                    (sid, sid, sid, sid, sid),
                 ).fetchone()
                 if referenced is None:
                     sessions += conn.execute("DELETE FROM sessions WHERE id = ?", (sid,)).rowcount
@@ -476,6 +556,7 @@ class EventStore:
             minute_levels=minutes,
             gaps=gaps,
             clock_anomalies=anomalies,
+            drift_advisories=drift,
             sessions=sessions,
         )
 
@@ -747,6 +828,85 @@ class EventStore:
         return [self._row_to_session(r) for r in rows]
 
     # -- clock anomalies -----------------------------------------------------
+    # -- advisory drift watch (EXP-04) ---------------------------------------
+    def add_drift_advisory(
+        self,
+        advisory: drift.DriftAdvisory,
+        *,
+        session_id: int | None,
+        detected_at: float,
+    ) -> int:
+        """Persist one drift advisory. Numbers only — never audio, never a threshold change."""
+        cur = self._conn.execute(
+            "INSERT INTO drift_advisories (session_id, detected_at, calibration_epoch, "
+            "reference_start, reference_end, recent_start, recent_end, reference_minutes, "
+            "recent_minutes, median_delta_db, l90_delta_db, tolerance_db) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                session_id,
+                detected_at,
+                advisory.calibration_epoch,
+                advisory.reference_start,
+                advisory.reference_end,
+                advisory.recent_start,
+                advisory.recent_end,
+                advisory.reference_minutes,
+                advisory.recent_minutes,
+                advisory.median_delta_db,
+                advisory.l90_delta_db,
+                advisory.tolerance_db,
+            ),
+        )
+        self._conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def drift_advisories(
+        self, start: float | None = None, end: float | None = None
+    ) -> list[DriftAdvisoryRecord]:
+        """Advisories whose detected_at falls in [start, end), oldest first.
+
+        An empty list means the table was queried and nothing was in the window. It does
+        not mean the baseline is steady: a check that never ran writes no row either, so
+        callers must read the availability state (``monitor.drift``) rather than reading
+        emptiness as reassurance.
+        """
+        sql = "SELECT * FROM drift_advisories"
+        clauses: list[str] = []
+        params: list[float] = []
+        if start is not None:
+            clauses.append("detected_at >= ?")
+            params.append(start)
+        if end is not None:
+            clauses.append("detected_at < ?")
+            params.append(end)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY detected_at ASC, id ASC"
+        rows: Iterable[sqlite3.Row] = self._conn.execute(sql, params)
+        return [
+            DriftAdvisoryRecord(
+                id=r["id"],
+                session_id=r["session_id"],
+                detected_at=r["detected_at"],
+                calibration_epoch=r["calibration_epoch"],
+                reference_start=r["reference_start"],
+                reference_end=r["reference_end"],
+                recent_start=r["recent_start"],
+                recent_end=r["recent_end"],
+                reference_minutes=r["reference_minutes"],
+                recent_minutes=r["recent_minutes"],
+                median_delta_db=r["median_delta_db"],
+                l90_delta_db=r["l90_delta_db"],
+                tolerance_db=r["tolerance_db"],
+            )
+            for r in rows
+        ]
+
+    def latest_drift_advisory(self) -> DriftAdvisoryRecord | None:
+        """The most recently detected advisory, or None if none has ever been recorded."""
+        rows = self.drift_advisories()
+        return rows[-1] if rows else None
+
     def add_clock_anomaly(
         self,
         *,
