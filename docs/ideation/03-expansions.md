@@ -62,6 +62,14 @@ levels is approximate; never lets the *headline* numbers move.
 **Effort:** M. **Risks/deps:** EXP-01; approximation must be honestly labeled or it
 backfires. **Excellence bar:** the section survives review by an acoustics SME
 (review gate); wording review-gated like R3's copy.
+**Status (2026-09-06):** built — `report/sensitivity.py`, rendered by
+`report/render.py` and suppressible with `olive-report --sensitivity off`. The
+implementation adds one thing this pitch did not anticipate: the recount is only
+answerable *upward* from stored events, because an event under the configured threshold
+was never recorded, so below it the event column is a floor rather than a count and the
+ambient ledger carries the signal. **The acoustics-SME wording review named in
+`04-impact-and-sequencing.md`'s human-gate table is still open**, and shipping the code
+does not close it; `tests/test_sensitivity.py` fails if that row is removed.
 
 ### EXP-04 · Advisory recalibration & drift watch
 **Pitch:** A nightly, *advisory-only* check comparing recent ambient percentiles to the
