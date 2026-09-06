@@ -13,10 +13,10 @@ UVX ?= uvx
 ZIZMOR_VERSION ?= 1.29.0
 ZIZMOR ?= $(UVX) --from zizmor==$(ZIZMOR_VERSION) zizmor
 
-.PHONY: help venv dev fmt lint hooks workflows workflows-auditor type test cov security a11y snapshot report pdf pdf-a11y pwa-test i18n ruleset-check nightly-check verify clean
+.PHONY: help venv dev fmt lint hooks workflows workflows-auditor type test cov security a11y snapshot doc-figures report pdf pdf-a11y pwa-test i18n ruleset-check nightly-check verify clean
 
 help:
-	@echo "Targets: dev fmt lint hooks workflows type test cov security a11y snapshot report pdf pdf-a11y pwa-test ruleset-check nightly-check verify clean"
+	@echo "Targets: dev fmt lint hooks workflows type test cov security a11y snapshot doc-figures report pdf pdf-a11y pwa-test ruleset-check nightly-check verify clean"
 
 venv:
 	@command -v $(UV) >/dev/null 2>&1 || { echo "uv not installed — see CONTRIBUTING.md#prerequisites"; exit 1; }
@@ -128,6 +128,15 @@ a11y:
 
 snapshot:
 	$(PY) scripts/gen_snapshot.py
+
+# Writes the figures the documents state about this repo -- waived CVEs, ADRs, and the
+# validation surface stated in two places -- from the tree itself, so that adding a test
+# file costs a command rather than an edit to a number in two documents.
+# tests/test_doc_figures.py fails when they disagree; this is the half that fixes it, and
+# like `snapshot` it is deliberately not a prerequisite of `verify`: a gate that repairs
+# what it checks cannot fail.
+doc-figures:
+	$(PY) scripts/doc_figures.py
 
 # Render a sample report from a demo event log so `make report` always produces output.
 report:

@@ -113,7 +113,11 @@ floor there. Making CodeQL blocking is a required-check decision recorded in
 `docs/GAP-LEDGER.md`.
 
 `tests/test_doc_figures.py` derives that six/three split from `ci.yml` and the `Makefile`,
-so this table fails a build if either side changes. It previously said there was "the one
+so this table fails a build if either side changes. It also derives the waived-CVE count, the
+ADR count, and the validation-surface figure that `docs/DOCUMENTATION-AUDIT.md` and
+`docs/PROJECT-SCOPE.md` both state -- and **`make doc-figures` writes all of them**. Adding
+a test file changes that figure in two documents; do not retype it in either, run the
+target and commit what it changes. It previously said there was "the one
 place" the two disagree and pointed at `docs/GAP-LEDGER.md#gap-cicd-1`, an entry about the
 branch ruleset that never mentions parity.
 

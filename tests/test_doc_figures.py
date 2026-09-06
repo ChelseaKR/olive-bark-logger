@@ -30,12 +30,19 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from conftest import ROOT
+from scripts import doc_figures
+from scripts.doc_figures import (
+    AUDITS,
+    DOC_AUDIT,
+    MAKEFILE,
+    SCOPE,
+    adr_count,
+    count_test_files,
+    waiver_count,
+    workflow_count,
+)
 
-AUDITS = ROOT / "docs" / "RESPONSIBLE-TECH-AUDITS.md"
-DOC_AUDIT = ROOT / "docs" / "DOCUMENTATION-AUDIT.md"
-SCOPE = ROOT / "docs" / "PROJECT-SCOPE.md"
-MAKEFILE = ROOT / "Makefile"
+from conftest import ROOT
 
 
 def _text(path: Path) -> str:
@@ -55,26 +62,15 @@ def _claims(path: Path) -> str:
 
 
 # --- the repo facts, read from the repo ----------------------------------------------
-
-
-def waiver_count() -> int:
-    """CVEs waived in `PIP_AUDIT_WAIVERS`, counted from the Makefile."""
-    return len(re.findall(r"--ignore-vuln\s+\S+", _text(MAKEFILE)))
-
-
-def adr_count() -> int:
-    return len(list((ROOT / "docs" / "adr").glob("*.md")))
-
-
-def count_test_files() -> int:
-    """Python and Node test files, the two suites `make verify` runs."""
-    return len(list((ROOT / "tests").glob("test_*.py"))) + len(
-        list((ROOT / "pwa").glob("*.test.mjs"))
-    )
-
-
-def workflow_count() -> int:
-    return len(list((ROOT / ".github" / "workflows").glob("*.yml")))
+#
+# `waiver_count`, `adr_count`, `count_test_files` and `workflow_count` are imported from
+# `scripts/doc_figures.py` rather than defined here. They used to live in this file, which
+# meant the gate could derive the true number and nothing could write it: every branch that
+# added a test file had to open two documents and retype a digit, and two such branches
+# conflicted over a diff whose entire content was a number. `scripts/doc_figures.py` writes
+# them (`make doc-figures`), and importing the derivations from there is what makes "what
+# the writer produces" and "what this gate demands" the same expression rather than two
+# regexes that agree until they do not.
 
 
 def verify_prerequisites() -> list[str]:
@@ -164,6 +160,40 @@ def test_the_validation_surface_counts_are_current():
             f"{path.name} says {flows_said} workflow file(s); .github/workflows/ holds "
             f"{workflow_count()}"
         )
+
+
+def test_the_writer_produces_exactly_what_these_checks_demand():
+    """`make doc-figures` must never produce a document the checks above reject.
+
+    A writer and a gate that each carry their own regex agree until the day they do not,
+    and the failure is silent in the worst direction: the command a contributor is told to
+    run leaves the build red, so they go back to editing by hand and the writer rots.
+
+    Both directions, the way everything else here is written. On the committed tree the
+    writer changes nothing; on a tree whose figures have been falsified it puts every one
+    of them back.
+    """
+    for path in doc_figures.DOCUMENTS:
+        assert doc_figures.rewrite(path) == _text(path), (
+            f"scripts/doc_figures.py would rewrite {path.name}, so the committed figures "
+            "are stale. Run `make doc-figures`."
+        )
+
+
+def test_the_writer_does_not_edit_a_quoted_superseded_claim(tmp_path: Path):
+    """The correction at the top of DOCUMENTATION-AUDIT.md quotes its own wrong numbers.
+
+    "33 Python/Node test files; 1 workflow file" is there on purpose, in a blockquote, next
+    to the correction that supersedes it -- the arrangement `docs/GAP-LEDGER.md` uses
+    throughout. A writer that treated it as a claim would quietly rewrite the record to
+    agree with the present, which is the one edit this repository must never make.
+    """
+    quoted = '"33 Python/Node test files; 1 workflow file"'
+    assert quoted in _text(DOC_AUDIT), "the superseded figure is no longer quoted; re-aim this"
+    assert quoted in doc_figures.rewrite(DOC_AUDIT), (
+        "scripts/doc_figures.py rewrote a figure inside a blockquote -- it must skip them, "
+        "the same way _claims() here does"
+    )
 
 
 # --- F4: what `make verify` does to committed artifacts ------------------------------
