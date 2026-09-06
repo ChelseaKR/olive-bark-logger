@@ -26,6 +26,8 @@ from monitor.capture import resilient_source
 from monitor.clock import ClockGuard
 from monitor.config import Config
 from monitor.detector import Detector, Event
+from monitor.drift import DriftAdvisory, DriftCheck
+from monitor.drift import evaluate as evaluate_drift
 from monitor.features import FeatureWindow, classify, zero_crossing_rate
 from monitor.health import CaptureStats, write_health
 from monitor.ipc import LocalIpcEmitter
@@ -173,6 +175,7 @@ def _health_payload(
     session_id: int,
     clock_anomalies: int = 0,
     last_level: float | None = None,
+    drift: DriftCheck | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "status": "ok",
@@ -189,7 +192,121 @@ def _health_payload(
     }
     if last_level is not None:
         payload["last_level_dbfs"] = round(last_level, 1)
+    payload.update(drift_health_fields(drift))
     return payload
+
+
+def drift_health_fields(check: DriftCheck | None) -> dict[str, object]:
+    """The heartbeat's drift block: a status word, and either a reason or the deltas.
+
+    ``None`` means no comparison has been attempted yet in this process, which is its
+    own state and is written as one. Numbers and fixed status words only, so the
+    heartbeat stays free of anything identifying (tests/test_health.py).
+    """
+    if check is None:
+        return {"drift_status": "not-yet-checked"}
+    fields: dict[str, object] = {"drift_status": check.status}
+    if check.reason is not None:
+        fields["drift_reason"] = check.reason
+    if check.reference is not None and check.recent is not None:
+        fields["drift_median_delta_db"] = round(
+            check.recent.median_dbfs - check.reference.median_dbfs, 2
+        )
+        fields["drift_l90_delta_db"] = round(check.recent.l90_dbfs - check.reference.l90_dbfs, 2)
+        fields["drift_reference_minutes"] = check.reference.minute_count
+        fields["drift_recent_minutes"] = check.recent.minute_count
+    if check.advisory is not None:
+        fields["drift_tolerance_db"] = check.advisory.tolerance_db
+    return fields
+
+
+def _describe_drift_advisory(advisory: DriftAdvisory) -> str:
+    """Lazy import so the monitor keeps no load-time dependency on the report package."""
+    from report.aggregate import describe_drift_advisory
+
+    return describe_drift_advisory(advisory)
+
+
+def run_drift_watch(
+    watch: DriftWatch, store: EventStore, *, session_id: int | None, now: float
+) -> DriftCheck | None:
+    """Run the advisory drift comparison if it is due. Best-effort by design.
+
+    A failure here must never take down capture: the watch is advisory, and losing it is
+    strictly less bad than losing the recording it comments on. The failure is announced
+    rather than swallowed, so a watch that has stopped working does not look like a
+    watch that keeps finding nothing.
+    """
+    try:
+        return watch.run(store, now=now, session_id=session_id)
+    except Exception as exc:  # pragma: no cover - defensive; capture must survive
+        emit(watch.config.log_format, "drift_watch_failed", f"drift watch did not run: {exc}")
+        return None
+
+
+class DriftWatch:
+    """Runs the advisory drift comparison on the checkpoint tick, at most once a day.
+
+    Mirrors :class:`monitor.clock.ClockGuard`: no timer thread, no sockets, and the
+    caller supplies the clock. Two things keep it from filling the table. In-process it
+    refuses to re-run inside ``interval_s``; across restarts it also refuses to write a
+    second advisory for the same calibration epoch within that interval, which a
+    monitor restarted hourly would otherwise do.
+
+    The last :class:`~monitor.drift.DriftCheck` is kept so the heartbeat can publish
+    what was actually found, including the unavailable reason. That matters: a watch
+    that could not run must not leave the heartbeat looking like a watch that ran and
+    found nothing.
+    """
+
+    def __init__(self, config: Config, *, interval_s: float | None = None) -> None:
+        self.config = config
+        self.interval_s = config.drift_check_interval_s if interval_s is None else interval_s
+        self.last_check: DriftCheck | None = None
+        self._last_run_at: float | None = None
+
+    def due(self, now: float) -> bool:
+        return self._last_run_at is None or (now - self._last_run_at) >= self.interval_s
+
+    def run(self, store: EventStore, *, now: float, session_id: int | None) -> DriftCheck | None:
+        """Compare, record an advisory if one is warranted, and return the check.
+
+        Returns None when the watch was not due, so the caller can tell "not time yet"
+        from "compared and found nothing".
+        """
+        if not self.due(now):
+            return None
+        self._last_run_at = now
+        history = store.calibration_history()
+        epoch = history[-1].effective_from if history else None
+        check = evaluate_drift(
+            store,
+            calibration_epoch=epoch,
+            now=now,
+            window_hours=self.config.drift_window_hours,
+            tolerance_db=self.config.drift_tolerance_db,
+            ledger_enabled=self.config.ambient_ledger,
+        )
+        self.last_check = check
+        if check.advisory is not None and self._should_record(store, check, now=now):
+            store.add_drift_advisory(check.advisory, session_id=session_id, detected_at=now)
+            emit(
+                self.config.log_format,
+                "drift_advisory",
+                _describe_drift_advisory(check.advisory),
+                median_delta_db=check.advisory.median_delta_db,
+                l90_delta_db=check.advisory.l90_delta_db,
+                tolerance_db=check.advisory.tolerance_db,
+            )
+        return check
+
+    def _should_record(self, store: EventStore, check: DriftCheck, *, now: float) -> bool:
+        """Skip a duplicate advisory for the same epoch inside one interval."""
+        previous = store.latest_drift_advisory()
+        if previous is None or check.advisory is None:
+            return True
+        same_epoch = previous.calibration_epoch == check.advisory.calibration_epoch
+        return not (same_epoch and (now - previous.detected_at) < self.interval_s)
 
 
 def _write_status_page(config: Config, store: EventStore, payload: dict[str, object]) -> None:
@@ -336,6 +453,10 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
     # Clock-integrity guard: watch for wall-vs-monotonic divergence (RTC-less Pi hazard).
     guard = ClockGuard(tolerance_s=config.clock_jump_tolerance_s)
     anomaly_count = 0
+    # Advisory drift watch (EXP-04): rides the same checkpoint cadence as the clock
+    # guard, but compares at most once per drift_check_interval_s. Never changes a
+    # detection parameter; see ADR 0030.
+    drift_watch = DriftWatch(config)
     # Opt-in, emit-only local automation feed (Home Assistant et al). Disabled unless
     # a socket path is configured; the emitter never opens a network socket.
     emitter = LocalIpcEmitter(config.ipc_socket) if config.ipc_socket else None
@@ -358,6 +479,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
             session_id=session_id,
             clock_anomalies=anomaly_count,
             last_level=latest_level,
+            drift=drift_watch.last_check,
         )
         _publish_heartbeat(config, store, emitter, payload)
 
@@ -395,6 +517,7 @@ def main(argv: list[str] | None = None, *, now: float = 0.0) -> int:
         # only the finally block records the real end time. The clock guard rides the
         # same cadence so anomalies are caught on quiet nights too, not only on events.
         check_clock()
+        run_drift_watch(drift_watch, store, session_id=session_id, now=time.time())
         heartbeat()
         store.update_session(
             session_id,

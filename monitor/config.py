@@ -324,6 +324,18 @@ class Config:
     # Clock-integrity guard: flag a wall-vs-monotonic divergence larger than this many
     # seconds as a clock jump (important on RTC-less Pis where NTP sync lurches the clock).
     clock_jump_tolerance_s: float = 2.0
+    # Advisory drift watch (EXP-04). Compares the recent ambient baseline against the
+    # window just after the current calibration epoch and raises an advisory when the
+    # median or L90 has moved further than the tolerance. It needs the ambient ledger
+    # above; with that off the watch reports itself unavailable rather than steady.
+    #
+    # 5 dB is a placeholder chosen for its order of magnitude, not measured: it is
+    # roughly a doubling of perceived loudness and well outside the minute-to-minute
+    # variation of a settled room, but this project has no long real-world deployment
+    # to derive a distribution from. Treat it as a default to tune, not a finding.
+    drift_tolerance_db: float = 5.0
+    drift_window_hours: float = 24.0  # length of both the reference and recent windows
+    drift_check_interval_s: float = 86400.0  # at most one comparison per day
 
     # Device/site metadata for data lineage and the bias audit.
     device_label: str = "olive-monitor"
@@ -343,10 +355,21 @@ class Config:
             raise ConfigError("retention_days must be non-negative")
         if self.clock_jump_tolerance_s <= 0:
             raise ConfigError("clock_jump_tolerance_s must be positive")
+        self._validate_drift()
         if self.checkpoint_interval_s <= 0:
             raise ConfigError("checkpoint_interval_s must be positive")
         if self.log_format not in LOG_FORMATS:
             raise ConfigError(f"log_format must be one of {LOG_FORMATS}")
+
+    def _validate_drift(self) -> None:
+        """Advisory drift-watch bounds. A non-positive value would make the watch a
+        no-op that still reported a status, so each is refused at load time."""
+        if self.drift_tolerance_db <= 0:
+            raise ConfigError("drift_tolerance_db must be positive")
+        if self.drift_window_hours <= 0:
+            raise ConfigError("drift_window_hours must be positive")
+        if self.drift_check_interval_s <= 0:
+            raise ConfigError("drift_check_interval_s must be positive")
 
     def status_html_path(self) -> str:
         """Effective path for the static status page ("" = disabled).

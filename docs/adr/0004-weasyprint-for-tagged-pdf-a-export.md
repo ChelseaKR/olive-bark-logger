@@ -130,6 +130,47 @@ formats for attached files that are forbidden in A-2" — the same reasoning app
 the -3 level generally, kept available for a future CSV-attachment enhancement even
 though this pass does not use it).
 
+### Amendment, 2026-09-06: the workaround was passing by coincidence
+
+The mitigation recorded above (drop the chart SVG, flatten the chart `<figure>`,
+let large tables paginate) was verified against the fixture set as it stood, and
+that turned out to be the whole extent of its guarantee. Appending filler
+paragraphs to the report before conversion, and changing nothing else, moved the
+gate's verdict around at random:
+
+| extra `<p>` | failures in `tests/test_pdf_export.py` |
+|---:|---:|
+| 0 | 7 |
+| 1 | 7 |
+| 5 | 1 |
+| 20 | 6 |
+| 60 | **0** |
+
+Every failure was the same `ValueError: Table wrapper without a table`. The suite
+was green at exactly the report's own length, so the next person to add a sentence
+to the report would have been handed a red gate and a stack trace pointing into
+WeasyPrint.
+
+The mechanism is narrower than the original bisection concluded. WeasyPrint wraps a
+`<table>` together with its `<caption>` in one table-wrapper box. When the caption
+fits at the foot of a page and the table body does not, the fragment left behind is
+a wrapper holding a caption and no table — the state `get_wrapped_table` refuses.
+Nothing in the earlier mitigation stopped a caption being separated from its table;
+it only removed the *other* ways of arriving at a bad layout.
+
+The fix is one rule in `_PDF_LAYOUT_STYLE`:
+
+```css
+caption { break-after: avoid; page-break-after: avoid; }
+```
+
+With it, the same sweep passes at 0, 1, 5, 20 and 60 extra paragraphs. The property
+is now pinned by `test_the_tagged_pdf_survives_a_longer_report`, which parametrizes
+over those lengths, and by `test_the_caption_keep_together_rule_is_the_one_doing_the_work`,
+which removes the rule in-process and asserts the crash comes back — without that
+control a future edit could drop the rule and every other test here would stay green
+until someone added a paragraph. Issue #116 records the measurement.
+
 ## Consequences
 - **Easier:** an archival + structurally-tagged PDF generation path exists,
   generated from the same semantic HTML already covered by `tests/test_a11y.py` — no

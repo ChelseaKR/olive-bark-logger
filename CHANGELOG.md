@@ -249,6 +249,68 @@ release" defect this file's absence let stand.
   fails on both a real omission and a decoy mention outside the array.
 
 ### Added
+- **The tagged-PDF gate was passing on how long the report happened to be**
+  (issue #116). `tests/test_pdf_export.py` was green on `main`, and that was a
+  coincidence of how much prose sat above a table. Appending filler paragraphs to
+  the report before conversion, changing nothing else, moved the verdict around at
+  random: 0 extra paragraphs crashed, 5 crashed, 20 crashed, 60 passed. Every
+  failure was the `ValueError: Table wrapper without a table` ADR 0004 already
+  documents, so the next person to add a sentence to the report would have been
+  handed a red gate and a stack trace pointing into WeasyPrint.
+
+  The mechanism is narrower than the original bisection concluded. WeasyPrint wraps
+  a `<table>` together with its `<caption>` in one table-wrapper box; when the
+  caption fits at the foot of a page and the body does not, the fragment left
+  behind is a wrapper holding a caption and no table. The existing mitigation
+  removed the other routes to a bad layout but never stopped a caption being
+  separated from its table. One rule fixes it — `caption { break-after: avoid }` in
+  `_PDF_LAYOUT_STYLE` — and the same sweep then passes at 0, 1, 5, 20 and 60 extra
+  paragraphs.
+
+  `test_the_tagged_pdf_survives_a_longer_report` parametrizes over those lengths so
+  the property is pinned rather than the fixture, and
+  `test_the_caption_keep_together_rule_is_the_one_doing_the_work` removes the rule
+  in-process and asserts the crash returns: without that control a future edit
+  could drop the rule and every other test in the file would stay green until
+  someone added a paragraph. ADR 0004 carries the measurement.
+- **An advisory calibration-drift watch** (issue #100, EXP-04). A microphone in a window
+  for a season does not stay where it was put, and nothing in the record said so: the
+  configured threshold kept reading the same while the meaning of "loud" underneath it
+  moved, so weeks of counts silently stopped being comparable. `monitor/drift.py`
+  compares the recent ambient baseline (median and L90, from the opt-in EXP-01 minute
+  ledger) against the window right after the current calibration epoch. Past
+  `drift_tolerance_db` — 5 dB by default, and documented as an order-of-magnitude
+  judgement rather than a measured distribution — it records a `drift_advisories` row,
+  publishes the state in the heartbeat JSON, shows it on `status.html`, and discloses it
+  in the report's *Measurement conditions* block with the check to run:
+  re-run `olive-calibrate`.
+
+  **Advisory means advisory.** No detection parameter, threshold or offset is changed by
+  any of it, and a test asserts that running the watch leaves every event and every
+  minute row byte-identical. `docs/adr/0030-advisory-drift-watch-never-adaptive-detection.md`
+  records why adaptive re-tuning was rejected: detection is frozen per session on purpose
+  (ADR 0019), and a threshold that moves on its own would make two nights incomparable
+  invisibly, which is the one thing this record exists to prevent.
+
+  The watch has three states, not two, because "the baseline has not moved" and "the
+  baseline could not be compared" are different facts. A disabled ambient ledger (the
+  default), no calibration epoch, an empty window, or a calibration so recent that the
+  two windows would overlap each produce **unavailable**, with the reason printed, on
+  every surface. With the ledger off the report says in terms `Drift watch unavailable:
+  ambient ledger not enabled`, followed by the sentence that an unavailable watch is not
+  a steady one. `tests/test_drift.py` asserts that distinction at the comparison, the
+  heartbeat, the status page and the report, and the report recomputes the state from the
+  stored minutes rather than reading the advisory table, because an empty table means
+  either "checked and steady" or "never checked" and only the recomputation can tell
+  them apart.
+
+  Schema v9 adds `drift_advisories`. It is inside the derived-data budget rather than an
+  increase to it: the only signal-derived numbers in a row are differences of two
+  `minute_levels` aggregates that are already declared, and
+  `tests/test_privacy_budget.py` now asserts exactly that, so a later edit cannot
+  introduce a new per-minute quantity under cover of an advisory. Retention reaches the
+  new table (`prune`, `PRUNED_TABLES`), so advisories cannot outlive the minutes that
+  justify them.
 - **A threshold-sensitivity section in the report** (issue #99, EXP-03). The strongest
   attack on a level-only record is "you picked the threshold that flatters you". The
   report now answers it before it is asked: `report/sensitivity.py` recounts the record at

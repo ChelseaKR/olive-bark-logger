@@ -23,6 +23,8 @@ from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from monitor import drift
+
 from report.aggregate import Summary, summarize
 
 # Reuse the report's stylesheet verbatim so the status page inherits the same
@@ -95,6 +97,23 @@ OFF_AIR_NOTE = (
 # first status page would otherwise claim 100% frame coverage for a device that has not
 # yet been asked for a single frame. Absence is written as absence here too.
 FRAME_COVERAGE_NOT_YET_STARTED = "not yet started, no frames processed yet"
+
+# The advisory drift watch (EXP-04) publishes its state through the heartbeat, so the
+# status page reads it there rather than re-querying the store. Same rule as frame
+# coverage and the gap ledger above: a watch that has not run, or could not run, must
+# not render the way a watch that ran and found nothing renders.
+DRIFT_HEADING = "Calibration drift watch"
+DRIFT_NOT_YET_CHECKED = "not yet checked in this run"
+DRIFT_STATUS_LABELS = {
+    drift.STEADY: "steady: the ambient baseline has not moved past the tolerance",
+    drift.ADVISORY: "advisory: the ambient baseline has moved past the tolerance",
+    drift.UNAVAILABLE: "unavailable",
+    "not-yet-checked": DRIFT_NOT_YET_CHECKED,
+}
+DRIFT_ADVISORY_ACTION = (
+    "Re-run `olive-calibrate`. Detection parameters were not changed: this watch is "
+    "advisory by design (ADR 0030)."
+)
 
 
 @dataclass(frozen=True)
@@ -212,6 +231,38 @@ def _rows(pairs: list[tuple[str, str]]) -> str:
     )
 
 
+def _drift_section(payload: dict[str, object]) -> str:
+    """The status page's drift block, read straight from the heartbeat's own fields.
+
+    A payload with no drift fields at all (an older heartbeat, or a monitor that has not
+    reached its first checkpoint) renders "not yet checked in this run" rather than
+    silently omitting the section, so a reader is never left to infer that a missing
+    block means a healthy one.
+    """
+    status = _get_str(payload, "drift_status", "not-yet-checked")
+    rows: list[tuple[str, str]] = [("Status", DRIFT_STATUS_LABELS.get(status, status))]
+    reason = payload.get("drift_reason")
+    if isinstance(reason, str):
+        rows.append(("Why not", reason))
+    for key, label, fmt in (
+        ("drift_median_delta_db", "Median change since calibration", "db"),
+        ("drift_l90_delta_db", "L90 change since calibration", "db"),
+        ("drift_reference_minutes", "Reference minutes compared", "count"),
+        ("drift_recent_minutes", "Recent minutes compared", "count"),
+    ):
+        value = payload.get(key)
+        if isinstance(value, (int, float)):
+            rows.append((label, f"{float(value):+.1f} dB" if fmt == "db" else f"{int(value):,}"))
+    table = (
+        f"<table><caption>{escape(DRIFT_HEADING)}</caption>"
+        '<thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>'
+        f"<tbody>{_rows(rows)}</tbody></table>"
+    )
+    if status != drift.ADVISORY:
+        return table
+    return f'{table}\n<p class="note">{escape(DRIFT_ADVISORY_ACTION)}</p>'
+
+
 def render_status(
     payload: dict[str, object],
     aggregates: StatusAggregates,
@@ -299,6 +350,8 @@ def render_status(
         items = "".join(f"<li>{escape(o)}</li>" for o in aggregates.off_air)
         off_air_section = f'<p class="note">{escape(OFF_AIR_NOTE)}</p>\n<ul>{items}</ul>'
 
+    drift_section = _drift_section(payload)
+
     # --- last night ---
     minutes_with_events = summary.total_loud_seconds / 60.0
     if aggregates.busiest_hour is None:
@@ -361,6 +414,9 @@ rewrites in place; open it directly from disk. No server, no network, no audio.<
 
 <h2>{escape(OFF_AIR_HEADING)}</h2>
 {off_air_section}
+
+<h2>{escape(DRIFT_HEADING)}</h2>
+{drift_section}
 
 <h2>Last night</h2>
 <p>Summary of the most recent {aggregates.window_hours} hours of logged events. Counts

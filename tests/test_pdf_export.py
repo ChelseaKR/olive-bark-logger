@@ -437,3 +437,60 @@ def test_cli_violations_pdf_flag_fails_loudly_on_tagging_error(tmp_path, monkeyp
     assert rc == 1
     assert "Skipped" in capsys.readouterr().out
     assert not (tmp_path / "violations.pdf").exists()
+
+
+# ---------------------------------------------------------------------------
+# The gate must hold for a report of any length, not only this one
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("extra_paragraphs", [0, 1, 5, 20, 60])
+def test_the_tagged_pdf_survives_a_longer_report(extra_paragraphs):
+    """Adding content to the report must not decide whether the PDF gate passes.
+
+    Measured on 2026-09-06: before `caption { break-after: avoid }` was added to
+    `_PDF_LAYOUT_STYLE`, this parametrization failed at 0, 1, 5 and 20 extra
+    paragraphs and passed at 60. The verdict tracked nothing but where a table
+    happened to land on a page, so the suite was green at exactly the report's
+    own length and any edit to it was a coin flip.
+
+    A gate whose result depends on how much prose sits above a table is not
+    measuring what it claims to. This pins the property instead of the fixture.
+    """
+    html = _main_report_html(with_events=True)
+    filler = "<p>filler line</p>" * extra_paragraphs
+    padded = html.replace(
+        "<h2>Measurement conditions</h2>", f"<h2>Measurement conditions</h2>\n{filler}", 1
+    )
+    assert padded != html or extra_paragraphs == 0, "the filler was not injected"
+    pdf_bytes = html_to_tagged_pdf_bytes(padded)
+    assert pdf_bytes[:5] == b"%PDF-"
+
+
+def test_the_caption_keep_together_rule_is_the_one_doing_the_work():
+    """The negative control for the rule above, run in-process.
+
+    Removing `caption { break-after: avoid }` from the injected style must bring
+    the crash back on the very fixture the suite otherwise passes. Without this,
+    a future edit could drop the rule and every other test here would stay green
+    until someone added a paragraph.
+    """
+    from report import pdf_export
+
+    html = _main_report_html(with_events=True)
+    weakened = pdf_export._PDF_LAYOUT_STYLE.replace(
+        "caption { break-after: avoid; page-break-after: avoid; }\n", ""
+    )
+    assert weakened != pdf_export._PDF_LAYOUT_STYLE, "the sabotage did not land"
+
+    original = pdf_export._PDF_LAYOUT_STYLE
+    pdf_export._PDF_LAYOUT_STYLE = weakened
+    try:
+        with pytest.raises(TaggedPdfGenerationError, match="Table wrapper without a table"):
+            html_to_tagged_pdf_bytes(html)
+    finally:
+        pdf_export._PDF_LAYOUT_STYLE = original
+
+    # And with the rule restored the same HTML converts, so the control is about
+    # the rule and not about the fixture having become unconvertible.
+    assert html_to_tagged_pdf_bytes(html)[:5] == b"%PDF-"

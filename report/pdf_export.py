@@ -43,8 +43,26 @@ Bisection traced it to the combination of inline chart SVGs, chart ``<figure>``
 wrappers, and the browser-print rule that forbids tables from splitting across pages.
 The tagged-PDF preparation removes the SVG, flattens only chart figures into neutral
 ``<div>`` containers, lets large PDF tables paginate, and renders the summary definition
-list as normal block flow instead of CSS grid. This avoids the crash across the real demo,
-empty, single-event, and 1-4 day fixtures, including the formerly failing two-day case.
+list as normal block flow instead of CSS grid.
+
+**The orphaned table wrapper, and why the fix is a caption rule (2026-09-06).** Those
+measures were not, on their own, enough: they avoided the crash on the fixtures as they
+stood and nowhere else. Measured by appending filler paragraphs to the report before
+conversion, the gate's verdict tracked nothing but where a table happened to land on a
+page -- 0 extra paragraphs crashed, 5 crashed, 20 crashed, 60 passed. The report was
+green at exactly its own length, and any future edit to it, of any size, was as likely
+to turn the gate red as not.
+
+WeasyPrint raises at ``get_wrapped_table`` when a table-wrapper box has no table child.
+A ``<table>`` is wrapped together with its ``<caption>``, so when the caption fits at the
+foot of a page and the table body does not, the fragment left behind is a wrapper holding
+a caption and nothing else -- exactly the state that branch refuses. Keeping the caption
+with its table (``caption { break-after: avoid }``, in :data:`_PDF_LAYOUT_STYLE`) means
+the wrapper never fragments that way. With that rule the same filler sweep passes at
+every length: 0, 1, 5, 20 and 60 extra paragraphs all build. The fixture set is unchanged
+and still covers the real demo, empty, single-event and 1-4 day cases, but the property
+is now pinned directly by
+``tests/test_pdf_export.py::test_the_tagged_pdf_survives_a_longer_report``.
 
 Since ``report/charts.py``'s own design already treats each chart's SVG as a
 supplementary visual only -- "every chart is followed by a real ``<table>`` ... so
@@ -89,6 +107,10 @@ _PDF_LAYOUT_STYLE = """<style>
 #calendar-table th, #calendar-table td { padding: 0.5pt; }
 #calendar-table th:first-child { width: 54pt; }
 .note { break-inside: avoid; page-break-inside: avoid; }
+/* Keep every caption with its own table. This is the rule that makes the
+   workaround above hold for a report of any length -- see the module docstring's
+   note on the orphaned table wrapper. */
+caption { break-after: avoid; page-break-after: avoid; }
 </style>"""
 
 
