@@ -191,7 +191,17 @@ REMEDY = (
 )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
+    """Read the live nightly sweep and report whether it supports a merge.
+
+    `now` is injectable, defaulting to the real clock, the way `monitor.capture.capture`
+    and `monitor.service` take a `clock`. Without that seam the only way to test the
+    end-to-end paths was a fixture with a calendar date in it, checked against the real
+    clock -- which is a test with an expiry date on it. The fixture dated 2026-08-26 aged
+    out of the 168-hour window on 2026-09-02 and the nightly stayed red from then on, for
+    no reason a commit could explain. `assess` already took `now`; this is the one caller
+    that did not.
+    """
     parser = argparse.ArgumentParser(
         prog="check-nightly-macos",
         description=(
@@ -209,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc) if now is None else now
     try:
         run = latest_completed_run(args.repo)
         jobs = macos_jobs(int(run["id"]), args.repo) if run is not None else []
