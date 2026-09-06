@@ -219,6 +219,23 @@ release" defect this file's absence let stand.
   fails on both a real omission and a decoy mention outside the array.
 
 ### Added
+- **The committed pre-commit hook set is now a gate** (issue #82, GAP-CQ-1 / CQ-12).
+  `.pre-commit-config.yaml` had been in the tree since 2026-07-14 and ran nowhere except
+  in a clone whose owner had happened to run `pre-commit install` — so its end-of-file,
+  trailing-whitespace, YAML-syntax, line-ending and large-file hooks gated nothing that
+  merged, for seven weeks, while the ledger recorded the mechanism as "added". A new
+  `make hooks` target runs that same file over **every tracked file**, is a prerequisite
+  of `make verify`, and is a step in the required `verify` CI job, so the two cannot
+  drift (CICD-27). `pre-commit` joins the `dev` dependency group and `uv.lock`, rather
+  than being fetched unpinned at CI time, because the lock is this repo's single
+  dependency snapshot. Two of the config's hooks are named as *not* run by the gate
+  instead of being left to look covered: **gitleaks**, whose upstream entry is `gitleaks
+  protect --staged` and therefore reports success without scanning a byte when nothing
+  is staged — which is every `--all-files` run and every CI checkout, the exact
+  always-green-check shape removed from this repo twice already; and **mypy**, which the
+  config stages at pre-push and which is bare `mypy` on this repo's own configuration,
+  i.e. `make type`, already blocking in both gates. `SKIP` is set in one place, the
+  `hooks` recipe, so neither caller can claim more than it runs.
 - **Session records in the browser store** (`{kind: "session", start, end}`), which is
   what makes the coverage figure possible at all. The store previously held events and
   gaps only, and a gap is written by the *running* app on a `visibilitychange`, so the
