@@ -249,6 +249,30 @@ release" defect this file's absence let stand.
   fails on both a real omission and a decoy mention outside the array.
 
 ### Added
+- **The tagged-PDF gate was passing on how long the report happened to be**
+  (issue #116). `tests/test_pdf_export.py` was green on `main`, and that was a
+  coincidence of how much prose sat above a table. Appending filler paragraphs to
+  the report before conversion, changing nothing else, moved the verdict around at
+  random: 0 extra paragraphs crashed, 5 crashed, 20 crashed, 60 passed. Every
+  failure was the `ValueError: Table wrapper without a table` ADR 0004 already
+  documents, so the next person to add a sentence to the report would have been
+  handed a red gate and a stack trace pointing into WeasyPrint.
+
+  The mechanism is narrower than the original bisection concluded. WeasyPrint wraps
+  a `<table>` together with its `<caption>` in one table-wrapper box; when the
+  caption fits at the foot of a page and the body does not, the fragment left
+  behind is a wrapper holding a caption and no table. The existing mitigation
+  removed the other routes to a bad layout but never stopped a caption being
+  separated from its table. One rule fixes it — `caption { break-after: avoid }` in
+  `_PDF_LAYOUT_STYLE` — and the same sweep then passes at 0, 1, 5, 20 and 60 extra
+  paragraphs.
+
+  `test_the_tagged_pdf_survives_a_longer_report` parametrizes over those lengths so
+  the property is pinned rather than the fixture, and
+  `test_the_caption_keep_together_rule_is_the_one_doing_the_work` removes the rule
+  in-process and asserts the crash returns: without that control a future edit
+  could drop the rule and every other test in the file would stay green until
+  someone added a paragraph. ADR 0004 carries the measurement.
 - **An advisory calibration-drift watch** (issue #100, EXP-04). A microphone in a window
   for a season does not stay where it was put, and nothing in the record said so: the
   configured threshold kept reading the same while the meaning of "loud" underneath it
