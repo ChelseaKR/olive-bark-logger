@@ -1,6 +1,6 @@
 """Absence is written as absence, never as a confident number or a silent omission.
 
-Three places in the report path rendered "no data" as something else:
+Four places in the report path rendered "no data" as something else:
 
 1. A log with no events printed "Loudest peak: 0.0 dBFS". `summarize` returns 0.0 for
    the empty case, and 0.0 dBFS is digital full scale — the loudest reading the device
@@ -11,19 +11,29 @@ Three places in the report path rendered "no data" as something else:
 3. The calendar heatmap only had rows for days that had events. A quiet monitored day
    and a day the monitor was switched off both simply vanished from the calendar, so
    the hatched "not monitored" state (#52) could never apply to a whole missing day.
+4. The quiet-hours duration rollup — the per-day table an ordinance's "30 minutes in a
+   day" figure is actually read from, rendered ten lines from the heatmap it shares its
+   days with — never learned (3). It listed only the days that had loud time in the
+   window, so a night nothing was listening on vanished from it exactly as it used to
+   vanish from the calendar; and with no quiet-hours event anywhere in the log the whole
+   table was replaced by "there is nothing to roll up", which is a claim about what was
+   measured made by a report that measured nothing.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 from monitor.config import Config
 from monitor.detector import Event
 from report.aggregate import summarize
+from report.charts import UNMONITORED_LABEL
 from report.render import (
     COVERAGE_UNDETERMINED_NOTE,
     NO_EVENTS_VALUE,
+    ROLLUP_ABSENCE_NOTE,
     build_report,
     generate_report_from_db,
 )
@@ -152,3 +162,90 @@ def test_heatmap_rows_stay_in_calendar_order(tmp_path):
     calendar = html[html.index("<h2>Calendar heatmap</h2>") :]
     positions = [calendar.index(f'<th scope="row">2026-03-1{d}</th>') for d in range(4)]
     assert positions == sorted(positions)
+
+
+# --- 4. the per-day duration rollup covers every day, and names the unmonitored ones ---
+#
+# `_three_day_log` has no quiet-hours event anywhere in it, and one whole day (2026-03-11)
+# with no monitor running at all. On the old code that combination rendered "No events
+# fell within the quiet-hours window, so there is nothing to roll up" — a statement about
+# what was observed, from a report that observed none of that night.
+
+
+def _rollup_cells_of(html: str) -> dict[str, str]:
+    """The rollup table as {day: cell text}, or {} when the table is not rendered."""
+    if "Loud time within quiet hours, per day" not in html:
+        return {}
+    table = html.split("Loud time within quiet hours, per day")[1].split("</table>")[0]
+    return dict(re.findall(r'<th scope="row">([^<]+)</th><td>([^<]*)</td>', table))
+
+
+def test_rollup_names_the_unmonitored_night_instead_of_reporting_nothing(tmp_path):
+    db = tmp_path / "olive.db"
+    with EventStore(db) as store:
+        _three_day_log(store)
+    html = generate_report_from_db(str(db), Config(db_path=str(db), tz="UTC"), generated_at="x")
+
+    assert "nothing to roll up" not in html, (
+        "a night with no monitor running was answered with 'nothing to roll up', which "
+        "reads as a measured quiet night"
+    )
+    cells = _rollup_cells_of(html)
+    assert set(cells) == {"2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13"}, (
+        f"the rollup must cover every day the window covers, like the calendar: {cells}"
+    )
+    # The off-air day states the absence and carries no duration at all.
+    assert cells["2026-03-11"] == UNMONITORED_LABEL
+    # The monitored days state a measured zero, which is a finding, not an absence.
+    assert cells["2026-03-12"] == "0 s"
+    assert cells["2026-03-13"] == "0 s"
+    # 2026-03-10's window closes at 23:00, so one of its quiet hours is uncovered and the
+    # cell says which — a partly-covered night is neither "0 s" nor "not monitored".
+    assert cells["2026-03-10"] == f"0 s (1 of 10 quiet hours {UNMONITORED_LABEL})"
+    assert ROLLUP_ABSENCE_NOTE in html
+
+
+def test_rollup_keeps_measured_durations_beside_the_unmonitored_days(tmp_path):
+    """A real quiet-hours event on one night, no monitor at all on the next. The measured
+    number must survive unchanged, and the unmonitored night must not become one."""
+    db = tmp_path / "olive.db"
+    common = {
+        "device_label": "pi-1",
+        "mic_model": "USB mic",
+        "placement_note": "by the wall",
+        "tz": "UTC",
+        "calibration_offset": 0.0,
+        "calibration_note": "x",
+        "app_version": "0.1.0",
+    }
+    with EventStore(db) as store:
+        first = store.start_session(started_at=_at(0, 22), **common)
+        store.add_event(Event(_at(0, 23), _at(0, 23) + 600, 600.0, -12.0, -18.0), session_id=first)
+        store.update_session(first, frames_seen=1, frames_dropped=0, ended_at=_at(1, 8))
+        # 2026-03-11 22:00 -> 2026-03-12 08:00: nothing running, no gap row to show for it.
+        second = store.start_session(started_at=_at(2, 22), **common)
+        store.update_session(second, frames_seen=1, frames_dropped=0, ended_at=_at(3, 8))
+
+    html = generate_report_from_db(str(db), Config(db_path=str(db), tz="UTC"), generated_at="x")
+    cells = _rollup_cells_of(html)
+    assert cells["2026-03-10"] == "10.0 min", "the measured duration must not move"
+    # The unmonitored night is split across two dates by the same start-attribution the
+    # durations use: 03-11's evening hours and 03-12's early-morning hours.
+    assert UNMONITORED_LABEL in cells["2026-03-11"]
+    assert UNMONITORED_LABEL in cells["2026-03-12"]
+    assert "2026-03-13" in cells
+
+
+def test_rollup_still_says_nothing_to_roll_up_when_that_is_the_whole_truth():
+    """The prose fallback is not removed, only narrowed: a log the record shows as fully
+    monitored with no quiet-hours loud time in it has genuinely nothing to roll up."""
+    config = Config(tz="UTC")
+    noon = _at(0, 12)
+    summary = summarize(
+        [Event(noon, noon + 5, 5.0, -20.0, -25.0)],
+        quiet_hours=config.quiet_hours,
+        tz=timezone.utc,
+    )
+    html = build_report(summary, config=config, generated_at="2026-03-11 UTC")
+    assert "nothing to roll up" in html
+    assert _rollup_cells_of(html) == {}

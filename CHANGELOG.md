@@ -46,6 +46,31 @@ release" defect this file's absence let stand.
   - An empty record now says there is no window to draw a calendar over, rather than
     "no events have been logged yet", which was a claim about events in a place the
     absence might equally be of monitoring.
+- **The quiet-hours duration rollup listed only the days that had loud time in it, so a
+  night with no monitor running vanished from the table an ordinance's per-day figure is
+  read from.** Issue #59 gave the calendar heatmap a row for every day the reporting
+  window covers, because "a quiet monitored day and a day the monitor was switched off
+  both simply vanished from the calendar". The per-day duration rollup, rendered ten
+  lines away in `build_report` over the same days, kept iterating
+  `quiet_hours_loud_seconds_by_day` — the days that *had* a number. Measured on a
+  three-night log with 2026-03-11 entirely off air: the calendar showed four day rows
+  with 03-11 hatched `not monitored`, and the rollup listed two days, 03-11 not among
+  them. With no quiet-hours event anywhere in that log the table did not render at all
+  and the section read "No events fell within the quiet-hours window, so there is
+  nothing to roll up" — a statement about what was observed, from a report that observed
+  none of that night.
+  - The rollup now has a row for every day the window covers, with the calendar's three
+    states: a measured duration (`0 s` included — a monitored night with no loud time is
+    a finding), `not monitored` where the record shows no monitor running for the whole
+    of that day's quiet hours, and a duration plus how many of the day's quiet hours are
+    missing from it where the night was only partly covered.
+  - `report/charts.py`'s `_UNMON_LABEL` is now the public `UNMONITORED_LABEL` and both
+    per-day surfaces render that one string, so the two cannot describe the same absence
+    differently.
+  - The prose fallback is narrowed, not removed: a record showing full coverage and no
+    quiet-hours loud time still says there is nothing to roll up, because there is.
+  - `tests/test_absence_as_value.py` gains the case as item 4 and pins all three states;
+    the golden snapshot carries the new note.
 - **`docs/GAP-LEDGER.md` listed two supply-chain items as absent that had been in the
   tree for eight weeks.** GAP-SEC-1 said "no SBOM/signing (no release pipeline exists to
   attach them to)". The parenthesis was the error: `.github/workflows/release.yml` landed
