@@ -366,9 +366,7 @@ def test_the_workflow_linter_is_pinned_to_a_version():
     )
     # The pin may be written through a make variable; resolve one level of `$(NAME)`
     # rather than requiring a literal, so the version can stay a named constant.
-    assignments = dict(
-        re.findall(r"^([A-Z_]+)\s*[:?]?=\s*(\S+)\s*$", makefile, re.MULTILINE)
-    )
+    assignments = dict(re.findall(r"^([A-Z_]+)\s*[:?]?=\s*(\S+)\s*$", makefile, re.MULTILINE))
     versions = set()
     for req in requirements:
         var = re.fullmatch(r"\$\(([A-Z_]+)\)", req)
