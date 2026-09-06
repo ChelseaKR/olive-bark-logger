@@ -37,8 +37,12 @@ on:
 permissions:
   contents: read
 
+# See the note in ci.yml. This workflow also runs on push to main, so a group
+# keyed on `github.ref` alone lets one merge cancel the previous merge's CodeQL
+# run; the commit then carries no static-analysis verdict at all, and a
+# `cancelled` check does not read as a failure.
 concurrency:
-  group: codeql-${{ github.ref }}
+  group: codeql-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: true
 
 jobs:

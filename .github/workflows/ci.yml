@@ -8,8 +8,22 @@ on:
 permissions:
   contents: read
 
+# Key pull requests on the ref and everything else on the commit.
+#
+# A concurrency group holds one running run and one pending run. `github.ref` is
+# `refs/heads/main` for every push to main, so a group keyed on the ref alone put
+# all of them together: with `cancel-in-progress: true` a second merge cancels the
+# first's run part-way through, and a third evicts the pending one before it
+# dispatches a single job. Either way that commit sits on main with every check
+# `cancelled` -- which is not `failure`, and so reads as "nothing went wrong" to a
+# person scanning for red. This workflow is where the merge gate lives, including
+# the gate-integrity steps 9a/9b, so a lost verdict is a commit the gate never saw.
+#
+# Keying non-pull-request runs on `github.sha` gives every push its own group, so
+# they never contend. Pull requests keep one shared key per ref, so pushing again
+# to a branch still supersedes the previous, now-irrelevant run.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: true
 
 jobs:
