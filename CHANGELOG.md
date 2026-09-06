@@ -6,7 +6,8 @@ All notable changes to this project are documented here. Format follows
 
 **No version of this project has been tagged or released yet.** `pyproject.toml` and
 `monitor/__init__.py` (via `importlib.metadata`) carry an in-development version number
-(`0.1.0`) — that is a development milestone, not a release claim. Everything below lives
+(`0.1.0.dev0`) — that is a development milestone, not a release claim, and the PEP 440
+`.dev0` suffix says so in a form a tool reads rather than only a reader. Everything below lives
 under `[Unreleased]` until a `git tag` actually exists; see `docs/GAP-LEDGER.md#gap-rel-1`
 for the release-pipeline gap and `CITATION.cff` for the corrected (un-dated) citation
 metadata. Do not add a dated `## [0.1.0] - YYYY-MM-DD` heading here until `v0.1.0` (or

@@ -4,7 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "olive-bark-logger"
-version = "0.1.0"
+# The single source of the version (REL-02). The PEP 440 `.dev0` suffix is load-bearing:
+# this repository has zero tags, so nothing has ever been built or signed under this number,
+# and a bare `0.1.0` is indistinguishable -- to pip, to an SBOM consumer, to a dependency
+# scanner -- from a release that happened. `0.1.0.dev0` sorts below `0.1.0` and says "not
+# that release, yet" in a form all three read. Drop the suffix in the same commit that gets
+# tagged: release.yml asserts the tag equals this string exactly (REL-14), so `v0.1.0`
+# cannot be cut while it says `.dev0`. Held by tests/test_version_reality.py.
+version = "0.1.0.dev0"
 description = "Privacy-first, on-device noise monitor: logs sound-level events (never audio) and generates an honest report."
 readme = "README.md"
 requires-python = ">=3.9"

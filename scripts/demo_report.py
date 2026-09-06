@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from monitor import __version__  # noqa: E402
 from monitor.capture import LoudRegion, synthetic_session  # noqa: E402
 from monitor.config import Config  # noqa: E402
 from monitor.service import run_pipeline  # noqa: E402
@@ -46,7 +47,7 @@ with EventStore(DB) as store:
         tz=config.tz,
         calibration_offset=config.calibration_offset,
         calibration_note=config.calibration_note,
-        app_version="0.1.0",
+        app_version=__version__,
     )
     events = list(
         run_pipeline(
