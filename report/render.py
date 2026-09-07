@@ -296,6 +296,58 @@ def _clock_anomalies_html(lines: list[str]) -> str:
     )
 
 
+ERASED_HEADING = "Windows erased by the operator"
+
+ERASED_NOTE = (
+    "The operator ran olive-forget over the periods below, so every measurement inside "
+    "them was deleted from the log. They are reported here, and counted as not "
+    "monitored in the coverage figures and the calendar, exactly as a period the device "
+    "was not listening is. What was erased cannot be recovered from this file, and this "
+    "disclosure is the only record that it existed. A report with no such section had "
+    "nothing erased from it."
+)
+
+
+def _erased_html(lines: list[str]) -> str:
+    """Disclose windows the operator erased, or render nothing when there are none.
+
+    Omitted rather than rendered empty, on the same rule as the event-types and ambient
+    sections: a report from a log nobody erased anything from should read as it always
+    did. The absence is not silent, because ``ERASED_NOTE`` says in terms that a report
+    without this section had nothing erased from it, and the coverage sentence and the
+    calendar's hatched hours already account for any window that was.
+    """
+    if not lines:
+        return ""
+    items = "".join(f"<li>{escape(line)}</li>" for line in lines)
+    return (
+        f"\n<h2>{ERASED_HEADING}</h2>\n"
+        f'<div class="note"><p>{escape(ERASED_NOTE)}</p></div>\n<ul>{items}</ul>\n'
+    )
+
+
+def erased_window_lines(gaps: list[Gap], tz: tzinfo) -> list[str]:
+    """One line per erased window, in the operator's zone, with the reason given.
+
+    "no reason given" rather than an empty string: an erasure with no note and an
+    erasure whose note was dropped somewhere between the store and the page must not
+    render the same way.
+    """
+    return [
+        f"{_fmt_span(gap.start, gap.end, tz)} — erased ({gap.note or 'no reason given'})"
+        for gap in gaps
+        if gap.erased
+    ]
+
+
+def _fmt_span(start: float, end: float, tz: tzinfo) -> str:
+    hours = (end - start) / 3600.0
+    return (
+        f"{datetime.fromtimestamp(start, tz=tz).strftime('%Y-%m-%d %H:%M')} to "
+        f"{datetime.fromtimestamp(end, tz=tz).strftime('%Y-%m-%d %H:%M')} ({hours:.1f} h)"
+    )
+
+
 AMBIENT_APPROXIMATION_NOTE = (
     "Day figures are rolled up from per-minute summaries, not from raw samples (which no "
     "longer exist past the minute they summarized). Minimum and maximum are exact; median "
@@ -743,6 +795,7 @@ def build_report(
     monitored_hours: float | None = None,
     wall_clock_hours: float | None = None,
     clock_anomaly_lines: list[str] | None = None,
+    erased_windows: list[str] | None = None,
     drift: DriftCheck | None = None,
     drift_advisories_recorded: int = 0,
     ambient_days: list[AmbientDay] | None = None,
@@ -772,6 +825,7 @@ def build_report(
     calibrated = offset != 0.0
     conditions_html = _conditions_html(session)
     clock_html = _clock_anomalies_html(clock_anomaly_lines or [])
+    erased_html = _erased_html(erased_windows or [])
     drift_html = _drift_html(
         drift or _unevaluated_drift(config), recorded=drift_advisories_recorded
     )
@@ -988,7 +1042,7 @@ transmitted to produce it.</p>
 {conditions_html}
 {clock_html}
 {drift_html}
-
+{erased_html}
 <h2>Distributions</h2>
 {hour_chart}
 {day_chart}
@@ -1360,6 +1414,7 @@ def generate_report_from_db(
             monitored_hours=monitored_hours,
             wall_clock_hours=wall_clock_hours,
             clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
+            erased_windows=erased_window_lines(gaps, tz),
             drift=drift_check,
             drift_advisories_recorded=drift_recorded,
             ambient_days=ambient_days,
@@ -1387,6 +1442,7 @@ def generate_report_from_db(
         monitored_hours=monitored_hours,
         wall_clock_hours=wall_clock_hours,
         clock_anomaly_lines=describe_clock_anomalies(anomalies, tz=tz),
+        erased_windows=erased_window_lines(gaps, tz),
         drift=drift_check,
         drift_advisories_recorded=drift_recorded,
         ambient_days=ambient_days,

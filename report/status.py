@@ -49,7 +49,7 @@ from report.render import _STYLE, NO_VERDICT_NOTE, _subtract_spans, cover_html, 
 
 if TYPE_CHECKING:
     from monitor.config import Config
-    from store import EventStore
+    from store import EventStore, Gap
 
 # How long we default to summarizing for the "last night" panel. A single window that
 # comfortably covers the previous night regardless of when the operator looks.
@@ -155,11 +155,7 @@ def collect_status_aggregates(
     busiest_hour: int | None = None
     if any(summary.by_hour.values()):
         busiest_hour = max(summary.by_hour, key=lambda h: summary.by_hour[h])
-    gaps = [
-        f"{_fmt_ts(gap.start, tz)}–{_fmt_ts(gap.end, tz)} "  # noqa: RUF001 - range dash
-        f"({_fmt_duration(gap.duration)}, {gap.reason.replace('-', ' ')})"
-        for gap in store.gaps(since=since, until=now)
-    ]
+    gaps = [_gap_line(gap, tz) for gap in store.gaps(since=since, until=now)]
     # None (no session record at all) means "cannot say"; otherwise on_air_spans
     # clips every session's and event's span to this page's own [since, now) window,
     # so a session that ended before `since` correctly contributes nothing on-air
@@ -208,6 +204,24 @@ def _fmt_duration(seconds: float) -> str:
 
 def _fmt_ts(ts: float, tz: tzinfo) -> str:
     return datetime.fromtimestamp(ts, tz=tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def _gap_line(gap: Gap, tz: tzinfo) -> str:
+    """One gap, said in words, with an erasure distinguished from an outage.
+
+    A window the operator erased and a window the device missed are both unmonitored
+    and both subtract from coverage, but they are different facts and a reader deciding
+    what a record is worth should not have to infer which one they are looking at. So
+    an erasure says so, and carries the operator's reason or the plain statement that
+    none was given -- which is not the same as saying nothing.
+    """
+    span = (
+        f"{_fmt_ts(gap.start, tz)}–{_fmt_ts(gap.end, tz)} "  # noqa: RUF001 - range dash
+        f"({_fmt_duration(gap.duration)}"
+    )
+    if gap.erased:
+        return f"{span}, erased by the operator: {gap.note or 'no reason given'})"
+    return f"{span}, {gap.reason.replace('-', ' ')})"
 
 
 def _get_float(payload: dict[str, object], key: str, default: float) -> float:

@@ -69,6 +69,7 @@ olive-monitor = "monitor.service:main"
 olive-report = "report.render:main"
 olive-tune = "monitor.calibrate:main_tune"
 olive-calibrate = "monitor.calibrate:main_calibrate"
+olive-forget = "store.forget:main"
 
 [tool.setuptools]
 packages = ["monitor", "store", "report"]
