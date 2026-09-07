@@ -34,7 +34,17 @@ from monitor import drift
 from monitor.ambient import MinuteLevel
 from monitor.detector import Event
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
+
+#: The reasons a `gaps` row may carry, and what each one means. The schema CHECK is
+#: generated from this tuple so the constraint and the documentation cannot drift
+#: apart. `erased` (schema v10) is the only one an operator writes on purpose: see
+#: `EventStore.forget`.
+GAP_REASONS: tuple[str, ...] = ("device-error", "shutdown", "clock-jump", "erased")
+
+#: The reason an operator erasure writes. Named because three places read it: the
+#: migration's CHECK, `forget`, and the report's disclosure of erased windows.
+ERASED_REASON = "erased"
 
 # Ordered migrations. Each entry upgrades the database from version i to i+1. A fresh
 # database (user_version 0) runs them all; an existing one runs only the new ones.
@@ -185,6 +195,45 @@ _MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_drift_detected ON drift_advisories(detected_at);
     """,
+    # 9 -> 10: admit 'erased' as a gap reason, for operator erasure (`olive-forget`).
+    #
+    # This has to be a table rebuild. The v5 migration wrote the permitted reasons into
+    # a column CHECK, and SQLite cannot ALTER a CHECK: there is no statement that adds a
+    # value to it. So the twelve-step ALTER TABLE procedure is followed here -- create
+    # the replacement, copy every row, drop the original, rename, recreate the index --
+    # which is worth saying out loud because "add a permitted value" reads like a
+    # one-line change and is not one.
+    #
+    # The BEGIN/COMMIT is load-bearing and is not decoration. `executescript` commits
+    # any pending transaction and then runs its statements in autocommit mode, one
+    # transaction each, so without the explicit pair an interruption between DROP TABLE
+    # and ALTER TABLE ... RENAME would leave a database with no `gaps` table at all --
+    # the ledger that discloses missing time, itself missing. Wrapped, the upgrade
+    # leaves either the old table or the new one.
+    #
+    # It is also idempotent if the process dies after the script and before the
+    # user_version bump: the migration simply runs again on the next open, copies the
+    # already-migrated rows, and lands in the same place. `PRAGMA foreign_keys` is on
+    # for the connection, but nothing references `gaps`, so no child rows follow the
+    # drop.
+    """
+    BEGIN;
+    CREATE TABLE gaps_v10 (
+        id          INTEGER PRIMARY KEY,
+        session_id  INTEGER,
+        start       REAL NOT NULL,
+        end         REAL NOT NULL,
+        reason      TEXT NOT NULL
+                    CHECK(reason IN ('device-error','shutdown','clock-jump','erased')),
+        note        TEXT   -- operator's words for an erasure; NULL for every other kind
+    );
+    INSERT INTO gaps_v10 (id, session_id, start, end, reason)
+        SELECT id, session_id, start, end, reason FROM gaps;
+    DROP TABLE gaps;
+    ALTER TABLE gaps_v10 RENAME TO gaps;
+    CREATE INDEX IF NOT EXISTS idx_gaps_start ON gaps(start);
+    COMMIT;
+    """,
 ]
 
 
@@ -312,6 +361,49 @@ PRUNED_TABLES: tuple[str, ...] = (
 
 
 @dataclass(frozen=True)
+class ForgetResult:
+    """What one erasure removed, per table, plus the gap row that discloses it.
+
+    Deliberately shaped like `PruneResult` and not merged with it: retention and
+    erasure delete for different reasons and are reported separately, so a report can
+    say "the operator erased this window" without implying the horizon did it.
+
+    `gap_id` is None only for a dry run. A completed erasure always has one, because
+    the whole point of the verb is that the hole it makes is disclosed; see
+    `EventStore.forget`.
+    """
+
+    start: float
+    end: float
+    reason: str | None
+    events: int
+    minute_levels: int
+    clock_anomalies: int
+    drift_advisories: int
+    gaps: int
+    gap_id: int | None = None
+
+    @property
+    def total(self) -> int:
+        return (
+            self.events
+            + self.minute_levels
+            + self.clock_anomalies
+            + self.drift_advisories
+            + self.gaps
+        )
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "events": self.events,
+            "minute_levels": self.minute_levels,
+            "clock_anomalies": self.clock_anomalies,
+            "drift_advisories": self.drift_advisories,
+            "gaps": self.gaps,
+        }
+
+
+@dataclass(frozen=True)
 class ClockAnomaly:
     """A detected wall-clock vs monotonic-clock divergence during capture. Numbers only."""
 
@@ -360,16 +452,27 @@ class DriftAdvisoryRecord:
 class Gap:
     """One interval when the device was not listening. Metadata only — no audio.
 
-    `reason` is one of 'device-error', 'shutdown', or 'clock-jump' (the schema CHECK
-    permits exactly those three). Only 'device-error' is ever written by the monitor,
-    from `resilient_source` catching a source outage during a run; the other two are
-    accepted values that no code path currently produces.
+    `reason` is one of `GAP_REASONS`. Only 'device-error' is ever written by the
+    monitor, from `resilient_source` catching a source outage during a run; 'shutdown'
+    and 'clock-jump' are accepted values that no code path currently produces.
 
-    That is a real limit on what this ledger can be asked, not a to-do: a gap row can
-    only be written by a monitor that is *running*, so the ledger structurally cannot
-    record the monitor not running. Time with no monitor up is derived instead from the
-    holes between capture sessions — see `report.render.off_air_spans`, which is what
-    the coverage figures actually subtract.
+    'erased' (schema v10) is different in kind from the other three: it is the only one
+    an operator writes on purpose, by running `olive-forget` over a window they want
+    gone. It is in this table rather than a table of its own precisely so that every
+    reader that already understands "the device was not listening here" understands it
+    too, with no new arithmetic: the coverage figures, the calendar's hatched third
+    state, and the CSV's `monitored` column all read `(start, end)` and never the
+    reason. An erased night therefore reads as not monitored, never as quiet.
+
+    That a gap row can only be written by a monitor that is *running* is a real limit on
+    what this ledger can be asked, not a to-do: the ledger structurally cannot record
+    the monitor not running. Time with no monitor up is derived instead from the holes
+    between capture sessions — see `report.render.off_air_spans`, which is what the
+    coverage figures actually subtract. An erasure is the exception, because the
+    operator is present to write it down.
+
+    `note` carries the operator's words for an erasure and is None for every other
+    kind. It is short free text and, like `coarse_tag`, is never audio.
     """
 
     id: int
@@ -377,10 +480,16 @@ class Gap:
     start: float
     end: float
     reason: str
+    note: str | None = None
 
     @property
     def duration(self) -> float:
         return self.end - self.start
+
+    @property
+    def erased(self) -> bool:
+        """True for a window the operator erased, rather than one the device missed."""
+        return self.reason == ERASED_REASON
 
 
 class EventStore:
@@ -629,7 +738,7 @@ class EventStore:
         Overlap semantics (a gap counts if any part of it falls in the window) so a
         report window slicing through an outage still sees it.
         """
-        sql = "SELECT id, session_id, start, end, reason FROM gaps"
+        sql = "SELECT id, session_id, start, end, reason, note FROM gaps"
         clauses: list[str] = []
         params: list[float] = []
         if since is not None:
@@ -649,9 +758,117 @@ class EventStore:
                 start=r["start"],
                 end=r["end"],
                 reason=r["reason"],
+                note=r["note"],
             )
             for r in rows
         ]
+
+    # -- erasure -------------------------------------------------------------
+    def forget(
+        self,
+        *,
+        start: float,
+        end: float,
+        reason: str | None = None,
+        dry_run: bool = False,
+    ) -> ForgetResult:
+        """Erase every measurement inside [start, end) and disclose the hole.
+
+        A privacy-first tool needs a privacy verb. Before this, an operator who did not
+        want a window in a file they were about to hand to a landlord had two options:
+        keep it, or edit the SQLite file by hand. The second destroys the record's
+        honesty in silence, which is the one thing this project will not do, so erasure
+        is a first-class operation that leaves a disclosure behind.
+
+        What goes, by overlap rather than by containment, because a row that straddles
+        the boundary still carries measurement from inside the window:
+
+        - ``events`` whose span overlaps it. Envelope anatomy lives in columns on the
+          event row, so it goes with it.
+        - ``minute_levels`` whose minute overlaps it.
+        - ``clock_anomalies`` and ``drift_advisories`` detected inside it.
+        - ``gaps`` lying wholly inside it, which the erasure gap subsumes. One
+          straddling the boundary is kept, because it also says something about time
+          outside the window and the erasure row does not cover that part.
+
+        What stays, and why: ``sessions`` and ``calibration_history``. A session row is
+        metadata about a run -- where the microphone sat, what the detection knobs were
+        -- not a measurement of any moment, and a run usually spans far more than the
+        erased window, so deleting it would destroy the lineage of the *retained* rows
+        to no privacy end. Calibration is the handful of operator-entered offsets
+        without which nothing retained can be interpreted at all.
+
+        The erasure row is written in the same transaction as the deletes. That is the
+        sharp edge of this whole verb and not an implementation detail: a crash between
+        the deletes and the disclosure would leave exactly the hole with nothing
+        disclosing it that erasing-by-hand produces, and it would leave it looking like
+        an ordinary quiet night. So either both land or neither does.
+
+        ``dry_run`` counts without deleting and writes no gap, so the returned
+        ``gap_id`` is None. Nothing is committed on that path.
+        """
+        if not end > start:
+            raise ValueError(f"forget: empty or reversed window ({start}, {end})")
+        conn = self._conn
+        if dry_run:
+            counts = self._forget_counts(start, end)
+            return ForgetResult(start=start, end=end, reason=reason, gap_id=None, **counts)
+        try:
+            counts = self._forget_counts(start, end)
+            conn.execute("DELETE FROM events WHERE start < ? AND end > ?", (end, start))
+            conn.execute(
+                "DELETE FROM minute_levels WHERE minute_start < ? AND minute_start + 60 > ?",
+                (end, start),
+            )
+            conn.execute(
+                "DELETE FROM clock_anomalies WHERE detected_at >= ? AND detected_at < ?",
+                (start, end),
+            )
+            conn.execute(
+                "DELETE FROM drift_advisories WHERE detected_at >= ? AND detected_at < ?",
+                (start, end),
+            )
+            conn.execute("DELETE FROM gaps WHERE start >= ? AND end <= ?", (start, end))
+            cur = conn.execute(
+                "INSERT INTO gaps (session_id, start, end, reason, note) VALUES (?, ?, ?, ?, ?)",
+                (None, start, end, ERASED_REASON, reason),
+            )
+            gap_id = int(cur.lastrowid or 0)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return ForgetResult(start=start, end=end, reason=reason, gap_id=gap_id, **counts)
+
+    def _forget_counts(self, start: float, end: float) -> dict[str, int]:
+        """How many rows `forget` would remove from each table, without removing any.
+
+        Counted with the same predicates the deletes use, from one place, so a dry run
+        cannot describe a different operation from the one it precedes.
+        """
+        conn = self._conn
+
+        def one(sql: str, params: tuple[float, ...]) -> int:
+            row = conn.execute(sql, params).fetchone()
+            return int(row[0])
+
+        return {
+            "events": one("SELECT COUNT(*) FROM events WHERE start < ? AND end > ?", (end, start)),
+            "minute_levels": one(
+                "SELECT COUNT(*) FROM minute_levels "
+                "WHERE minute_start < ? AND minute_start + 60 > ?",
+                (end, start),
+            ),
+            "clock_anomalies": one(
+                "SELECT COUNT(*) FROM clock_anomalies WHERE detected_at >= ? AND detected_at < ?",
+                (start, end),
+            ),
+            "drift_advisories": one(
+                "SELECT COUNT(*) FROM drift_advisories WHERE detected_at >= ? AND detected_at < ?",
+                (start, end),
+            ),
+            "gaps": one("SELECT COUNT(*) FROM gaps WHERE start >= ? AND end <= ?", (start, end)),
+        }
 
     # -- calibration ---------------------------------------------------------
     def add_calibration(
