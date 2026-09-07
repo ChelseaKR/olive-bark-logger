@@ -55,6 +55,43 @@ export const NO_VERDICT_NOTE =
   "This is a measurement, not a determination. Being within quiet hours is not the same " +
   "as a violation, and only the relevant authority can decide whether a rule was broken.";
 
+// --- Erasure, disclosed ---------------------------------------------------------------
+//
+// The browser half of `olive-forget` (issue #106). The Python side's rule is that erasure
+// is an operation and not an edit: what it leaves behind is a gap, so every reader that
+// already understands "the app was not listening here" understands an erasure with no new
+// arithmetic — coverage subtracts it, the calendar hatches it, and an erased night can
+// never read as a quiet one.
+//
+// Before this the page's only way to remove anything was "Clear events", which emptied the
+// whole object store — events, gaps and session records alike — and left nothing at all
+// behind. That is exactly the hand-edit of the SQLite file that `olive-forget` exists so
+// nobody has to make: the record loses its hours and loses the fact that it ever had them.
+//
+// The heading is verbatim from report/render.py. The note is not, and deliberately: the
+// Python one names `olive-forget`, a command this page has no access to, and says "the
+// device", which here is a browser tab. Copying it verbatim would be a false statement
+// about how the erasure happened, which is a strange way to be faithful to a disclosure.
+// Its last two sentences are the claims that must not vary between the two documents and
+// are pinned across implementations in pwa/report.test.mjs.
+export const ERASED_HEADING = "Windows erased by the operator";
+export const ERASED_NOTE =
+  "The operator erased the periods below from this browser's log, so every measurement " +
+  "inside them was deleted. They are reported here, and counted as not monitored in the " +
+  "coverage figures and the calendar, exactly as a period the app was not listening is. " +
+  "What was erased cannot be recovered from this file, and this disclosure is the only " +
+  "record that it existed. A report with no such section had nothing erased from it.";
+
+//: The `reason` an erasure carries on its gap record. A gap with no reason is an ordinary
+//: coverage hole — a backgrounded tab or a locked device — and the two must not be
+//: rendered with one explanation between them.
+export const ERASED_REASON = "erased";
+
+//: What an erasure with no operator note reads as. Not an empty cell: an erasure the
+//: operator gave no reason for and one whose reason was dropped between the store and the
+//: page must not render the same way.
+export const NO_REASON_GIVEN = "no reason given";
+
 // R2 — the browser edition has no calibration step at all, so it is always uncalibrated.
 export const UNCALIBRATED_HEADLINE =
   "Uncalibrated — these readings are relative, not dB(A).";
@@ -111,7 +148,10 @@ export function gapPreambleLines(gaps) {
   for (const g of gaps) {
     lines.push(
       `  - ${new Date(g.start * 1000).toISOString()} to ${new Date(g.end * 1000).toISOString()} ` +
-        `(${Math.round(Math.max(0, g.end - g.start))}s)`,
+        // Every line says why. Without it an erased window travels in a CSV preamble under
+        // the sentence above it -- "the browser cannot monitor while the tab is
+        // backgrounded" -- which is a reason, and the wrong one.
+        `(${Math.round(Math.max(0, g.end - g.start))}s, ${gapReason(g)})`,
     );
   }
   return lines;
@@ -388,6 +428,14 @@ export function coverageTextLines(summary) {
   if (summary.wallClockHours !== null && !summary.sessionsKnown) {
     lines.push("", NO_SESSION_RECORD_NOTE);
   }
+  // The erasure disclosure rides with the coverage statement, so it reaches every export
+  // that carries one — including the event CSV, which lists no gaps of its own and would
+  // otherwise be the one file that could be forwarded with no sign that a window had been
+  // removed from it.
+  const erased = summary.erasedLines || [];
+  if (erased.length) {
+    lines.push("", ERASED_HEADING, "", ERASED_NOTE, "", ...erased.map((line) => `  - ${line}`));
+  }
   return lines;
 }
 
@@ -446,17 +494,101 @@ function inQuietHours(hour, startHour, endHour) {
 //   (no kind)                          a detected event
 //   { kind: 'gap',     start, end }    the tab was backgrounded or locked: a coverage
 //                                      hole inside a run, written by the running app
+//   { kind: 'gap',     start, end,     the operator erased this window; the measurements
+//                      reason:          are gone and this row is the only record they
+//                      'erased', note } existed
 //   { kind: 'session', start, end }    one observation run, start() to stop()
 //
 // Events are therefore selected as "records with no kind", not as "not a gap". The
 // difference is the whole of issue #64's first hazard: `(r) => !isGap(r)` would have
 // counted every session record as a loud event the moment sessions were introduced,
 // inflating every count in the document this file exists to keep honest.
+//
+// An erasure is a gap and is *selected* as one everywhere coverage is computed, so it
+// costs the coverage figures and the calendar nothing to learn about it. It is separated
+// only where the document explains a gap in words, because "the browser cannot monitor
+// while the tab is backgrounded" is not why an erased window is missing.
 const isGap = (r) => r && r.kind === "gap";
+const isErased = (r) => isGap(r) && r.reason === ERASED_REASON;
 const isSession = (r) => r && r.kind === "session";
 const onlyEvents = (records) => records.filter((r) => r && !r.kind);
 const onlyGaps = (records) => records.filter(isGap);
+const onlyErased = (records) => records.filter(isErased);
 const onlySessions = (records) => records.filter(isSession);
+
+/** Why a gap row is missing, in words. Never blank, and never the wrong reason. */
+export function gapReason(gap) {
+  return isErased(gap)
+    ? `erased by the operator (${gap.note || NO_REASON_GIVEN})`
+    : "tab backgrounded or device locked";
+}
+
+/**
+ * One line per erased window, oldest first, with the reason the operator gave.
+ *
+ * Empty when nothing was erased, which is what keeps the disclosure section out of a
+ * report that has nothing to disclose — `ERASED_NOTE` says in terms that a report without
+ * the section had nothing erased from it, so the absence is not silent.
+ */
+export function erasedWindowLines(records) {
+  return onlyErased(records)
+    .slice()
+    .sort((a, b) => a.start - b.start)
+    .map(
+      (g) =>
+        `${new Date(g.start * 1000).toISOString()} to ${new Date(g.end * 1000).toISOString()} ` +
+        `(${((g.end - g.start) / 3600).toFixed(1)} h) — erased (${g.note || NO_REASON_GIVEN})`,
+    );
+}
+
+/**
+ * The gap record an erasure leaves behind, given a window and the operator's reason.
+ *
+ * Built here rather than in pwa/app.js so the one place that decides what an erasure looks
+ * like is the same file that decides how one is read back. `note` is normalised to a
+ * string and never invented: an empty reason stays empty and is rendered as
+ * `NO_REASON_GIVEN` at the point of display, not stored as it.
+ */
+export function erasureRecord(start, end, note = "") {
+  return { kind: "gap", start, end, reason: ERASED_REASON, note: String(note || "") };
+}
+
+/**
+ * Whether erasing `[start, end)` removes this record. Ported predicate-for-predicate from
+ * `EventStore.forget` (store/db.py), because the two implementations erasing different
+ * rows for the same request is the drift `spec/SEMANTICS.md` exists to stop.
+ *
+ * - **Events go by overlap, not containment.** A row that straddles the boundary still
+ *   carries measurement from inside the window, and a half-covered event cannot be
+ *   half-erased.
+ * - **A gap goes only if it lies wholly inside the window**, which the erasure row
+ *   subsumes. One that straddles the boundary also says something about time *outside*
+ *   the window, and the erasure row does not cover that part.
+ * - **An erasure row is never erased.** Removing the disclosure of an earlier erasure is
+ *   the single deletion this whole design exists to prevent.
+ * - **Session records stay.** A session is metadata about a run — when it began, when it
+ *   ended — not a measurement of any moment, and a run usually spans far more than the
+ *   erased window. Deleting it would destroy the lineage of the rows that were *kept*, to
+ *   no privacy end, and would take the erased hours out of the coverage denominator
+ *   entirely, which is the opposite of disclosing them.
+ */
+export function willForget(record, start, end) {
+  if (!record || isErased(record)) return false;
+  if (isSession(record)) return false;
+  const s = record.start ?? 0;
+  const e = record.end ?? record.start ?? 0;
+  if (isGap(record)) return s >= start && e <= end;
+  return e > start && s < end;
+}
+
+/**
+ * What erasing `[start, end)` would remove, by kind, so a confirmation can state what it
+ * is about to destroy before it destroys it rather than after.
+ */
+export function forgetCounts(records, start, end) {
+  const doomed = records.filter((r) => willForget(r, start, end));
+  return { events: doomed.filter((r) => !r.kind).length, gaps: doomed.filter(isGap).length };
+}
 
 /** How many of these records are detected events, as opposed to gaps or sessions. */
 export function countEvents(records) {
@@ -540,6 +672,10 @@ export function summarize(records, { startHour = 22, endHour = 8, tz = "UTC" } =
     gapCount: gaps.length,
     gapSeconds,
     gaps,
+    // Erased windows travel with the summary for the same reason coverage does: the
+    // document that states how much was observed is the document that has to say which of
+    // the unobserved part the operator removed on purpose.
+    erasedLines: erasedWindowLines(records),
     // Coverage travels with the counts rather than being computed per export path: a
     // count is only meaningful against the time it was counted over, and two exports
     // disagreeing about the denominator would be its own defect. null means the record
@@ -568,10 +704,25 @@ function coverHtml() {
 </section>`;
 }
 
+// Any width, not two. This destructured `([k, v])` and dropped every cell past the second
+// in silence, so a caller that grew a column got a `<th scope="col">` with no cells under
+// it -- a header that labels nothing, which is both a broken table for a screen reader and
+// a column of data that simply vanished from the document. The width check makes that a
+// failure rather than an omission nobody sees.
 function table(caption, headers, rows) {
   const head = headers.map((h) => `<th scope="col">${esc(h)}</th>`).join("");
   const body = rows
-    .map(([k, v]) => `<tr><th scope="row">${esc(k)}</th><td>${esc(v)}</td></tr>`)
+    .map((row) => {
+      if (row.length !== headers.length) {
+        throw new Error(
+          `table("${caption}"): a row has ${row.length} cells and the header has ` +
+            `${headers.length}. A column would be dropped or left unlabelled.`,
+        );
+      }
+      const [first, ...rest] = row;
+      const cells = rest.map((v) => `<td>${esc(v)}</td>`).join("");
+      return `<tr><th scope="row">${esc(first)}</th>${cells}</tr>`;
+    })
     .join("");
   return `<table><caption>${esc(caption)}</caption><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
@@ -637,12 +788,27 @@ export function buildReportHtml(summary, { generatedAt, tz = "UTC", startHour = 
   const tagsSection = tagRows.length
     ? `<h2>Event types (coarse hint)</h2><p>A crude, on-device hint, not a fact; it cannot identify a source.</p>${table("Events by coarse type", ["Type", "Events"], tagRows)}`
     : "";
+  // Every gap row carries why it is there. The paragraph below used to explain all of
+  // them with one sentence about a backgrounded tab, which is true of the gaps the running
+  // app writes and false of a window the operator erased on purpose — one explanation
+  // covering two different absences, in the table a reader uses to size the other one.
   const gapRows = (summary.gaps || []).map((g) => [
     new Date(g.start * 1000).toISOString(),
     `${new Date(g.end * 1000).toISOString()} (${Math.round((g.end - g.start))}s)`,
+    gapReason(g),
   ]);
+  const erasedCount = (summary.erasedLines || []).length;
   const gapsSection = gapRows.length
-    ? `<h2>Monitoring gaps</h2><p>The browser cannot monitor while the tab is backgrounded or the device is locked. During ${summary.gapCount} such gap(s), totalling ${Math.round(summary.gapSeconds)}s, no events could be detected. These periods are absences of data, not silence.</p>${table("Monitoring gaps (no data collected)", ["Gap start", "Gap end"], gapRows)}`
+    ? `<h2>Monitoring gaps</h2><p>During ${summary.gapCount} gap(s), totalling ${Math.round(summary.gapSeconds)}s, no events could be detected. These periods are absences of data, not silence. The browser cannot monitor while the tab is backgrounded or the device is locked; ${erasedCount ? `${erasedCount} of these were erased by the operator instead, and are listed again below with the reason given` : "none of these were erased by the operator"}.</p>${table("Monitoring gaps (no data collected)", ["Gap start", "Gap end", "Why"], gapRows)}`
+    : "";
+  // Omitted rather than rendered empty, on the same rule report/render.py's `_erased_html`
+  // follows: a report from a log nobody erased anything from should read as it always did,
+  // and ERASED_NOTE says in terms that a report without this section had nothing erased
+  // from it, so the absence is not silent.
+  const erasedSection = erasedCount
+    ? `<h2>${esc(ERASED_HEADING)}</h2><div class="note"><p>${esc(ERASED_NOTE)}</p></div><ul>${summary.erasedLines
+        .map((line) => `<li>${esc(line)}</li>`)
+        .join("")}</ul>`
     : "";
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -683,6 +849,7 @@ ${dayRows.length ? table("Events by day", ["Day", "Events"], dayRows) : "<p>No e
 ${Object.keys(summary.byDayHour).length ? `<p>Each cell is the number of events that began in that hour, by day and hour of day. Darker cells saw more events; the count is printed in every cell, so the pattern does not depend on color. Every day the reporting window covers has a row, including the quiet ones and the ones nothing was listening on.</p>${heatTable(summary.byDayHour, summary.unmonitored)}` : "<p>Nothing has been observed yet — no events, no monitoring sessions — so there is no window to draw a calendar over and no calendar to show.</p>"}
 ${tagsSection}
 ${gapsSection}
+${erasedSection}
 <h2>Quiet hours</h2>
 <p>Window <strong>${window}</strong> in time zone <strong>${esc(tz)}</strong>. Of ${summary.count} events, <strong>${summary.quietCount}</strong> began within quiet hours and <strong>${summary.outsideCount}</strong> outside them. An event counts as within quiet hours by its start time; this flags a level threshold being crossed, not the source of a sound.</p>
 <div class="note"><p>${esc(NO_VERDICT_NOTE)} Compare these counts against your own local ordinance, lease, or HOA rule.</p>

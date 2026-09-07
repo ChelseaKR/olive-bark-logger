@@ -14,6 +14,7 @@ the honest methodology/limitations framing with the Python core:
 | Detector (threshold/min-dur/debounce) | `detector.py` | `detector.js` |
 | Aggregation + report + CSV | `aggregate.py`, `render.py`, `export.py` | `report.js` |
 | Storage (events only, no audio) | SQLite | IndexedDB |
+| Erasure, disclosed as a gap | `store/forget.py` (`olive-forget`), `db.forget` | `report.js` (`willForget`, `erasureRecord`), `app.js` (`eraseWindow`) |
 | Cover block + no-verdict line | `render.py` (`cover_html`, `cover_text_lines`) | `report.js` (`coverHtml`, `coverTextLines`, `csvPreamble`) |
 
 **The caveats travel with every file this page produces.** The report HTML and both CSV
@@ -65,8 +66,19 @@ quiet-hours window while watching the live level. Use **Download report** (HTML,
 day×hour calendar heatmap and a quiet-hours summary), **Download CSV** (the event log), or
 **Download quiet-hours CSV** (every event flagged within/outside quiet hours, led by how
 much of the window was monitored — an honest export for a neighbor/landlord/HOA
-submission). **Clear events** resets. Install it as an
-app from your browser's "Install" option.
+submission). Install it as an app from your browser's "Install" option.
+
+**Erasing.** *Erase a window* takes a start, an end and an optional reason; *Erase
+everything recorded* does the same over everything the log covers. Both delete the
+measurements inside the window and **record that they did**: the window is listed in every
+report and CSV as erased by the operator, with the reason given (or `no reason given`),
+and its hours count as **not monitored** rather than as quiet. That is the point of the
+verb rather than a limitation of it — a stretch of time with no trace at all reads as a
+quiet one to whoever receives the file, which is the silent hand-edit `olive-forget`
+exists so that nobody has to make. Monitoring sessions survive an erasure, so the erased
+hours stay in the coverage figure's denominator. To leave no record at all, including the
+disclosure, clear this site's data in your browser — the browser's equivalent of deleting
+the `.db` file.
 
 ## Test
 

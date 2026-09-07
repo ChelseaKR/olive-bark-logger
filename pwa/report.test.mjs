@@ -13,7 +13,11 @@ import {
   COVER_CANNOT,
   COVER_HEADING,
   COVER_PRIVACY,
+  ERASED_HEADING,
+  ERASED_NOTE,
+  ERASED_REASON,
   NO_EVENTS_VALUE,
+  NO_REASON_GIVEN,
   NO_SESSION_RECORD_NOTE,
   NO_VERDICT_NOTE,
   UNCALIBRATED_HEADLINE,
@@ -22,10 +26,15 @@ import {
   countEvents,
   coverageSentence,
   coverageTextLines,
+  erasedWindowLines,
+  erasureRecord,
   eventsToCsv,
+  forgetCounts,
+  gapReason,
   offAirSpans,
   summarize,
   violationsToCsv,
+  willForget,
   windowDays,
 } from "./report.js";
 
@@ -464,4 +473,183 @@ test("the two implementations name this absence with the same string", () => {
   const match = charts.match(/\b_?UNMON(?:ITORED)?_LABEL\s*=\s*"([^"]+)"/);
   assert.ok(match, "report/charts.py no longer defines an unmonitored-cell label");
   assert.equal(UNMONITORED_LABEL, match[1]);
+});
+
+// --- erasure, disclosed: the browser half of `olive-forget` (issue #106) --------------
+//
+// Before this the page's only removal verb emptied the whole object store and left
+// nothing at all behind -- events, gaps and sessions together -- which is precisely the
+// silent hand-edit `olive-forget` exists so that nobody has to make. The record loses the
+// hours and loses the fact that it ever had them, and the file that gets handed to a
+// landlord afterwards reads as a device that was never running then.
+
+const erasedRec = (start, end, note = "") => erasureRecord(start, end, note);
+
+test("an erasure removes exactly what store/db.py's forget removes", () => {
+  const start = T0 + HOUR;
+  const end = T0 + 3 * HOUR;
+  // An event that straddles the boundary goes: it carries measurement from inside the
+  // window, and a half-covered event cannot be half-erased.
+  assert.equal(willForget(ev(start - 60, 300), start, end), true);
+  assert.equal(willForget(ev(end + 60, 60), start, end), false);
+  // A gap goes only if it lies wholly inside; a straddling one also describes time
+  // outside the window, which the erasure row does not cover.
+  assert.equal(willForget(gap(start + 60, end - 60), start, end), true);
+  assert.equal(willForget(gap(start - 60, end + 60), start, end), false);
+  // A session stays. Deleting it would take the erased hours out of the coverage
+  // denominator, which is the opposite of disclosing them.
+  assert.equal(willForget(session(start - HOUR, end + HOUR), start, end), false);
+  // An earlier erasure is never erased. Removing the disclosure of an erasure is the one
+  // deletion this whole design exists to prevent.
+  assert.equal(willForget(erasedRec(start + 60, end - 60, "earlier"), start, end), false);
+});
+
+test("erasing tells the operator what goes before it goes", () => {
+  const start = T0 + HOUR;
+  const end = T0 + 3 * HOUR;
+  const records = [
+    session(T0, T0 + 5 * HOUR),
+    ev(start + 60),
+    ev(start + 120),
+    ev(end + 600),
+    gap(start + 200, start + 400),
+  ];
+  assert.deepEqual(forgetCounts(records, start, end), { events: 2, gaps: 1 });
+});
+
+test("an erased window is unmonitored time, not quiet time", () => {
+  const records = [session(T0, T0 + 4 * HOUR), erasedRec(T0 + HOUR, T0 + 2 * HOUR, "guests over")];
+  const s = summarize(records, { tz: "UTC" });
+  assert.equal(s.wallClockHours.toFixed(1), "4.0");
+  assert.equal(s.monitoredHours.toFixed(1), "3.0");
+});
+
+test("the report names an erased window as erased, not as a backgrounded tab", () => {
+  const records = [
+    session(T0, T0 + 4 * HOUR),
+    ev(T0 + 30),
+    erasedRec(T0 + HOUR, T0 + 2 * HOUR, "guests over"),
+  ];
+  const html = buildReportHtml(summarize(records, { tz: "UTC" }), { generatedAt: "x", tz: "UTC" });
+  assert.ok(html.includes(ERASED_HEADING), "the erased-windows section is missing");
+  // The note is HTML-escaped on the way in (it contains an apostrophe), so the claim is
+  // asserted rather than the constant: the escaping is what a browser undoes to show it.
+  assert.ok(html.includes("counted as not monitored in the coverage figures and the calendar"));
+  assert.ok(html.includes("A report with no such section had nothing erased from it."));
+  assert.ok(html.includes("erased (guests over)"));
+  // Per-row, in the gaps table: one sentence about a backgrounded tab explaining every
+  // gap is a reason, and the wrong one for a window somebody removed on purpose.
+  assert.ok(
+    html.includes("erased by the operator (guests over)"),
+    "the gaps table does not say why this gap is there",
+  );
+  assert.ok(html.includes("1 of these were erased by the operator"));
+});
+
+test("an erasure with no reason says so instead of rendering a blank", () => {
+  // An erasure the operator gave no reason for and one whose reason was dropped between
+  // the store and the page must not render the same way.
+  const [line] = erasedWindowLines([erasedRec(T0, T0 + HOUR)]);
+  assert.ok(line.endsWith(`erased (${NO_REASON_GIVEN})`), line);
+  assert.ok(!line.includes("()"), line);
+  assert.equal(gapReason(erasedRec(T0, T0 + HOUR)), `erased by the operator (${NO_REASON_GIVEN})`);
+});
+
+test("an ordinary gap is not described as an erasure", () => {
+  assert.equal(gapReason(gap(T0, T0 + 60)), "tab backgrounded or device locked");
+  assert.deepEqual(erasedWindowLines([gap(T0, T0 + 60), session(T0, T0 + HOUR), ev(T0 + 10)]), []);
+});
+
+test("every export path this page produces discloses an erasure", () => {
+  // The event CSV lists no gaps of its own, so before the erasure disclosure joined the
+  // coverage statement it was the one file that could be forwarded with no sign that a
+  // window had been removed from it.
+  const records = [
+    session(T0, T0 + 4 * HOUR),
+    ev(T0 + 30),
+    erasedRec(T0 + HOUR, T0 + 2 * HOUR, "guests over"),
+  ];
+  const artifacts = {
+    buildReportHtml: buildReportHtml(summarize(records, { tz: "UTC" }), {
+      generatedAt: "x",
+      tz: "UTC",
+    }),
+    eventsToCsv: eventsToCsv(records),
+    violationsToCsv: violationsToCsv(records, { startHour: 22, endHour: 8, tz: "UTC" }),
+  };
+  for (const [name, text] of Object.entries(artifacts)) {
+    assert.ok(text.includes(ERASED_HEADING), `${name} does not disclose the erasure`);
+    assert.ok(text.includes("guests over"), `${name} drops the operator's reason`);
+  }
+});
+
+test("a log nobody erased anything from reads exactly as it did before", () => {
+  // Omitted rather than rendered empty, on the same rule report/render.py follows.
+  // ERASED_NOTE says in terms that a report without the section had nothing erased from
+  // it, so the absence is not a silent one.
+  const html = buildReportHtml(summarize([ev(T23)], { tz: "UTC" }), { generatedAt: "x", tz: "UTC" });
+  assert.ok(!html.includes(ERASED_HEADING));
+  assert.ok(!html.includes("erased"));
+});
+
+test("the calendar hatches an erased hour, so it cannot read as a quiet one", () => {
+  const records = [session(T0, T0 + 4 * HOUR), erasedRec(T0 + HOUR, T0 + 2 * HOUR, "x")];
+  const s = summarize(records, { tz: "UTC" });
+  const [date] = new Date(T0 * 1000).toISOString().split("T");
+  assert.ok(s.unmonitored.has(`${date}|21`), `21:00 was erased and is not marked: ${[...s.unmonitored]}`);
+});
+
+test("both implementations name an erasure with the same words", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const render = readFileSync(join(root, "report", "render.py"), "utf8");
+  const db = readFileSync(join(root, "store", "db.py"), "utf8");
+
+  const heading = render.match(/^ERASED_HEADING\s*=\s*"([^"]+)"/m);
+  assert.ok(heading, "report/render.py no longer defines ERASED_HEADING");
+  assert.equal(ERASED_HEADING, heading[1]);
+
+  const reason = db.match(/^ERASED_REASON\s*=\s*"([^"]+)"/m);
+  assert.ok(reason, "store/db.py no longer defines ERASED_REASON");
+  assert.equal(ERASED_REASON, reason[1]);
+
+  // The two notes are NOT identical and must not be: the Python one names `olive-forget`
+  // and "the device", neither of which exists on this page, and copying it verbatim would
+  // make the disclosure a false statement about how the erasure happened. These two
+  // sentences are the claims themselves, and those may not drift.
+  const joined = render.replace(/"\s*\n\s*"/g, "");
+  for (const claim of [
+    "What was erased cannot be recovered from this file, and this disclosure is the only record that it existed.",
+    "A report with no such section had nothing erased from it.",
+  ]) {
+    assert.ok(joined.includes(claim), `report/render.py no longer states: ${claim}`);
+    assert.ok(ERASED_NOTE.includes(claim), `pwa/report.js no longer states: ${claim}`);
+  }
+});
+
+test("no table in the report labels a column it has no cells for", () => {
+  // The gaps table grew a "Why" column and `table()` destructured its rows as `([k, v])`,
+  // dropping every cell past the second in silence: a `<th scope="col">` with nothing
+  // under it, which is a broken table for a screen reader and a column of data that left
+  // the document without a word. Checked over every table the report renders, not just
+  // that one, because the helper is shared.
+  const records = [
+    session(T0, T0 + 4 * HOUR),
+    ev(T0 + 30),
+    gap(T0 + 600, T0 + 900),
+    erasedRec(T0 + HOUR, T0 + 2 * HOUR, "guests over"),
+  ];
+  const html = buildReportHtml(summarize(records, { tz: "UTC" }), { generatedAt: "x", tz: "UTC" });
+  const tables = html.match(/<table>[\s\S]*?<\/table>/g) || [];
+  assert.ok(tables.length >= 4, `expected several tables, found ${tables.length}`);
+  for (const t of tables) {
+    const caption = (t.match(/<caption>([^<]*)/) || [, "?"])[1];
+    const headers = (t.match(/<th scope="col">/g) || []).length;
+    const rows = t.split("<tbody>")[1].match(/<tr>[\s\S]*?<\/tr>/g) || [];
+    assert.ok(rows.length > 0, `${caption}: no body rows`);
+    for (const row of rows) {
+      const cells =
+        (row.match(/<th scope="row">/g) || []).length + (row.match(/<td/g) || []).length;
+      assert.equal(cells, headers, `${caption}: ${cells} cells under ${headers} headers`);
+    }
+  }
 });
