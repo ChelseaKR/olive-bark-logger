@@ -17,13 +17,16 @@ import {
   NO_SESSION_RECORD_NOTE,
   NO_VERDICT_NOTE,
   UNCALIBRATED_HEADLINE,
+  UNMONITORED_LABEL,
   buildReportHtml,
   countEvents,
   coverageSentence,
   coverageTextLines,
   eventsToCsv,
+  offAirSpans,
   summarize,
   violationsToCsv,
+  windowDays,
 } from "./report.js";
 
 // The shared vector both implementations are held to. Same arrangement as
@@ -323,4 +326,138 @@ test("the violations CSV's coverage lines are comment lines, so data rows still 
   const dataRows = csv.split("\n").filter((l) => !l.startsWith("#"));
   assert.equal(dataRows.length, 2); // header + the one real event
   assert.ok(csv.split("\n").some((l) => l.startsWith("# ") && l.includes("wall-clock hours")));
+});
+
+// ---------------------------------------------------------------------------
+// The calendar's third state: a day nothing was listening on is not a quiet day.
+//
+// Issue #59 gave the Python calendar a row for every day the reporting window covers,
+// on the reasoning that "a quiet monitored day and a day the monitor was switched off
+// both simply vanished from the calendar". The browser twin of that calendar kept
+// building its grid from the days that happened to have an event, where the outage it
+// hides is the commonest one there is: a closed tab.
+// ---------------------------------------------------------------------------
+
+// Three days. The app runs on day 1 and day 3 with one event each, and is never opened
+// on day 2 -- so day 2 leaves no gap row behind, only the hole between two sessions.
+const D1 = Date.UTC(2026, 2, 10, 12) / 1000;
+const D2 = D1 + 86400;
+const D3 = D1 + 2 * 86400;
+const threeDayRecords = () => [
+  ev(D1),
+  ev(D3),
+  session(D1 - HOUR, D1 + HOUR),
+  session(D3 - HOUR, D3 + HOUR),
+];
+
+const calendarOf = (records, tz = "UTC") => summarize(records, { tz });
+
+test("the calendar has a row for every day the window covers, not only the days with events", () => {
+  const s = calendarOf(threeDayRecords());
+  assert.deepEqual(Object.keys(s.byDayHour).sort(), ["2026-03-10", "2026-03-11", "2026-03-12"]);
+});
+
+test("the day nothing was listening on is marked, not filled with zeros", () => {
+  const s = calendarOf(threeDayRecords());
+  // Every hour of 2026-03-11 is off air: no session covers it and no event falls in it.
+  const marked = [...s.unmonitored].filter((k) => k.startsWith("2026-03-11|"));
+  assert.equal(marked.length, 24, "the unopened day should be 24 unmonitored hours");
+  // And the hour an event was actually recorded in is not marked, on any day.
+  assert.ok(!s.unmonitored.has("2026-03-10|12"));
+});
+
+test("an unmonitored hour prints no count at all, not a zero", () => {
+  const s = calendarOf(threeDayRecords());
+  const html = buildReportHtml(s, { generatedAt: "now", tz: "UTC", startHour: 22, endHour: 8 });
+  const row = html.split("<tr>").find((r) => r.includes('scope="row">2026-03-11'));
+  assert.ok(row, "the unopened day has no row in the rendered calendar");
+  assert.ok(row.includes(UNMONITORED_LABEL), "the row does not say what the absence is");
+  // A count chip in this row would be the defect: a measurement where there was none.
+  // The row total at the end is a different thing and legitimately reads 0 events.
+  assert.equal(
+    row.match(/>\d+<\/span>/g),
+    null,
+    `an unmonitored hour rendered a count: ${row.slice(0, 300)}`,
+  );
+});
+
+test("the third state does not depend on colour", () => {
+  const s = calendarOf(threeDayRecords());
+  const html = buildReportHtml(s, { generatedAt: "now", tz: "UTC", startHour: 22, endHour: 8 });
+  const row = html.split("<tr>").find((r) => r.includes('scope="row">2026-03-11'));
+  // Three colour-free carriers: a text dash in the cell, the label in the cell's title,
+  // and the day's count of unmonitored hours as a real column.
+  assert.ok(row.includes(">—</span>"), "no text marker in the cell");
+  assert.ok(row.includes(`— ${UNMONITORED_LABEL}"`), "no spelled-out title on the cell");
+  assert.ok(row.trimEnd().endsWith("<td>24</td></tr>"), `no unmonitored-hours column: ${row.slice(-120)}`);
+  assert.ok(
+    html.includes(`Hours ${UNMONITORED_LABEL}`),
+    "the unmonitored-hours column has no header",
+  );
+});
+
+test("an unmonitored hour is in no total and does not rescale the shading", () => {
+  const s = calendarOf(threeDayRecords());
+  const html = buildReportHtml(s, { generatedAt: "now", tz: "UTC", startHour: 22, endHour: 8 });
+  const row = html.split("<tr>").find((r) => r.includes('scope="row">2026-03-11'));
+  // Row total 0 events, 24 hours nobody was listening: the two figures say different
+  // things and the row carries both.
+  assert.ok(row.includes("<td>0</td><td>24</td>"), `totals wrong: ${row.slice(-160)}`);
+});
+
+test("a quiet monitored day keeps its zeros, which are a measurement", () => {
+  // Same three days, but the app also ran through day 2 and heard nothing.
+  const records = [...threeDayRecords(), session(D2 - 12 * HOUR, D2 + 12 * HOUR)];
+  const s = calendarOf(records);
+  assert.ok(Object.keys(s.byDayHour).includes("2026-03-11"));
+  const covered = [...s.unmonitored].filter((k) => k.startsWith("2026-03-11|"));
+  assert.ok(covered.length < 24, "a monitored quiet day was marked as unmonitored");
+  const html = buildReportHtml(s, { generatedAt: "now", tz: "UTC", startHour: 22, endHour: 8 });
+  const row = html.split("<tr>").find((r) => r.includes('scope="row">2026-03-11'));
+  assert.ok(row.includes(">0</span>"), "a monitored quiet hour lost its zero");
+});
+
+test("a recorded gap marks its hours too, and an event inside one keeps its count", () => {
+  // A gap is a different outage from being off air. Both are absences of data.
+  const records = [ev(D1), session(D1 - 3 * HOUR, D1 + 3 * HOUR), gap(D1 + HOUR, D1 + 2 * HOUR)];
+  const s = calendarOf(records);
+  assert.ok(s.unmonitored.has("2026-03-10|13"), "the gap hour is not marked");
+  assert.ok(!s.unmonitored.has("2026-03-10|12"), "the hour holding a real event was marked");
+});
+
+test("with no session records the calendar marks nothing, because the record cannot say", () => {
+  // A log written before sessions existed. "Cannot say" is not "fully covered" and it
+  // is not "entirely off air" either; the honest rendering is no third state at all.
+  const s = calendarOf([ev(D1), ev(D3)]);
+  assert.equal(s.unmonitored.size, 0);
+  assert.equal(offAirSpans([ev(D1), ev(D3)]), null);
+});
+
+test("an empty record draws no calendar and says why", () => {
+  const s = calendarOf([]);
+  assert.deepEqual(Object.keys(s.byDayHour), []);
+  const html = buildReportHtml(s, { generatedAt: "now", tz: "UTC", startHour: 22, endHour: 8 });
+  assert.ok(html.includes("no window to draw a calendar over"));
+});
+
+test("windowDays does not skip or repeat a day across a DST transition", () => {
+  // 2026-03-08 is the US spring-forward. Walking by 86400 s from a local timestamp
+  // would land on 2026-03-08 twice or skip it; the day walk runs on calendar dates.
+  const start = Date.UTC(2026, 2, 6, 20) / 1000;
+  const end = Date.UTC(2026, 2, 10, 20) / 1000;
+  const days = windowDays([start, end], "America/Los_Angeles");
+  assert.deepEqual(days, ["2026-03-06", "2026-03-07", "2026-03-08", "2026-03-09", "2026-03-10"]);
+  assert.equal(new Set(days).size, days.length);
+});
+
+test("the two implementations name this absence with the same string", () => {
+  // report/charts.py renders the same cell. Two words for one absence is how the two
+  // halves of one report start disagreeing in front of a reader.
+  const charts = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "report", "charts.py"),
+    "utf8",
+  );
+  const match = charts.match(/_UNMON_LABEL\s*=\s*"([^"]+)"/);
+  assert.ok(match, "report/charts.py no longer defines _UNMON_LABEL");
+  assert.equal(UNMONITORED_LABEL, match[1]);
 });

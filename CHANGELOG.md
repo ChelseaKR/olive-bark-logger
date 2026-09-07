@@ -17,6 +17,35 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Fixed
+- **The browser report's calendar had a row only for the days that had an event, so a day
+  the app was never opened and a genuinely quiet day were both simply absent from it.**
+  Issue #59 fixed exactly this on the Python side, on the reasoning that "a quiet
+  monitored day and a day the monitor was switched off both simply vanished from the
+  calendar". `pwa/report.js` is the browser twin of that same report and never learned:
+  `summarize` built `byDayHour` from `partsInTz(ev.start)` as it walked the events, so
+  the grid's rows *were* the event days. On this side the outage it hides is the
+  commonest one there is, because a gap row is written by a *running* app catching its
+  own coverage hole: a closed tab, a locked device, an app never opened that day leaves
+  no gap behind at all, and only the hole between two session records can find it.
+  - The calendar now has a row for every day the reporting window covers, and the
+    calendar's three states are rendered: a count, a `0` (a monitored hour with no event
+    is a measurement), and `not monitored` for an hour nothing was listening for. An
+    unmonitored cell prints no count at all, not even a zero, and is in neither the row
+    total nor the shading scale.
+  - The third state does not depend on colour: a text dash in the cell, the label spelled
+    out in the cell's title, and each day's count of unmonitored hours as a real column
+    with its own header. Same rule `report/charts.py` follows for the same cell.
+  - `UNMONITORED_LABEL` is exported and a test holds it equal to `report/charts.py`'s
+    `_UNMON_LABEL`, so the two halves of one report cannot describe one absence with two
+    different words.
+  - `offAirSpans` returns `null`, not an empty list and not the whole window, for a
+    record with no session rows: "the record cannot say" is neither "fully covered" nor
+    "entirely off air", and the calendar marks nothing rather than inventing an outage.
+  - `windowDays` walks calendar dates rather than adding 86400 seconds, so a
+    daylight-saving transition inside the window cannot skip a day or emit one twice.
+  - An empty record now says there is no window to draw a calendar over, rather than
+    "no events have been logged yet", which was a claim about events in a place the
+    absence might equally be of monitoring.
 - **`docs/GAP-LEDGER.md` listed two supply-chain items as absent that had been in the
   tree for eight weeks.** GAP-SEC-1 said "no SBOM/signing (no release pipeline exists to
   attach them to)". The parenthesis was the error: `.github/workflows/release.yml` landed

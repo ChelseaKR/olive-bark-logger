@@ -18,6 +18,12 @@ export const RELATIVE_DBFS_NOTE =
 // What a peak or duration figure reads when there were no events to take it from.
 export const NO_EVENTS_VALUE = "no events";
 
+// The calendar's third state, in words. The same string report/charts.py renders as
+// _UNMON_LABEL: two implementations of one report describing the same absence must not
+// describe it with two different words, so this is a constant on both sides rather than
+// a literal typed twice.
+export const UNMONITORED_LABEL = "not monitored";
+
 export const NO_SOURCE_NOTE =
   "This tool measures sound levels only. It cannot prove what made a sound or where it " +
   "came from; it does not record or identify any voice or source.";
@@ -259,6 +265,76 @@ export function coverageHours(records) {
   };
 }
 
+/**
+ * Stretches of the reporting window with no monitor running at all, or null.
+ *
+ * The browser twin of `report.render.off_air_spans`. null means the record cannot say
+ * (no window, or no session records at all), which is a different statement from "none"
+ * and is rendered as one: with no session rows the calendar marks nothing unmonitored
+ * rather than inventing an outage the record cannot support.
+ *
+ * A gap is written by a *running* app catching its own coverage hole, so the ordinary
+ * outage -- the tab closed, the device asleep, the app never opened that day -- leaves
+ * no gap behind. Only the hole between two session records can find it.
+ */
+export function offAirSpans(records) {
+  const window = coverageWindow(records);
+  if (!window) return null;
+  const sessions = onlySessions(records);
+  if (!sessions.length) return null;
+  const onAir = clipSpans(
+    [
+      ...sessions.map((s) => [s.start, typeof s.end === "number" ? s.end : s.start]),
+      ...onlyEvents(records).map((e) => [e.start, e.end]),
+    ],
+    window,
+  );
+  return subtractSpans([window], onAir);
+}
+
+/**
+ * Every calendar date (in `tz`) the window touches, as `YYYY-MM-DD`, in order.
+ *
+ * The browser twin of `report.render._fill_window_days`' day walk. The arithmetic runs
+ * on UTC midnights of the *local* dates rather than by adding 86400 to the window's own
+ * timestamps, so a daylight-saving transition inside the window cannot skip a day or
+ * emit one twice.
+ */
+export function windowDays([winStart, winEnd], tz) {
+  const first = partsInTz(winStart * 1000, tz).date;
+  const last = partsInTz(winEnd * 1000, tz).date;
+  const days = [];
+  let cursor = Date.parse(`${first}T00:00:00Z`);
+  const end = Date.parse(`${last}T00:00:00Z`);
+  while (cursor <= end) {
+    days.push(new Date(cursor).toISOString().slice(0, 10));
+    cursor += 86400000;
+  }
+  return days;
+}
+
+/**
+ * Which `date|hour` calendar cells the device was not listening for.
+ *
+ * The browser twin of `report.render._unmonitored_buckets`: only cells that exist in the
+ * grid and hold zero events are marked, so a partly covered hour with a real event in it
+ * still shows its count rather than being overwritten by the absence around it. Recorded
+ * gaps and off-air stretches both count: they are different outages and neither is a
+ * quiet hour.
+ */
+export function unmonitoredCells(records, byDayHour, tz) {
+  const offAir = offAirSpans(records);
+  const spans = [...onlyGaps(records).map((g) => [g.start, g.end]), ...(offAir || [])];
+  const cells = new Set();
+  for (const [start, end] of mergeSpans(spans)) {
+    for (let t = start; t < end; t += 3600) {
+      const { hour, date } = partsInTz(t * 1000, tz);
+      if (byDayHour[date] && (byDayHour[date][hour] || 0) === 0) cells.add(`${date}|${hour}`);
+    }
+  }
+  return cells;
+}
+
 // The claim itself, held as a template rather than built inline, so the shape lives in
 // exactly one place on this side and can be checked character for character against the
 // shared vector's `coverage.sentence_template` (pwa/report.test.mjs). Python's copy is
@@ -426,6 +502,25 @@ export function summarize(records, { startHour = 22, endHour = 8, tz = "UTC" } =
       outsideLoud += ev.duration;
     }
   }
+  // Every calendar day the window covers gets a row, not only the days that had an
+  // event. Without this a quiet monitored day and a day the app was never opened both
+  // simply vanished from the calendar: indistinguishable from each other and from days
+  // that were never in the window at all. The Python side fixed this in issue #59
+  // (report.render._fill_window_days); this is the same fix on the browser side, where
+  // the outage it hides is the commonest one there is -- a closed tab.
+  const calendarWindow = coverageWindow(records);
+  if (calendarWindow) {
+    for (const day of windowDays(calendarWindow, tz)) {
+      if (!byDayHour[day]) {
+        byDayHour[day] = {};
+        for (let h = 0; h < 24; h++) byDayHour[day][h] = 0;
+      }
+    }
+  }
+  // Filling those rows with zeros is only honest beside the third state: a zero is a
+  // measurement, and an hour nothing was listening for is not one.
+  const unmonitored = unmonitoredCells(records, byDayHour, tz);
+
   return {
     count: events.length,
     totalLoud,
@@ -436,6 +531,8 @@ export function summarize(records, { startHour = 22, endHour = 8, tz = "UTC" } =
     byDay,
     byTag,
     byDayHour,
+    // `date|hour` keys the calendar renders as UNMONITORED_LABEL instead of a count.
+    unmonitored,
     quietCount,
     quietLoud,
     outsideCount: events.length - quietCount,
@@ -479,18 +576,37 @@ function table(caption, headers, rows) {
   return `<table><caption>${esc(caption)}</caption><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
+// A diagonal hatch for the cells nothing was listening for. Paired with a text dash and
+// a spelled-out title, so the third state survives with color removed -- the same rule
+// report/charts.py follows for the same cell.
+const UNMON_HATCH = "repeating-linear-gradient(45deg,#eee,#eee 3px,#bbb 3px,#bbb 5px)";
+
 // Calendar heatmap as an accessible HTML table: rows are days, columns are hours 0..23.
 // Cells are shaded by intensity AND print their count, so meaning never depends on color
 // alone; the table itself is the data-table equivalent. Counts only — never audio.
-function heatTable(byDayHour) {
+//
+// A cell nothing was listening for prints no count, not even a zero: there is no
+// measurement to print, and an hour rendered as 0 here would be the absence-as-a-value
+// defect this file exists to keep out of the report. It also does not enter the row
+// total or the shading scale, because an unmonitored hour contributed no events and
+// must not be read as having contributed none.
+function heatTable(byDayHour, unmonitored = new Set()) {
   const days = Object.keys(byDayHour).sort();
+  const isUnmon = (d, h) => unmonitored.has(`${d}|${h}`);
   let max = 0;
-  for (const d of days) for (let h = 0; h < 24; h++) max = Math.max(max, byDayHour[d][h] || 0);
+  for (const d of days)
+    for (let h = 0; h < 24; h++) if (!isUnmon(d, h)) max = Math.max(max, byDayHour[d][h] || 0);
   const head = Array.from({ length: 24 }, (_, h) => `<th scope="col">${String(h).padStart(2, "0")}</th>`).join("");
   const rows = days
     .map((d) => {
       let rowTotal = 0;
+      let unmonHours = 0;
       const cells = Array.from({ length: 24 }, (_, h) => {
+        const label = `${esc(d)} ${String(h).padStart(2, "0")}:00`;
+        if (isUnmon(d, h)) {
+          unmonHours += 1;
+          return `<td style="background:${UNMON_HATCH};text-align:center" title="${label} — ${esc(UNMONITORED_LABEL)}"><span style="background:#fff;color:#111;padding:0 3px;border-radius:2px">—</span></td>`;
+        }
         const v = byDayHour[d][h] || 0;
         rowTotal += v;
         const ratio = max ? v / max : 0;
@@ -502,12 +618,15 @@ function heatTable(byDayHour) {
         // shade. The old fg switch (white text when ratio >= 0.55) genuinely failed
         // AA on mid-intensity cells — same defect class fixed in report/charts.py
         // (see tests/test_svg_contrast.py for the exact ratios on the shared ramp).
-        return `<td style="background:${bg};text-align:center" title="${esc(d)} ${String(h).padStart(2, "0")}:00 — ${v} events"><span style="background:#fff;color:#111;padding:0 3px;border-radius:2px">${v}</span></td>`;
+        return `<td style="background:${bg};text-align:center" title="${label} — ${v} events"><span style="background:#fff;color:#111;padding:0 3px;border-radius:2px">${v}</span></td>`;
       }).join("");
-      return `<tr><th scope="row">${esc(d)}</th>${cells}<td>${rowTotal}</td></tr>`;
+      // The count of unmonitored hours is a real column, not only a colour: a reader who
+      // cannot see the hatch still gets the number, and it is the figure that says how
+      // much of the day the row's total was taken over.
+      return `<tr><th scope="row">${esc(d)}</th>${cells}<td>${rowTotal}</td><td>${unmonHours}</td></tr>`;
     })
     .join("");
-  return `<table><caption>Events by day and hour — darker cells saw more events; counts are printed in every cell</caption><thead><tr><th scope="col">Day</th>${head}<th scope="col">Total</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table><caption>Events by day and hour — darker cells saw more events; counts are printed in every cell. A cell marked — was ${esc(UNMONITORED_LABEL)}: nothing was listening, so no event could have been recorded in it, and it is not a quiet hour.</caption><thead><tr><th scope="col">Day</th>${head}<th scope="col">Total</th><th scope="col">Hours ${esc(UNMONITORED_LABEL)}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 export function buildReportHtml(summary, { generatedAt, tz = "UTC", startHour = 22, endHour = 8 }) {
@@ -561,7 +680,7 @@ ${table("Events by hour of day", ["Hour", "Events"], hourRows)}
 <h2>Events by day</h2>
 ${dayRows.length ? table("Events by day", ["Day", "Events"], dayRows) : "<p>No events yet.</p>"}
 <h2>Calendar heatmap</h2>
-${dayRows.length ? `<p>Each cell is the number of events that began in that hour, by day and hour of day. Darker cells saw more events; the count is printed in every cell, so the pattern does not depend on color.</p>${heatTable(summary.byDayHour)}` : "<p>No events have been logged yet, so there is no calendar to show.</p>"}
+${Object.keys(summary.byDayHour).length ? `<p>Each cell is the number of events that began in that hour, by day and hour of day. Darker cells saw more events; the count is printed in every cell, so the pattern does not depend on color. Every day the reporting window covers has a row, including the quiet ones and the ones nothing was listening on.</p>${heatTable(summary.byDayHour, summary.unmonitored)}` : "<p>Nothing has been observed yet — no events, no monitoring sessions — so there is no window to draw a calendar over and no calendar to show.</p>"}
 ${tagsSection}
 ${gapsSection}
 <h2>Quiet hours</h2>
