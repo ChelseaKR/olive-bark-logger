@@ -55,6 +55,39 @@ release" defect this file's absence let stand.
   between `DROP TABLE` and `RENAME` would leave a database with no `gaps` table at all --
   the ledger that discloses missing time, itself missing.
 
+- **The browser edition can erase a window too, and discloses it the same way.** The PWA
+  half of the verb above. Until now the page's only removal control was **Clear events**,
+  which emptied the whole IndexedDB store -- events, gaps and session records together --
+  and left nothing at all behind. That is the silent hand-edit `olive-forget` exists so
+  that nobody has to make, in the implementation with the lowest barrier to reaching for
+  it: the record loses the hours *and* loses the fact that it ever had them, and what gets
+  handed to a landlord afterwards reads as a device that was simply never running then.
+
+  **Erase a window** takes a start, an end and an optional reason, states what it is about
+  to destroy before it destroys it, and leaves behind a gap record with `reason: "erased"`.
+  Everything downstream already understood that shape: coverage subtracts the window, the
+  calendar hatches its hours as *not monitored*, the quiet-hours CSV names it in the gap
+  list, and the report gains the same *Windows erased by the operator* section the Python
+  report has -- or `no reason given`, which is not the same as saying nothing. The delete
+  and the disclosure share one IndexedDB transaction, so a tab closed between them cannot
+  leave the hole without the row that discloses it.
+
+  **Erase everything recorded** replaces *Clear events* and is the same operation over the
+  whole observed window. Session records survive it, deliberately and for the Python side's
+  reason: they are what keeps the erased hours in the coverage denominator instead of
+  removing them from the record's own idea of what it covered. The page says plainly that
+  clearing the site's data in the browser is the way to leave no record at all, including
+  the disclosure -- the browser's equivalent of deleting the `.db` file.
+
+  `pwa/report.js`'s selection rule (`willForget`) is ported predicate-for-predicate from
+  `EventStore.forget`: events by overlap, a gap only if it lies wholly inside, sessions
+  kept, and an earlier erasure row never erased -- removing the disclosure of an erasure is
+  the one deletion this design exists to prevent. The heading is shared with the Python
+  report and pinned across the two; the note is deliberately *not* verbatim, because the
+  Python wording names `olive-forget` and "the device", and copying it into a browser tab
+  would make the disclosure a false statement about how the erasure happened. The two
+  sentences that are the claim itself are pinned in both directions.
+
 ### Fixed
 - **The browser report's calendar had a row only for the days that had an event, so a day
   the app was never opened and a genuinely quiet day were both simply absent from it.**

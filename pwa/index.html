@@ -20,6 +20,9 @@
   fieldset { margin: 1rem 0; border: 1px solid #767676; }
   label { display: inline-block; min-width: 9rem; }
   input { width: 5rem; color: #1a1a1a; background: #ffffff; border: 1px solid #595959; }
+  /* A date-time or free-text field does not fit the 5rem the numeric knobs use; without
+     this the erase window's own timestamps are clipped to unreadability. */
+  input.wide { width: auto; min-width: 14rem; max-width: 100%; }
   meter { width: 100%; height: 1.5rem; }
   button { font-size: 1rem; padding: .5rem 1rem; margin: .25rem .25rem 0 0;
            color: #ffffff; background: #1f4e79; border: 1px solid #14395a; }
@@ -72,8 +75,27 @@ interruptions are recorded as monitoring gaps in your report.</p>
   <button id="report">Download report (HTML)</button>
   <button id="csv">Download CSV</button>
   <button id="violations">Download quiet-hours CSV</button>
-  <button id="clear">Clear events</button>
 </div>
+
+<h2>Erase</h2>
+<p class="note">Erasing deletes the measurements inside a window and <strong>records that
+it happened</strong>: every report and CSV from this page lists the window, says the
+operator erased it, and counts those hours as <strong>not monitored</strong> rather than
+as quiet. That is the point — a night with no trace at all reads as a quiet one to whoever
+you hand the file to. Monitoring sessions are kept, so the erased hours stay in the
+coverage figure's denominator. To leave no record at all, including that one, clear this
+site's data in your browser.</p>
+<fieldset>
+  <legend>Erase a window</legend>
+  <div class="row"><label for="eraseFrom">Erase from</label><input id="eraseFrom" class="wide" type="datetime-local"></div>
+  <div class="row"><label for="eraseTo">Erase to</label><input id="eraseTo" class="wide" type="datetime-local"></div>
+  <div class="row"><label for="eraseReason">Reason (optional)</label><input id="eraseReason" class="wide" type="text" maxlength="200"></div>
+  <div>
+    <button id="erase">Erase window</button>
+    <button id="clear">Erase everything recorded</button>
+  </div>
+</fieldset>
+<p id="eraseStatus" role="status">Nothing has been erased.</p>
 </main>
 <script type="module" src="./app.js"></script>
 </body>

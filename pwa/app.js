@@ -5,7 +5,17 @@
 import { computeAnchor, toEpochSeconds } from "./clock.js";
 import { Detector } from "./detector.js";
 import { dbfs } from "./level.js";
-import { buildReportHtml, countEvents, eventsToCsv, summarize, violationsToCsv } from "./report.js";
+import {
+  buildReportHtml,
+  countEvents,
+  coverageWindow,
+  erasureRecord,
+  eventsToCsv,
+  forgetCounts,
+  summarize,
+  violationsToCsv,
+  willForget,
+} from "./report.js";
 
 const $ = (id) => document.getElementById(id);
 const cfg = () => ({
@@ -52,12 +62,43 @@ async function allEvents() {
     req.onerror = () => rej(req.error);
   });
 }
-async function clearEvents() {
+// --- Erasure, disclosed (the browser half of `olive-forget`, issue #106) ---------------
+//
+// Until now the only way to remove anything from this page was a "Clear events" button
+// that emptied the object store: events, gaps and session records together, leaving
+// nothing at all behind. That is the hand-edit of the SQLite file the Python side built
+// `olive-forget` so that nobody has to make. The record loses the hours *and* loses the
+// fact that it ever had them, and what is handed to a landlord afterwards reads as a
+// device that was simply never running then.
+//
+// So erasure here is the same operation it is there: the measurements go, and a gap row
+// with `reason: "erased"` stays, which every reader already understands as "nothing was
+// listening" — coverage subtracts it, the calendar hatches it, the report names it.
+//
+// The delete and the disclosure share ONE IndexedDB transaction. That is the sharp edge
+// of the whole verb: a tab closed between them would leave exactly the undisclosed hole
+// erasing-by-hand produces, and it would look like an ordinary quiet night.
+async function eraseWindow(start, end, note) {
+  if (!(end > start)) throw new Error("Erase: the window is empty or runs backwards.");
   const db = await openDb();
-  await new Promise((res, rej) => {
+  return new Promise((res, rej) => {
     const tx = db.transaction("events", "readwrite");
-    tx.objectStore("events").clear();
-    tx.oncomplete = res;
+    const store = tx.objectStore("events");
+    let removed = 0;
+    store.openCursor().onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor) {
+        if (willForget(cursor.value, start, end)) {
+          cursor.delete();
+          removed += 1;
+        }
+        cursor.continue();
+        return;
+      }
+      // Only once the sweep is finished, and inside the same transaction.
+      store.add(erasureRecord(start, end, note));
+    };
+    tx.oncomplete = () => res(removed);
     tx.onerror = () => rej(tx.error);
   });
 }
@@ -226,13 +267,88 @@ async function downloadViolations() {
   download("quiet-hours.csv", violationsToCsv(await allEvents(), cfg()), "text/csv");
 }
 
+// The moment the operator named, in this device's own zone -- a `datetime-local` value
+// carries no offset, and the quiet-hours window and the report are already read in the
+// local zone, so an operator naming "last night" gets the night they mean.
+//
+// Refused rather than guessed. An empty or unreadable field must not fall through to
+// `new Date(undefined)` (NaN) or to 0 (1970): the window this returns is the window that
+// gets destroyed, and a silently widened one destroys more than was asked for. Same rule
+// as store/forget.py's `parse_moment`, which refuses a bare date for the same reason.
+function readMoment(id, label) {
+  const raw = $(id).value.trim();
+  if (!raw) throw new Error(`Give a ${label} time before erasing.`);
+  const ms = new Date(raw).getTime();
+  if (Number.isNaN(ms)) throw new Error(`Cannot read the ${label} time as a moment.`);
+  return ms / 1000;
+}
+
+const fmt = (t) => new Date(t * 1000).toLocaleString();
+
+// Counts first, then the window, then what survives. The operator is told what is about to
+// go before it goes, the way `olive-forget` prints its counts and waits for confirmation.
+function erasePrompt(start, end, { events, gaps }) {
+  return (
+    `Erase ${events} event(s) and ${gaps} recorded gap(s) between\n` +
+    `${fmt(start)} and ${fmt(end)}?\n\n` +
+    "This cannot be undone. The erasure itself is NOT hidden: every report and CSV from " +
+    "this page will list the window and say the operator erased it, and will count those " +
+    "hours as not monitored rather than as quiet.\n\n" +
+    "To leave no record at all, including that one, clear this site's data in your browser."
+  );
+}
+
+async function eraseFromForm() {
+  const start = readMoment("eraseFrom", "start");
+  const end = readMoment("eraseTo", "end");
+  if (!(end > start)) throw new Error("The end time must come after the start time.");
+  const counts = forgetCounts(await allEvents(), start, end);
+  if (!confirm(erasePrompt(start, end, counts))) {
+    $("eraseStatus").textContent = "Nothing was erased.";
+    return;
+  }
+  await eraseWindow(start, end, $("eraseReason").value.trim());
+  await refresh();
+  $("eraseStatus").textContent =
+    `Erased ${counts.events} event(s) and ${counts.gaps} gap(s). The window is now listed ` +
+    "in every report as erased by the operator.";
+}
+
+// The old "Clear events" emptied the store and said nothing. It now erases the whole
+// observed window as one disclosed erasure, so what is left cannot be mistaken for a
+// device that was never running. Session records survive it, deliberately: they are what
+// keeps the erased hours in the coverage denominator instead of removing them from the
+// record's own idea of what it covered.
+async function eraseEverything() {
+  const records = await allEvents();
+  const window = coverageWindow(records);
+  if (!window) {
+    $("eraseStatus").textContent = "Nothing has been recorded yet, so there is nothing to erase.";
+    return;
+  }
+  const [start, end] = window;
+  const counts = forgetCounts(records, start, end);
+  if (!confirm(erasePrompt(start, end, counts))) {
+    $("eraseStatus").textContent = "Nothing was erased.";
+    return;
+  }
+  await eraseWindow(start, end, $("eraseReason").value.trim());
+  await refresh();
+  $("eraseStatus").textContent =
+    `Erased everything recorded: ${counts.events} event(s) and ${counts.gaps} gap(s). The ` +
+    "whole window is now listed in every report as erased by the operator.";
+}
+
+const reportError = (id) => (e) => ($(id).textContent = e.message);
+
 window.addEventListener("DOMContentLoaded", () => {
-  $("start").addEventListener("click", () => start().catch((e) => ($("status").textContent = e.message)));
+  $("start").addEventListener("click", () => start().catch(reportError("status")));
   $("stop").addEventListener("click", stop);
   $("report").addEventListener("click", downloadReport);
   $("csv").addEventListener("click", downloadCsv);
   $("violations").addEventListener("click", downloadViolations);
-  $("clear").addEventListener("click", () => clearEvents().then(refresh));
+  $("erase").addEventListener("click", () => eraseFromForm().catch(reportError("eraseStatus")));
+  $("clear").addEventListener("click", () => eraseEverything().catch(reportError("eraseStatus")));
   refresh();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
 });
