@@ -17,6 +17,57 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Added
+- **`olive-bundle`: a tamper-evident evidence bundle, and a verifier that can fail.** The
+  research roadmap's E1 is the item every adjudicator persona raised -- a property manager
+  or a board will not weigh a log the other party could have edited -- and
+  `docs/audits/residual-risk.md` row 1 accepts tampering as unmitigated. A manifest turns
+  "trust me" into "check it", offline and with no network step anywhere.
+
+  `olive-bundle build --db olive.db --out bundle/` writes a consistent SQLite snapshot
+  (through SQLite's own backup API, not a byte copy of a database being written to), the
+  report, both CSV exports, the quiet-hours HTML, the session ledger, the calibration
+  history, and `manifest.json`: tool version, schema version, the config in force, the
+  SHA-256 and byte count of every other file, and a plain-language block. That block
+  carries verbatim the sentence the roadmap flags as the over-promise to avoid -- a hash
+  proves the files have not been edited since the bundle was made, and proves nothing
+  about how the device was placed or tuned before it.
+
+  `olive-bundle verify bundle/` gives three answers and only three, and **unverifiable is
+  a real answer**: a bundle whose manifest is gone has not been shown to be intact and has
+  not been shown to be modified, and a verifier that resolves that ambiguity in either
+  direction is worse than no verifier. Exit codes follow `scripts/check_ruleset.py` -- 0
+  intact, 1 modified, 2 "I could not tell". **The inventory is closed**, so a file *added*
+  to a bundle is a finding and not only one that changed; an open inventory lets anything
+  be dropped into a bundle that still reads as intact, which is most of the point of
+  having one.
+
+  Three smaller decisions, each with its reason in the source:
+  - **The artifacts are produced by `report.render.main`, not re-rendered.** A bundle
+    containing a second implementation's idea of the report would be evidence of nothing.
+  - **`--created-at` is both the manifest's timestamp and the report's "generated at"
+    line**, so it is the only value that moves between two builds over one database. Two
+    bundles made with the same `--created-at` are byte-identical, and a test asserts it.
+  - **The no-audio guarantee is checked at the inventory level**, by extension *and* by
+    magic bytes, because a bundle is the one artifact that packages files by inventory
+    rather than one at a time.
+
+  `sessions.csv` and `calibration.csv` carry the same R1 cover block as every other
+  export. They are discovered by `tests/test_export_caveats.py`'s behavioural half and
+  added to its checked set, so they are under the existing gate rather than beside it --
+  and an empty calibration history is written as a header with no rows, because "this
+  device was never calibrated" is a fact the recipient needs and a missing file states
+  nothing.
+
+  **Signing is not here, and the reason is recorded rather than left as an omission.**
+  Every candidate (`ssh-keygen -Y`, minisign) is a subprocess; `tests/gates.py` forbids
+  importing `subprocess` anywhere in `monitor/`, `store/` or `report/`, and `make
+  security` runs bandit over the same tree, which reports it at LOW severity and fails.
+  This repository carries no `# nosec` suppression anywhere, and adding the first one
+  inside a feature is how a security gate erodes. So the format reserves
+  `manifest.json.sig` and the verifier *detects* a signature it cannot check, answering
+  **unverifiable** -- never intact, and never treating it as though the bundle had no
+  signature at all, which would let a forgery read as an honest unsigned bundle.
+
 - **`olive-forget`: erase a time range, and disclose the erasure as a gap.** A
   privacy-first tool needs a privacy verb. A guest's visit, a family argument, a medical
   episode -- an operator may reasonably not want any trace of a window in a file they are

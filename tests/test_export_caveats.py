@@ -113,6 +113,12 @@ PY_CHECKED = {
     "build_report",
     "build_violation_report_html",
     "render_status",
+    # The two ledgers `olive-bundle` writes into an evidence bundle. They are handed to a
+    # person exactly like the exports above -- a recipient reads them to find out what was
+    # running and what the levels mean -- so they carry the same cover block, and they are
+    # discovered here by the behavioural half of the pattern rather than by their names.
+    "write_sessions_csv",
+    "write_calibration_csv",
 }
 JS_CHECKED = {"eventsToCsv", "violationsToCsv", "buildReportHtml"}
 
@@ -488,6 +494,39 @@ def _rendered_python_exports(tmp_path) -> dict[str, str]:
             ),
             now=events[0].start,
         ),
+        # The bundle ledgers, written from a real store rather than a stub: they read the
+        # session and calibration tables, and a fabricated stand-in for those would be a
+        # fixture testing itself.
+        **_rendered_bundle_ledgers(tmp_path),
+    }
+
+
+def _rendered_bundle_ledgers(tmp_path) -> dict[str, str]:
+    """`write_sessions_csv` and `write_calibration_csv` over a one-session store."""
+    from report.bundle import write_calibration_csv, write_sessions_csv
+    from store import EventStore
+
+    db = tmp_path / "ledgers.db"
+    start = _events()[0].start
+    with EventStore(db) as store:
+        sid = store.start_session(
+            started_at=start - 3600,
+            device_label="pi-1",
+            mic_model="USB mic",
+            placement_note="by the wall",
+            tz="UTC",
+            calibration_offset=0.0,
+            calibration_note="uncalibrated",
+            app_version="0.1.0",
+        )
+        store.update_session(sid, frames_seen=100, frames_dropped=0, ended_at=start + 3600)
+        sessions_csv = tmp_path / "sessions.csv"
+        calibration_csv = tmp_path / "calibration.csv"
+        write_sessions_csv(store, sessions_csv)
+        write_calibration_csv(store, calibration_csv)
+    return {
+        "write_sessions_csv": sessions_csv.read_text(encoding="utf-8"),
+        "write_calibration_csv": calibration_csv.read_text(encoding="utf-8"),
     }
 
 
