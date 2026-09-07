@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -34,7 +34,7 @@ from report.aggregate import (
     summarize,
     summarize_ambient,
 )
-from report.charts import bar_chart, heatmap
+from report.charts import UNMONITORED_LABEL, bar_chart, heatmap
 from report.sensitivity import (
     SENSITIVITY_APPROXIMATION_NOTE,
     SENSITIVITY_FLOOR_NOTE,
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from datetime import tzinfo
 
+    from monitor.config import QuietSchedule
     from store import CalibrationEpoch, ClockAnomaly, Gap, MinuteLevel, Session
 
 # Phrases the report-content gate checks for. Keeping them as constants makes the
@@ -72,6 +73,22 @@ DRIFT_NOT_EVALUATED = "no drift comparison was run for this report"
 
 #: What a peak or duration figure reads when there were no events to take it from.
 NO_EVENTS_VALUE = "no events"
+
+#: A rollup day whose configured schedule has no quiet-hours window at all (a per-weekday
+#: schedule can leave a day out). Not the same fact as "nothing was measured".
+ROLLUP_NO_QUIET_WINDOW = "no quiet-hours window this day"
+
+#: Why the rollup lists days that contributed no loud time. The calendar heatmap gained a
+#: row for every day in the window so a quiet monitored night and an unmonitored one could
+#: stop looking identical; the per-day duration table beside it kept listing only the days
+#: that had loud time, so both still vanished from the exhibit an ordinance reader keys on.
+ROLLUP_ABSENCE_NOTE = (
+    "Every day this reporting window covers has a row. A day the device monitored with no "
+    "loud time inside the quiet-hours window shows a measured zero; a day whose quiet hours "
+    "the record shows no monitor running for is marked "
+    f"\u201c{UNMONITORED_LABEL}\u201d instead of a duration, because no event could have "
+    "been recorded then. A day left out of this table would read as a quiet one."
+)
 
 #: The main report's coverage statement when the record cannot support one. Said, not
 #: omitted: the violations export already says this, and the main report used to print
@@ -281,6 +298,87 @@ def _drift_html(check: DriftCheck, *, recorded: int) -> str:
         f"neighbour.</p>\n<ul><li>{escape(describe_drift_advisory(check.advisory))}</li>"
         f"</ul>{history}"
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class RollupCell:
+    """One day's cell in the quiet-hours duration rollup.
+
+    ``measured`` is False when the cell states an absence rather than a duration the
+    device actually measured -- an unmonitored night, a partly covered one, or a day the
+    schedule gives no quiet window. The renderer reads it to decide whether the table has
+    anything to say at all, so "nothing to roll up" can never be the answer to a night
+    nothing was listening on.
+    """
+
+    day: str
+    text: str
+    measured: bool
+
+
+def _quiet_hours_on(day_label: str, quiet_hours: QuietSchedule, tz: tzinfo) -> list[int]:
+    """The clock hours of ``day_label`` (an ISO date in ``tz``) the quiet window touches.
+
+    An hour counts when any part of it falls inside the window, which is the same unit the
+    calendar heatmap's cells use, so the two per-day surfaces divide a day the same way. A
+    per-weekday schedule with no window on that day yields an empty list.
+    """
+    day = date.fromisoformat(day_label)
+    hours: list[int] = []
+    for hour in range(24):
+        start = datetime(day.year, day.month, day.day, hour, tzinfo=tz)
+        if quiet_hours.overlap_seconds(start, start + timedelta(hours=1)) > 0:
+            hours.append(hour)
+    return hours
+
+
+def _rollup_cells(
+    summary: Summary,
+    *,
+    quiet_hours: QuietSchedule,
+    tz: tzinfo,
+    unmonitored: set[tuple[str, int]] | None,
+) -> list[RollupCell]:
+    """One :class:`RollupCell` per day the report covers, in calendar order.
+
+    The three states are the calendar heatmap's three, because this table describes the
+    same days:
+
+    * a measured duration, including a measured ``0 s`` -- a monitored night with no loud
+      time in the window is a finding, and it belongs in the table;
+    * :data:`UNMONITORED_LABEL` when every quiet hour of that day is one the record shows
+      no monitor running for. That is an absence and is never rendered as a duration;
+    * a measured duration plus how many of the day's quiet hours are missing from it, for
+      a night that was only partly covered.
+
+    ``summary.by_day_hour`` carries every day in the reporting window once
+    :func:`_fill_window_days` has run, which is the set of days this walks; the measured
+    durations are unioned in so a caller that renders a bare summary loses nothing.
+    """
+    days = sorted(set(summary.by_day_hour) | set(summary.quiet_hours_loud_seconds_by_day))
+    unmon = unmonitored or set()
+    cells: list[RollupCell] = []
+    for day in days:
+        quiet = _quiet_hours_on(day, quiet_hours, tz)
+        if not quiet:
+            cells.append(RollupCell(day, ROLLUP_NO_QUIET_WINDOW, measured=False))
+            continue
+        missing = [hour for hour in quiet if (day, hour) in unmon]
+        seconds = summary.quiet_hours_loud_seconds_by_day.get(day, 0.0)
+        if len(missing) == len(quiet):
+            cells.append(RollupCell(day, UNMONITORED_LABEL, measured=False))
+        elif missing:
+            cells.append(
+                RollupCell(
+                    day,
+                    f"{_fmt_seconds(seconds)} "
+                    f"({len(missing)} of {len(quiet)} quiet hours {UNMONITORED_LABEL})",
+                    measured=False,
+                )
+            )
+        else:
+            cells.append(RollupCell(day, _fmt_seconds(seconds), measured=True))
+    return cells
 
 
 def _clock_anomalies_html(lines: list[str]) -> str:
@@ -962,10 +1060,25 @@ def build_report(
     # R3 — quiet-hours duration rollup. Ordinances/CC&Rs commonly key on accumulated
     # duration in a day; this totals detected loud time within the configured window, per
     # day, WITHOUT rendering a verdict. The no-verdict framing is mandatory.
-    if summary.quiet_hours_loud_seconds_by_day:
+    # Every day the window covers gets a row, not only the days that had loud time in it.
+    # A day that simply vanishes from a per-day table reads as a day with nothing to
+    # report, which is exactly what an unmonitored night is not -- the same defect the
+    # calendar heatmap carried until `_fill_window_days` gave it a row per day, in the
+    # table an ordinance's per-day duration figure is actually read from.
+    rollup_cells = _rollup_cells(
+        summary,
+        quiet_hours=config.quiet_hours,
+        tz=config.tzinfo(),
+        unmonitored=unmonitored,
+    )
+    # The prose fallback still stands for a record with nothing to say about any day: no
+    # loud time in the window anywhere, and no quiet hour the record can name as
+    # unmonitored. As soon as either exists the table renders, so an unmonitored night
+    # can no longer be answered with "there is nothing to roll up".
+    if summary.quiet_hours_loud_seconds_by_day or any(not cell.measured for cell in rollup_cells):
         rollup_rows = "".join(
-            f'<tr><th scope="row">{escape(day)}</th><td>{_fmt_seconds(secs)}</td></tr>'
-            for day, secs in summary.quiet_hours_loud_seconds_by_day.items()
+            f'<tr><th scope="row">{escape(cell.day)}</th><td>{escape(cell.text)}</td></tr>'
+            for cell in rollup_cells
         )
         rollup_section = (
             "\n<h2>Quiet-hours duration rollup</h2>\n"
@@ -976,6 +1089,7 @@ def build_report(
             "cited — but the threshold, the unit, and the definition vary by jurisdiction.</p>\n"
             f'<div class="note"><p>{NO_VERDICT_NOTE} Compare these durations against your '
             "own local ordinance, lease, or HOA rule.</p></div>\n"
+            f'<p class="note">{escape(ROLLUP_ABSENCE_NOTE)}</p>\n'
             "<table><caption>Loud time within quiet hours, per day</caption>"
             '<thead><tr><th scope="col">Day</th>'
             '<th scope="col">Loud time within quiet hours</th></tr></thead>'

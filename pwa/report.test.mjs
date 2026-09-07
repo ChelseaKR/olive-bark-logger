@@ -457,7 +457,11 @@ test("the two implementations name this absence with the same string", () => {
     join(dirname(fileURLToPath(import.meta.url)), "..", "report", "charts.py"),
     "utf8",
   );
-  const match = charts.match(/_UNMON_LABEL\s*=\s*"([^"]+)"/);
-  assert.ok(match, "report/charts.py no longer defines _UNMON_LABEL");
+  // Either name: this constant was `_UNMON_LABEL` and became the public
+  // `UNMONITORED_LABEL` when the quiet-hours rollup started rendering the same string.
+  // The binding is to the string, not to the identifier, so a rename on the Python side
+  // must not read as "the two sides have stopped agreeing".
+  const match = charts.match(/\b_?UNMON(?:ITORED)?_LABEL\s*=\s*"([^"]+)"/);
+  assert.ok(match, "report/charts.py no longer defines an unmonitored-cell label");
   assert.equal(UNMONITORED_LABEL, match[1]);
 });

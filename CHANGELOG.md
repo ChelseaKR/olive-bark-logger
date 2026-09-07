@@ -85,6 +85,58 @@ release" defect this file's absence let stand.
   - An empty record now says there is no window to draw a calendar over, rather than
     "no events have been logged yet", which was a claim about events in a place the
     absence might equally be of monitoring.
+- **The quiet-hours duration rollup listed only the days that had loud time in it, so a
+  night with no monitor running vanished from the table an ordinance's per-day figure is
+  read from.** Issue #59 gave the calendar heatmap a row for every day the reporting
+  window covers, because "a quiet monitored day and a day the monitor was switched off
+  both simply vanished from the calendar". The per-day duration rollup, rendered ten
+  lines away in `build_report` over the same days, kept iterating
+  `quiet_hours_loud_seconds_by_day` — the days that *had* a number. Measured on a
+  three-night log with 2026-03-11 entirely off air: the calendar showed four day rows
+  with 03-11 hatched `not monitored`, and the rollup listed two days, 03-11 not among
+  them. With no quiet-hours event anywhere in that log the table did not render at all
+  and the section read "No events fell within the quiet-hours window, so there is
+  nothing to roll up" — a statement about what was observed, from a report that observed
+  none of that night.
+  - The rollup now has a row for every day the window covers, with the calendar's three
+    states: a measured duration (`0 s` included — a monitored night with no loud time is
+    a finding), `not monitored` where the record shows no monitor running for the whole
+    of that day's quiet hours, and a duration plus how many of the day's quiet hours are
+    missing from it where the night was only partly covered.
+  - `report/charts.py`'s `_UNMON_LABEL` is now the public `UNMONITORED_LABEL` and both
+    per-day surfaces render that one string, so the two cannot describe the same absence
+    differently. The PWA's cross-implementation check reads that constant out of
+    `report/charts.py` by name; it now accepts either name and still fails if the two
+    sides render different *text*, because the binding is to the string and a rename is
+    not the two halves of one report disagreeing.
+  - A fourth cell state, reachable from any weekday-restricted schedule
+    (`QuietWindow.days` — a Tuesdays-only HOA rule is an ordinary one): a day the
+    schedule gives no quiet window at all says so. `0 s` there would measure nothing and
+    `not monitored` would be false, since the device may well have been listening.
+  - The prose fallback is narrowed, not removed: a record showing full coverage and no
+    quiet-hours loud time still says there is nothing to roll up, because there is not.
+  - `tests/test_absence_as_value.py` gains the case as item 4 and pins all four states;
+    the golden snapshot carries the new note.
+- **The tagged-PDF negative control was pinned to one report length, and the rollup fix
+  above turned it into a no-op.** The control in `tests/test_pdf_export.py` named
+  `test_the_caption_keep_together_rule_is_the_one_doing_the_work` removed
+  `caption { break-after: avoid }` from `_PDF_LAYOUT_STYLE` and required WeasyPrint's
+  "Table wrapper without a table" crash to come back on the report at exactly its own
+  length. Which lengths crash is a fact about where a table lands on a page, not about
+  the rule: `report/pdf_export.py`'s own measurement has the unfixed code crashing at 0,
+  1, 5 and 20 filler paragraphs and *passing* at 60. Measured on CI, adding one table to
+  the report moved 0, 1, 5, 20 **and** 60 out of the crashing shape together — the
+  control reported `DID NOT RAISE`, and a five-length version of it would have gone
+  quietly green instead. It now searches every whole-paragraph offset up to a full extra
+  page (`CONTROL_SWEEP`) for a length where removing the rule brings the crash back,
+  stops at the first hit, and then asserts that same length converts with the rule
+  restored — which is the only positive assertion at a length where the rule is
+  demonstrably doing work. Its failure message says that widening the sweep, not
+  deleting the control, is the response if no length crashes.
+  `make verify` cannot see any of this: the `pdf` extra needs a >=3.10 host and
+  `weasyprint` needs system Pango, so the whole file `importorskip`s on a 3.9 dev venv
+  and only CI's "Install pdf extra" step runs it — which is why the rollup commit's local
+  gate was green and CI's was not.
 - **`docs/GAP-LEDGER.md` listed two supply-chain items as absent that had been in the
   tree for eight weeks.** GAP-SEC-1 said "no SBOM/signing (no release pipeline exists to
   attach them to)". The parenthesis was the error: `.github/workflows/release.yml` landed

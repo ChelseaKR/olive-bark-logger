@@ -98,7 +98,10 @@ def _heat_fill(ratio: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-_UNMON_LABEL = "not monitored"
+#: The heatmap's third state, in words. Public and shared: the quiet-hours duration
+#: rollup in `report/render.py` marks an unmonitored day with this same label, so the
+#: two per-day surfaces of one report cannot describe the same absence differently.
+UNMONITORED_LABEL = "not monitored"
 
 
 def _heat_cell(
@@ -123,7 +126,7 @@ def _heat_cell(
     ratio = (value / max_v) if max_v else 0.0
     if is_unmon:
         fill = f"url(#{escape(hatch_id)})"
-        cell_title = f"{escape(label)} {hour:02d}:00 — {_UNMON_LABEL}"
+        cell_title = f"{escape(label)} {hour:02d}:00 — {UNMONITORED_LABEL}"
     else:
         fill = _HEAT_EMPTY if value == 0 else _heat_fill(ratio)
         cell_title = f"{escape(label)} {hour:02d}:00 — {value} {escape(value_caption)}"
@@ -260,7 +263,7 @@ def _heat_table(
     rows: list[str] = []
     for label, row in zip(day_labels, grid):
         cells = "".join(
-            f"<td>{_UNMON_LABEL}</td>" if (label, h) in unmon else f"<td>{v}</td>"
+            f"<td>{UNMONITORED_LABEL}</td>" if (label, h) in unmon else f"<td>{v}</td>"
             for h, v in enumerate(row)
         )
         # Row total counts only monitored hours (unmonitored hours contribute no events).
