@@ -32,6 +32,7 @@ is added, and reads as a pass while it does.
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timezone
 
 import pytest
@@ -52,8 +53,8 @@ from report.bundle import (
     main,
     verify_bundle,
 )
-from report.render import cover_text_lines
-from store import EventStore
+from report.render import ERASED_HEADING, cover_text_lines
+from store import ERASED_REASON, EventStore
 
 STAMP = "2026-03-11T00:00:00+00:00"
 DAY = datetime(2026, 3, 10, tzinfo=timezone.utc)
@@ -350,3 +351,52 @@ def test_the_cli_with_no_subcommand_prints_help_and_does_not_exit_zero(capsys):
     """A tool that exits 0 having done nothing is a gate that cannot fail, in miniature."""
     assert main([]) == 2
     assert "olive-bundle" in capsys.readouterr().out
+
+
+# --- an erasure survives into the bundle ---------------------------------------------
+
+
+def test_an_erased_window_reaches_the_bundle_as_an_erasure_not_as_a_quiet_night(db, tmp_path):
+    """Issue #106's remaining criterion, for the bundle half of it.
+
+    `olive-forget` deletes the measurements in a window and leaves a `gaps` row with
+    reason `erased` behind, and the whole design rests on every downstream reader
+    understanding that row. A bundle is the furthest downstream reader there is -- the
+    artifact handed to somebody who does not trust the sender -- so the erasure has to
+    survive the snapshot, the report and the coverage arithmetic, all three.
+
+    The sharpest half of this is the last one. An erased night that reached the bundle as
+    a *report section* but not as unmonitored *time* would read as a quiet night to
+    anyone who looked at the numbers rather than the prose, which is precisely what
+    erasure is not allowed to look like.
+    """
+    with EventStore(db) as store:
+        result = store.forget(start=_at(0, 22), end=_at(0, 23) + 600, reason="a guest")
+    assert result.events == 2, "the fixture must actually have something to erase"
+
+    root = tmp_path / "bundle"
+    _build(db, root)
+    assert verify_bundle(root).outcome == INTACT
+
+    # 1. The snapshot carries the disclosure, not just the hole.
+    snapshot = sqlite3.connect(root / SNAPSHOT_NAME)
+    try:
+        rows = snapshot.execute("SELECT reason, note FROM gaps WHERE reason = ?", (ERASED_REASON,))
+        erased = rows.fetchall()
+        remaining = snapshot.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    finally:
+        snapshot.close()
+    assert erased == [(ERASED_REASON, "a guest")]
+    assert remaining == 0, "the erased measurements must be gone from the snapshot too"
+
+    # 2. The bundled report names the window and the operator's reason.
+    report = (root / "report.html").read_text(encoding="utf-8")
+    assert ERASED_HEADING in report
+    assert "a guest" in report
+
+    # 3. And the arithmetic agrees with the prose: those hours are not monitored, and the
+    #    quiet-hours export says so rather than reporting a quiet night.
+    quiet_hours = (root / "quiet-hours.csv").read_text(encoding="utf-8")
+    assert "not monitored" in quiet_hours
+    data = [ln for ln in quiet_hours.splitlines() if not ln.startswith("#")]
+    assert len(data) == 1, f"every event was erased, so only the header may remain: {data}"
