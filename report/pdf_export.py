@@ -64,6 +64,13 @@ and still covers the real demo, empty, single-event and 1-4 day cases, but the p
 is now pinned directly by
 ``tests/test_pdf_export.py::test_the_tagged_pdf_survives_a_longer_report``.
 
+That test's negative control sweeps the same family of lengths rather than asserting the
+crash at one of them, and for the same reason. It was written pinned to the report's own
+length, and the very next change to the report -- the quiet-hours rollup gaining a table
+-- moved the layout past the boundary, so the control reported ``DID NOT RAISE`` while
+proving nothing about the rule. Which lengths crash is a fact about pagination; that
+*some* length crashes is the fact about the rule, and that is what is asserted.
+
 Since ``report/charts.py``'s own design already treats each chart's SVG as a
 supplementary visual only -- "every chart is followed by a real ``<table>`` ... so
 screen readers and keyboard users get the data without the graphic" -- and a
