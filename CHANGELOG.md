@@ -66,7 +66,10 @@ release" defect this file's absence let stand.
     missing from it where the night was only partly covered.
   - `report/charts.py`'s `_UNMON_LABEL` is now the public `UNMONITORED_LABEL` and both
     per-day surfaces render that one string, so the two cannot describe the same absence
-    differently.
+    differently. The PWA's cross-implementation check reads that constant out of
+    `report/charts.py` by name; it now accepts either name and still fails if the two
+    sides render different *text*, because the binding is to the string and a rename is
+    not the two halves of one report disagreeing.
   - The prose fallback is narrowed, not removed: a record showing full coverage and no
     quiet-hours loud time still says there is nothing to roll up, because there is.
   - `tests/test_absence_as_value.py` gains the case as item 4 and pins all three states;
