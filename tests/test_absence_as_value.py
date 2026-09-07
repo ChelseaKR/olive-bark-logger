@@ -26,7 +26,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from monitor.config import Config
+from monitor.config import Config, QuietSchedule, QuietWindow
 from monitor.detector import Event
 from report.aggregate import summarize
 from report.charts import UNMONITORED_LABEL
@@ -34,6 +34,7 @@ from report.render import (
     COVERAGE_UNDETERMINED_NOTE,
     NO_EVENTS_VALUE,
     ROLLUP_ABSENCE_NOTE,
+    ROLLUP_NO_QUIET_WINDOW,
     build_report,
     generate_report_from_db,
 )
@@ -249,3 +250,40 @@ def test_rollup_still_says_nothing_to_roll_up_when_that_is_the_whole_truth():
     html = build_report(summary, config=config, generated_at="2026-03-11 UTC")
     assert "nothing to roll up" in html
     assert _rollup_cells_of(html) == {}
+
+
+def test_rollup_says_a_day_with_no_quiet_window_is_not_a_quiet_one(tmp_path):
+    """The fourth cell state, and the one a weekday-restricted schedule reaches.
+
+    `QuietWindow.days` lets a schedule leave whole weekdays out — a Tuesdays-only rule is
+    a perfectly ordinary HOA one. On such a day there is no window to accumulate loud time
+    inside, so `0 s` would be a measurement of nothing and `not monitored` would be false
+    (the device may well have been listening). Both are absences dressed as findings, in
+    opposite directions, so the cell says which absence it is.
+    """
+    db = tmp_path / "olive.db"
+    with EventStore(db) as store:
+        _three_day_log(store)
+    # 2026-03-10 is a Tuesday (weekday 1); 03-11 to 03-13 are not. 20:00-23:00 does not
+    # wrap, so no part of the window lands on any other date either.
+    tuesday_evenings = QuietSchedule(
+        windows=(QuietWindow(start_minute=20 * 60, end_minute=23 * 60, days=frozenset({1})),)
+    )
+    config = Config(db_path=str(db), tz="UTC", quiet_hours=tuesday_evenings)
+    html = generate_report_from_db(str(db), config, generated_at="x")
+
+    cells = _rollup_cells_of(html)
+    assert set(cells) == {"2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13"}
+    # Tuesday's window was monitored end to end and holds one 5 s event.
+    assert cells["2026-03-10"] == "5 s"
+    for day in ("2026-03-11", "2026-03-12", "2026-03-13"):
+        assert cells[day] == ROLLUP_NO_QUIET_WINDOW, (
+            f"{day} has no quiet-hours window at all; {cells[day]!r} states something else"
+        )
+    # 03-11 is the day nothing was listening on. It must not be described as unmonitored
+    # here, because that would imply a window the record failed to cover.
+    assert UNMONITORED_LABEL not in cells["2026-03-11"]
+    # Pinned by value as well as by name: an assertion written only against the constant
+    # moves with any wrong value the constant takes, and could not catch one.
+    assert cells["2026-03-12"] == "no quiet-hours window this day"
+    assert cells["2026-03-12"] != "0 s"

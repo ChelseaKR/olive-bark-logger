@@ -109,9 +109,13 @@ release" defect this file's absence let stand.
     `report/charts.py` by name; it now accepts either name and still fails if the two
     sides render different *text*, because the binding is to the string and a rename is
     not the two halves of one report disagreeing.
+  - A fourth cell state, reachable from any weekday-restricted schedule
+    (`QuietWindow.days` — a Tuesdays-only HOA rule is an ordinary one): a day the
+    schedule gives no quiet window at all says so. `0 s` there would measure nothing and
+    `not monitored` would be false, since the device may well have been listening.
   - The prose fallback is narrowed, not removed: a record showing full coverage and no
-    quiet-hours loud time still says there is nothing to roll up, because there is.
-  - `tests/test_absence_as_value.py` gains the case as item 4 and pins all three states;
+    quiet-hours loud time still says there is nothing to roll up, because there is not.
+  - `tests/test_absence_as_value.py` gains the case as item 4 and pins all four states;
     the golden snapshot carries the new note.
 - **The tagged-PDF negative control was pinned to one report length, and the rollup fix
   above turned it into a no-op.** The control in `tests/test_pdf_export.py` named
