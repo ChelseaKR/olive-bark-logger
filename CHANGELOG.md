@@ -74,19 +74,23 @@ release" defect this file's absence let stand.
 - **The tagged-PDF negative control was pinned to one report length, and the rollup fix
   above turned it into a no-op.** The control in `tests/test_pdf_export.py` named
   `test_the_caption_keep_together_rule_is_the_one_doing_the_work` removed
-  `caption { break-after: avoid }` from `_PDF_LAYOUT_STYLE` and required the
-  "Table wrapper without a table" crash to come back
-  on the report at exactly its own length. Whether a given length crashes is a fact about
-  where a table lands on a page, not about the rule — `report/pdf_export.py`'s own
-  measurement has the unfixed code crashing at 0, 1, 5 and 20 filler paragraphs and
-  *passing* at 60. Adding the rollup table moved the report past that boundary, so on CI
-  the control reported `DID NOT RAISE`: the first change to the report after the control
-  was written was enough to stop it demonstrating anything. It now sweeps the same
-  `FILLER_SWEEP` family the positive gate holds over and requires the crash somewhere in
-  it, and it says in its failure message that widening the sweep, not deleting the
-  control, is the response if that stops happening. `make verify` cannot see any of this:
-  the `pdf` extra needs a >=3.10 host and `weasyprint` needs system Pango, so the whole
-  file `importorskip`s on a 3.9 dev venv and only CI's "Install pdf extra" step runs it.
+  `caption { break-after: avoid }` from `_PDF_LAYOUT_STYLE` and required WeasyPrint's
+  "Table wrapper without a table" crash to come back on the report at exactly its own
+  length. Which lengths crash is a fact about where a table lands on a page, not about
+  the rule: `report/pdf_export.py`'s own measurement has the unfixed code crashing at 0,
+  1, 5 and 20 filler paragraphs and *passing* at 60. Measured on CI, adding one table to
+  the report moved 0, 1, 5, 20 **and** 60 out of the crashing shape together — the
+  control reported `DID NOT RAISE`, and a five-length version of it would have gone
+  quietly green instead. It now searches every whole-paragraph offset up to a full extra
+  page (`CONTROL_SWEEP`) for a length where removing the rule brings the crash back,
+  stops at the first hit, and then asserts that same length converts with the rule
+  restored — which is the only positive assertion at a length where the rule is
+  demonstrably doing work. Its failure message says that widening the sweep, not
+  deleting the control, is the response if no length crashes.
+  `make verify` cannot see any of this: the `pdf` extra needs a >=3.10 host and
+  `weasyprint` needs system Pango, so the whole file `importorskip`s on a 3.9 dev venv
+  and only CI's "Install pdf extra" step runs it — which is why the rollup commit's local
+  gate was green and CI's was not.
 - **`docs/GAP-LEDGER.md` listed two supply-chain items as absent that had been in the
   tree for eight weeks.** GAP-SEC-1 said "no SBOM/signing (no release pipeline exists to
   attach them to)". The parenthesis was the error: `.github/workflows/release.yml` landed

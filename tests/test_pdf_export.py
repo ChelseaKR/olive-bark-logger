@@ -444,12 +444,16 @@ def test_cli_violations_pdf_flag_fails_loudly_on_tagging_error(tmp_path, monkeyp
 # ---------------------------------------------------------------------------
 
 #: The filler lengths the caption rule was measured over on 2026-09-06 (see
-#: ``report/pdf_export.py``'s module docstring). Both the positive gate below and its
-#: negative control sweep this same family on purpose: whether a given length crashes
-#: without the rule is a fact about where a table happens to land on a page, so a
-#: control pinned to one length silently stops proving anything the first time anyone
-#: adds a paragraph to the report.
+#: ``report/pdf_export.py``'s module docstring): the positive gate holds at all of them.
 FILLER_SWEEP = (0, 1, 5, 20, 60)
+
+#: The negative control's search space: every whole-paragraph offset up to a full extra
+#: page of prose. It is a search and not a fixture because whether a given length crashes
+#: without the caption rule is a fact about where a table happens to land on a page, not
+#: about the rule. A control pinned to one length stops proving anything the first time
+#: anyone adds a paragraph -- measured 2026-09-06, when adding one table to the report
+#: moved every one of :data:`FILLER_SWEEP` out of the crashing shape at once.
+CONTROL_SWEEP = tuple(range(60))
 
 
 def _padded_report(extra_paragraphs: int) -> str:
@@ -487,13 +491,16 @@ def test_the_caption_keep_together_rule_is_the_one_doing_the_work():
     crash back somewhere in :data:`FILLER_SWEEP` -- the same family of report lengths
     the positive gate holds over.
 
-    It is deliberately a sweep and not one length. Until 2026-09-06 this control
-    asserted the crash on the report's own length alone, and that is a fact about
-    pagination rather than about the rule: the module docstring's own measurement has
-    the unfixed code crashing at 0, 1, 5 and 20 filler paragraphs and *passing* at 60.
-    Adding one table to the report is enough to move which lengths land which way, so
-    a single-length control turns into a no-op that still reads green -- which is what
-    happened to it, on the first change to the report that followed it.
+    It searches :data:`CONTROL_SWEEP` for a crashing length rather than asserting one.
+    Until 2026-09-06 it asserted the crash at the report's own length alone, and which
+    length crashes is a fact about pagination rather than about the rule: the module
+    docstring's own measurement has the unfixed code crashing at 0, 1, 5 and 20 filler
+    paragraphs and *passing* at 60. Measured the same day, adding a single table to the
+    report (the quiet-hours duration rollup) moved 0, 1, 5, 20 *and* 60 out of the
+    crashing shape together -- a five-length control would have gone quietly green too.
+    The claim worth holding is that the rule is load-bearing *somewhere* in the family
+    of report lengths, so that is what is searched for, and the search stops at the
+    first hit.
     """
     from report import pdf_export
 
@@ -504,26 +511,28 @@ def test_the_caption_keep_together_rule_is_the_one_doing_the_work():
 
     original = pdf_export._PDF_LAYOUT_STYLE
     pdf_export._PDF_LAYOUT_STYLE = weakened
+    crashed: int | None = None
     try:
-        crashed = []
-        for extra_paragraphs in FILLER_SWEEP:
+        for extra_paragraphs in CONTROL_SWEEP:
             try:
                 html_to_tagged_pdf_bytes(_padded_report(extra_paragraphs))
             except TaggedPdfGenerationError as exc:
                 assert "Table wrapper without a table" in str(exc)
-                crashed.append(extra_paragraphs)
+                crashed = extra_paragraphs
+                break
     finally:
         pdf_export._PDF_LAYOUT_STYLE = original
 
-    assert crashed, (
-        "removing `caption { break-after: avoid }` changed nothing at any of "
-        f"{list(FILLER_SWEEP)} filler paragraphs, so this control no longer shows the "
-        "rule is load-bearing. Either the rule is now dead code that should go, or the "
-        "crash needs a page shape this sweep stopped producing and the sweep needs "
-        "widening -- do not delete the control to get green."
+    assert crashed is not None, (
+        "removing `caption { break-after: avoid }` changed nothing at any of the "
+        f"{len(CONTROL_SWEEP)} filler lengths in CONTROL_SWEEP, so this control no "
+        "longer shows the rule is load-bearing. Either the rule has become dead code "
+        "that should go, or the crash needs a page shape this sweep stopped producing "
+        "and the sweep needs widening -- do not delete the control to get green."
     )
 
-    # And with the rule restored, every length that crashed without it converts: the
-    # control is about the rule and not about the fixture having become unconvertible.
-    for extra_paragraphs in crashed:
-        assert html_to_tagged_pdf_bytes(_padded_report(extra_paragraphs))[:5] == b"%PDF-"
+    # And with the rule restored, the length that crashed without it converts: the
+    # control is about the rule, not about the fixture having become unconvertible.
+    # This is also the only positive assertion at a length where the rule demonstrably
+    # matters; FILLER_SWEEP's five are wherever the 2026-09-06 measurement left them.
+    assert html_to_tagged_pdf_bytes(_padded_report(crashed))[:5] == b"%PDF-"
