@@ -16,6 +16,45 @@ release" defect this file's absence let stand.
 
 ## [Unreleased]
 
+### Added
+- **`olive-forget`: erase a time range, and disclose the erasure as a gap.** A
+  privacy-first tool needs a privacy verb. A guest's visit, a family argument, a medical
+  episode -- an operator may reasonably not want any trace of a window in a file they are
+  about to hand to a landlord, and until now the only two options were to keep it or to
+  edit the SQLite file by hand. The second is the worse one, because it destroys the
+  record's honesty in silence: the hours come back as an ordinary quiet night with nothing
+  saying otherwise.
+
+  So erasure is an operation and what it leaves behind is a `gaps` row with reason
+  `erased`, carrying the operator's words. That is the whole design: every reader that
+  already understands "the device was not listening here" understands it with no new
+  arithmetic. The coverage sentence subtracts it, the calendar hatches those hours as not
+  monitored, the CSV's `monitored` column reads `no`, and the report gains a *Windows
+  erased by the operator* section naming the window and the reason -- or "no reason given",
+  which is not the same as saying nothing. An erased night can never read as quiet.
+
+  `EventStore.forget` removes events, ambient minutes, clock anomalies, drift advisories
+  and any gap lying wholly inside the window, by **overlap** rather than containment, since
+  a row straddling the boundary still carries measurement from inside. Capture sessions and
+  calibration history are kept and the reason is written down: they are lineage for the rows
+  that remain, not measurements of any moment. `--dry-run` counts without deleting; without
+  `--yes` the command prints the counts and requires the word `erase`.
+
+  Two things are load-bearing rather than incidental. The erasure row is written **in the
+  same transaction as the deletes**, because a crash between them produces exactly the
+  hole-with-nothing-disclosing-it that hand-editing produces; a test drives that with a real
+  SQLite abort and requires every deleted row to come back. And a `--from`/`--to` value with
+  no time of day in it is refused by name, even though `datetime.fromisoformat` reads it
+  happily as midnight -- accepting it would round the operator's window outward to a whole
+  day and erase more than they asked for.
+
+  Schema 9 to 10. Admitting a fourth gap reason meant a **table rebuild**: the permitted
+  values live in a column `CHECK` and SQLite has no statement that adds one, so the twelve-step
+  procedure is followed inside an explicit `BEGIN`/`COMMIT`. That pair is not decoration:
+  `executescript` runs its statements in autocommit mode, so without it an interruption
+  between `DROP TABLE` and `RENAME` would leave a database with no `gaps` table at all --
+  the ledger that discloses missing time, itself missing.
+
 ### Fixed
 - **The browser report's calendar had a row only for the days that had an event, so a day
   the app was never opened and a genuinely quiet day were both simply absent from it.**
