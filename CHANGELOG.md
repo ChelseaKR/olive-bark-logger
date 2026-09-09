@@ -140,6 +140,41 @@ release" defect this file's absence let stand.
   sentences that are the claim itself are pinned in both directions.
 
 ### Fixed
+- **The file that lists the two ports' deliberate divergences was missing two of them, and
+  one of them moves a number.** `spec/SEMANTICS.md` has an "Intentional Python ↔ PWA
+  differences" section precisely so a divergence is a decision rather than a thing that
+  happened. Its detector half is held by golden vectors both suites replay and its cover
+  half by `spec/report/cover.json`. Its **report-structure** half was held by nothing:
+
+  - **`monitor.config.QuietSchedule` holds a tuple of windows with minute granularity and a
+    per-weekday `days` set; `pwa/report.js`'s `summarize` takes one wrapping whole-hour pair
+    and `pwa/index.html` offers two whole-hour inputs and no weekday control.** A
+    Tuesdays-only rule, a 22:30 start, or a second window in one day are questions the Pi
+    report answers and the browser cannot be asked — so over identical events the two ports
+    give different quiet-hours counts. This is the one divergence on the list that changes a
+    figure rather than a layout.
+  - **The `Quiet-hours duration rollup` exists only in Python.** The browser report has
+    quiet-hours *counts* and no per-day accumulated-duration figure anywhere. PR #117's own
+    body calls that table "the exhibit an ordinance's per-day duration figure is actually
+    read from".
+
+  Both are now written down, along with the four other port-only sections that had never
+  been stated (`Measurement conditions`, `Ambient baseline`, `Threshold sensitivity`, `Why
+  there is deliberately no audio`, and the `Distributions` ↔ `Events by hour of day` /
+  `Events by day` rename).
+
+  `tests/test_port_divergence.py` keeps it that way: it extracts every `<h2>` each port can
+  emit — resolving `{CONSTANT}` on the Python side and `${esc(CONST)}` on the browser side —
+  and compares both against a declared map, so a section added to one port and not the other
+  fails until somebody says which it is. Every declared port-only heading is separately
+  asserted to be genuinely absent from the other port, so an entry cannot outlive the
+  divergence it names; and a floor asserts both extractors still find at least eight
+  sections, because two extractors that have stopped matching look exactly like two ports in
+  perfect agreement.
+
+  **Porting either divergence is an owner call, and neither is done here.** The rollup rests
+  on the schedule model — its fourth cell state exists only because a schedule can leave a
+  weekday out.
 - **The browser report's calendar had a row only for the days that had an event, so a day
   the app was never opened and a genuinely quiet day were both simply absent from it.**
   Issue #59 fixed exactly this on the Python side, on the reasoning that "a quiet

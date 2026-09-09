@@ -98,6 +98,48 @@ force parity on them:
   handling); this is noted in the FIX-06 roadmap entry and is *not* a detector
   concern, so it is out of scope for `spec/detector/`.
 
+- **The quiet-hours schedule model.** `monitor.config.QuietSchedule` holds a tuple of
+  `QuietWindow`s, each with **minute** granularity and a **per-weekday** `days` set. The
+  browser's `summarize` takes one wrapping whole-hour pair (`startHour`, `endHour`) and
+  `pwa/index.html` offers exactly two whole-hour inputs and no weekday control. So a
+  Tuesdays-only rule, a 22:30 start, or a second window in one day are questions the Pi
+  report answers and the browser cannot be asked. Over identical events the two ports then
+  produce different quiet-hours counts, which makes this the one divergence on this list
+  that moves a number rather than a layout. Closing it means a schedule editor in the
+  browser and a port of `QuietSchedule.overlap_seconds`; that is an owner decision, not a
+  drift to be tidied.
+
+## Report structure: which sections each port renders
+
+The detector has vectors and the cover block has `spec/report/cover.json`. The *structure*
+of the report — which `<h2>` sections a reader finds — had neither, and had drifted. It is
+now held by `tests/test_port_divergence.py`, which extracts the headings each port can emit
+and compares them against a declared map, so a section added to one port and not the other
+fails until somebody writes down which it is. Every declared port-only heading is also
+asserted to be genuinely absent from the other port, so an entry cannot outlive the
+divergence it describes.
+
+**Only the Pi report renders these:**
+
+- **`Quiet-hours duration rollup`.** The per-day accumulated-duration table an ordinance's
+  "30 minutes in a day" figure is read from. Not ported, and it rests on the schedule model
+  above: the table's fourth cell state, `no quiet-hours window this day`, exists only
+  because a schedule can leave a weekday out.
+- **`Measurement conditions`**, **`Ambient baseline`**, **`Threshold sensitivity`.** Each
+  needs data the browser does not keep — session and calibration lineage, EXP-01's ambient
+  minute ledger, and the stored levels EXP-03 recomputes from.
+- **`Distributions`.** A rename, not an absence: the browser splits the same content across
+  `Events by hour of day` and `Events by day`. It is on both lists so the rename is the
+  declared fact rather than an accident of two lists.
+- **`Why there is deliberately no audio`.** The browser states the same rule in
+  `pwa/index.html`, which is the page the operator reads before granting a microphone.
+
+**Only the browser renders these:** `Monitoring gaps` and `Monitoring coverage` — the Pi
+report carries the same content in its coverage and off-air prose without a heading of its
+own, and the coverage *claim* is pinned on both sides by `spec/report/cover.json` — plus
+`Events by hour of day` and `Events by day`, the browser half of the `Distributions`
+rename.
+
 ## Shared: the monitoring-coverage block
 
 `spec/report/cover.json`'s `coverage` object is replayed against both ports the way the
