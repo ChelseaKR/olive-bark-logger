@@ -25,16 +25,20 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from html import escape
 
 from monitor.config import Config, QuietSchedule, QuietWindow
 from monitor.detector import Event
-from report.aggregate import summarize
+from report.aggregate import Summary, summarize
 from report.charts import UNMONITORED_LABEL
 from report.render import (
     COVERAGE_UNDETERMINED_NOTE,
     NO_EVENTS_VALUE,
     ROLLUP_ABSENCE_NOTE,
     ROLLUP_NO_QUIET_WINDOW,
+    ROLLUP_STATE_SENTENCES,
+    _quiet_hours_on,
+    _rollup_cells,
     build_report,
     generate_report_from_db,
 )
@@ -203,7 +207,10 @@ def test_rollup_names_the_unmonitored_night_instead_of_reporting_nothing(tmp_pat
     # 2026-03-10's window closes at 23:00, so one of its quiet hours is uncovered and the
     # cell says which — a partly-covered night is neither "0 s" nor "not monitored".
     assert cells["2026-03-10"] == f"0 s (1 of 10 quiet hours {UNMONITORED_LABEL})"
-    assert ROLLUP_ABSENCE_NOTE in html
+    # Compared against the *rendered* form. The note is written through `escape`, so an
+    # apostrophe in it leaves the page as `&#x27;` and a raw comparison silently stops
+    # being a test of anything the reader sees.
+    assert escape(ROLLUP_ABSENCE_NOTE) in html
 
 
 def test_rollup_keeps_measured_durations_beside_the_unmonitored_days(tmp_path):
@@ -287,3 +294,84 @@ def test_rollup_says_a_day_with_no_quiet_window_is_not_a_quiet_one(tmp_path):
     # moves with any wrong value the constant takes, and could not catch one.
     assert cells["2026-03-12"] == "no quiet-hours window this day"
     assert cells["2026-03-12"] != "0 s"
+
+
+def _states_the_renderer_can_reach() -> set[str]:
+    """Every ``RollupCell.state`` the renderer produces, over fixtures reaching all four.
+
+    Built from `_rollup_cells` rather than from the rendered table, because the table
+    renders a cell's *text* and two different states can be one string away from each
+    other; the state is the thing the note is keyed on. The unmonitored hour sets are
+    derived from `_quiet_hours_on` rather than written out, so a change to the default
+    schedule cannot leave this fixture reaching a state it no longer means to.
+    """
+    everyday = Config(tz="UTC").quiet_hours
+    #: A Tuesdays-only rule is an ordinary HOA one, and 2026-03-11 is a Wednesday, so that
+    #: day has no quiet window under it at all.
+    tuesdays = QuietSchedule(
+        windows=(QuietWindow(start_minute=20 * 60, end_minute=23 * 60, days=frozenset({1})),)
+    )
+    day = "2026-03-11"
+    summary = Summary(
+        event_count=0,
+        total_loud_seconds=0.0,
+        longest_event_seconds=0.0,
+        loudest_peak_dbfs=0.0,
+        mean_peak_dbfs=0.0,
+        by_day_hour={day: {}},
+    )
+    quiet = _quiet_hours_on(day, everyday, timezone.utc)
+    assert len(quiet) > 1, "the partly-covered state needs a day with more than one quiet hour"
+    reached = set()
+    for schedule, unmonitored in (
+        (everyday, set()),  # measured
+        (everyday, {(day, quiet[0])}),  # partly covered
+        (everyday, {(day, hour) for hour in quiet}),  # unmonitored
+        (tuesdays, set()),  # no quiet window at all
+    ):
+        cells = _rollup_cells(
+            summary, quiet_hours=schedule, tz=timezone.utc, unmonitored=unmonitored
+        )
+        reached.update(cell.state for cell in cells)
+    return reached
+
+
+def test_the_note_beside_the_rollup_explains_every_state_the_table_can_render():
+    """The note is the only explanation a reader gets, and it described two of four states.
+
+    It predated the partly-covered cell (`0 s (1 of 10 quiet hours not monitored)`) and the
+    no-window cell (`no quiet-hours window this day`), so the two cells in the table that
+    are *not* durations were the two the paragraph beside it did not mention — and one of
+    them says the table's own headline sentence is wrong for that day, because a day with
+    no quiet window does not "show a measured zero".
+
+    Held in both directions, so neither half can rot quietly: every state the renderer
+    reaches has a sentence, and every sentence belongs to a state some fixture reaches.
+    """
+    reached = _states_the_renderer_can_reach()
+    assert reached == set(ROLLUP_STATE_SENTENCES), (
+        "the rollup's states and the sentences explaining them have drifted apart: "
+        f"reached={sorted(reached)} explained={sorted(ROLLUP_STATE_SENTENCES)}"
+    )
+    for state, sentence in ROLLUP_STATE_SENTENCES.items():
+        assert sentence in ROLLUP_ABSENCE_NOTE, f"{state} has a sentence the note omits"
+
+
+def test_a_report_carrying_a_no_window_day_explains_that_cell_to_its_reader(tmp_path):
+    """The state-coverage test above is about the vocabulary; this is about one page.
+
+    A Tuesdays-only schedule puts `no quiet-hours window this day` in front of a reader on
+    three rows of four, so the page has to say what that means.
+    """
+    db = tmp_path / "olive.db"
+    with EventStore(db) as store:
+        _three_day_log(store)
+    tuesdays = QuietSchedule(
+        windows=(QuietWindow(start_minute=20 * 60, end_minute=23 * 60, days=frozenset({1})),)
+    )
+    html = generate_report_from_db(
+        str(db), Config(db_path=str(db), tz="UTC", quiet_hours=tuesdays), generated_at="x"
+    )
+    assert ROLLUP_NO_QUIET_WINDOW in _rollup_cells_of(html).values()
+    assert escape(ROLLUP_STATE_SENTENCES["no-quiet-window"]) in html
+    assert escape(ROLLUP_STATE_SENTENCES["partly-covered"]) in html
