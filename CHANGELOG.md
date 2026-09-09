@@ -451,6 +451,29 @@ release" defect this file's absence let stand.
   precache. It now extracts and checks membership in `ASSETS` specifically, with two
   canary tests (against a synthetic fixture, not the real files) proving it actually
   fails on both a real omission and a decoy mention outside the array.
+- **The note beside the quiet-hours duration rollup explained two of the four things the
+  table can say.** `ROLLUP_ABSENCE_NOTE` is the only explanation a reader gets for that
+  table, and it was written for the two states the rollup had when #117 gave it a row per
+  day: a measured duration and `not monitored`. Two more states landed with it and after
+  it — a partly-covered night (`0 s (1 of 10 quiet hours not monitored)`) and a day the
+  schedule gives no quiet window at all (`no quiet-hours window this day`) — and both are
+  precisely the cells that are *not* durations, so the two hardest cells to read were the
+  two the paragraph beside them did not mention. Worse, its headline sentence was wrong
+  for the fourth: a day with no quiet window does not "show a measured zero".
+
+  The note is now the concatenation of one sentence per state (`ROLLUP_STATE_SENTENCES`)
+  rather than a paragraph written beside them, and `RollupCell` carries the `state` it is
+  in — `measured` could not, because it collapses three different absences into one flag.
+  `test_the_note_beside_the_rollup_explains_every_state_the_table_can_render` holds the
+  two together in both directions: every state `_rollup_cells` reaches has a sentence, and
+  every sentence belongs to a state some fixture reaches, so neither a new state with no
+  explanation nor an explanation for a state that is gone can sit there quietly.
+
+  Found alongside it: `test_rollup_names_the_unmonitored_night_instead_of_reporting_nothing`
+  compared the note against the page as **raw** text. The note is written through
+  `html.escape`, so the first apostrophe added to it turned that assertion into one that
+  could never match. It now compares `escape(ROLLUP_ABSENCE_NOTE)`, which is the string the
+  reader actually receives.
 
 ### Added
 - **The tagged-PDF gate was passing on how long the report happened to be**

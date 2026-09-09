@@ -78,16 +78,53 @@ NO_EVENTS_VALUE = "no events"
 #: schedule can leave a day out). Not the same fact as "nothing was measured".
 ROLLUP_NO_QUIET_WINDOW = "no quiet-hours window this day"
 
+#: The four things one cell of the quiet-hours duration rollup can say, in the order the
+#: note beside the table explains them. `RollupCell.state` is one of these and nothing
+#: else.
+ROLLUP_MEASURED = "measured"
+ROLLUP_PARTLY_COVERED = "partly-covered"
+ROLLUP_UNMONITORED = "unmonitored"
+ROLLUP_NO_WINDOW = "no-quiet-window"
+
+#: One sentence per state, and the note is their concatenation rather than a paragraph
+#: written beside them. The paragraph this replaced described two of the four: it predated
+#: the partly-covered cell and the no-window cell, so a reader who met either was given no
+#: explanation of the only two cells in the table that are not durations. A state added to
+#: `_rollup_cells` without a sentence here, or a sentence here no fixture can reach, fails
+#: `tests/test_absence_as_value.py` -- the vocabulary is held to the renderer in both
+#: directions.
+ROLLUP_STATE_SENTENCES: dict[str, str] = {
+    ROLLUP_MEASURED: (
+        "A day the device monitored with no loud time inside the quiet-hours window shows "
+        "a measured zero, because a monitored night with nothing in it is a finding."
+    ),
+    ROLLUP_PARTLY_COVERED: (
+        "A day whose quiet hours the record covers only in part shows the duration it did "
+        "measure, and says how many of that day's quiet hours are missing from it."
+    ),
+    ROLLUP_UNMONITORED: (
+        "A day whose quiet hours the record shows no monitor running for is marked "
+        f"\u201c{UNMONITORED_LABEL}\u201d instead of a duration, because no event could "
+        "have been recorded then."
+    ),
+    ROLLUP_NO_WINDOW: (
+        "A day the configured schedule gives no quiet-hours window at all is marked "
+        f"\u201c{ROLLUP_NO_QUIET_WINDOW}\u201d. There was no window to accumulate loud "
+        f"time inside, so a zero would count nothing and \u201c{UNMONITORED_LABEL}\u201d "
+        "would be untrue of a device that was listening."
+    ),
+}
+
 #: Why the rollup lists days that contributed no loud time. The calendar heatmap gained a
 #: row for every day in the window so a quiet monitored night and an unmonitored one could
 #: stop looking identical; the per-day duration table beside it kept listing only the days
 #: that had loud time, so both still vanished from the exhibit an ordinance reader keys on.
-ROLLUP_ABSENCE_NOTE = (
-    "Every day this reporting window covers has a row. A day the device monitored with no "
-    "loud time inside the quiet-hours window shows a measured zero; a day whose quiet hours "
-    "the record shows no monitor running for is marked "
-    f"\u201c{UNMONITORED_LABEL}\u201d instead of a duration, because no event could have "
-    "been recorded then. A day left out of this table would read as a quiet one."
+ROLLUP_ABSENCE_NOTE = " ".join(
+    [
+        "Every day this reporting window covers has a row.",
+        *ROLLUP_STATE_SENTENCES.values(),
+        "A day left out of this table would read as a quiet one.",
+    ]
 )
 
 #: The main report's coverage statement when the record cannot support one. Said, not
@@ -309,11 +346,16 @@ class RollupCell:
     schedule gives no quiet window. The renderer reads it to decide whether the table has
     anything to say at all, so "nothing to roll up" can never be the answer to a night
     nothing was listening on.
+
+    ``state`` names which of the four things in :data:`ROLLUP_STATE_SENTENCES` this cell
+    is saying. ``measured`` cannot carry that: it collapses three different absences into
+    one flag, and the note beside the table has to explain each of them separately.
     """
 
     day: str
     text: str
     measured: bool
+    state: str
 
 
 def _quiet_hours_on(day_label: str, quiet_hours: QuietSchedule, tz: tzinfo) -> list[int]:
@@ -341,15 +383,17 @@ def _rollup_cells(
 ) -> list[RollupCell]:
     """One :class:`RollupCell` per day the report covers, in calendar order.
 
-    The three states are the calendar heatmap's three, because this table describes the
-    same days:
+    The first three states are the calendar heatmap's three, because this table describes
+    the same days; the fourth belongs to this table alone, because the heatmap's unit is a
+    clock hour and the schedule's is a weekday:
 
-    * a measured duration, including a measured ``0 s`` -- a monitored night with no loud
-      time in the window is a finding, and it belongs in the table;
-    * :data:`UNMONITORED_LABEL` when every quiet hour of that day is one the record shows
+    * :data:`ROLLUP_MEASURED` -- a measured duration, including a measured ``0 s``. A
+      monitored night with no loud time in the window is a finding, and it belongs here;
+    * :data:`ROLLUP_UNMONITORED` when every quiet hour of that day is one the record shows
       no monitor running for. That is an absence and is never rendered as a duration;
-    * a measured duration plus how many of the day's quiet hours are missing from it, for
-      a night that was only partly covered.
+    * :data:`ROLLUP_PARTLY_COVERED` -- a measured duration plus how many of the day's quiet
+      hours are missing from it, for a night that was only partly covered;
+    * :data:`ROLLUP_NO_WINDOW` when the schedule gives that day no quiet window at all.
 
     ``summary.by_day_hour`` carries every day in the reporting window once
     :func:`_fill_window_days` has run, which is the set of days this walks; the measured
@@ -361,12 +405,16 @@ def _rollup_cells(
     for day in days:
         quiet = _quiet_hours_on(day, quiet_hours, tz)
         if not quiet:
-            cells.append(RollupCell(day, ROLLUP_NO_QUIET_WINDOW, measured=False))
+            cells.append(
+                RollupCell(day, ROLLUP_NO_QUIET_WINDOW, measured=False, state=ROLLUP_NO_WINDOW)
+            )
             continue
         missing = [hour for hour in quiet if (day, hour) in unmon]
         seconds = summary.quiet_hours_loud_seconds_by_day.get(day, 0.0)
         if len(missing) == len(quiet):
-            cells.append(RollupCell(day, UNMONITORED_LABEL, measured=False))
+            cells.append(
+                RollupCell(day, UNMONITORED_LABEL, measured=False, state=ROLLUP_UNMONITORED)
+            )
         elif missing:
             cells.append(
                 RollupCell(
@@ -374,10 +422,13 @@ def _rollup_cells(
                     f"{_fmt_seconds(seconds)} "
                     f"({len(missing)} of {len(quiet)} quiet hours {UNMONITORED_LABEL})",
                     measured=False,
+                    state=ROLLUP_PARTLY_COVERED,
                 )
             )
         else:
-            cells.append(RollupCell(day, _fmt_seconds(seconds), measured=True))
+            cells.append(
+                RollupCell(day, _fmt_seconds(seconds), measured=True, state=ROLLUP_MEASURED)
+            )
     return cells
 
 
