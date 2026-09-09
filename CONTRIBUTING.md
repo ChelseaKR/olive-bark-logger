@@ -142,3 +142,12 @@ branch ruleset that never mentions parity.
   (hardware-dependent, documented in `pyproject.toml`).
 - Tests: `pytest` with `--strict-markers --strict-config` (`make test` / `make cov`);
   coverage floor is 85% branch coverage.
+
+## Commercial solicitation
+
+Issues here are not open to bids. They are design records — written so a decision is
+reconstructable later — not scope documents for outside quoting, and unsolicited offers to
+implement one for a fee will be declined.
+
+Contributions through the normal fork-and-PR process are welcome, and `good first issue` is the
+place to start.
