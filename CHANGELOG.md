@@ -17,6 +17,36 @@ release" defect this file's absence let stand.
 ## [Unreleased]
 
 ### Added
+- **The pip-audit waiver list is now held to `uv.lock` instead of to a sentence.** Twelve
+  advisories are waived because their fixes require Python >=3.10 and this repository's floor
+  is 3.9 (ADR-0002 / CQ-01), so a default `make dev` venv resolves the
+  `python_full_version < '3.10'` branch of the lock and installs versions below the fix. The
+  `Makefile`'s waiver block carried the sentence that makes that acceptable rather than
+  alarming -- *"uv.lock carries pip 26.2.1 for >=3.10, so CI (3.12) is fixed, not waived"* --
+  and nothing re-derived it. A waiver written for the 3.9 branch would go on suppressing the
+  finding on CI's 3.12 the day the >=3.10 resolution also fell behind, and `make security`
+  would stay green over a package CI installs.
+
+  `tests/test_pip_audit_waivers.py` re-derives it offline from the lock: every id in
+  `PIP_AUDIT_WAIVERS` has a registry entry naming its package and first fixed version and
+  every entry is in the Makefile (neither list may grow alone); every waived package's
+  **>=3.10** resolution is at or above the fixed version, so CI is fixed rather than waived;
+  and every **<3.10** resolution is still below it, because a waiver that suppresses nothing
+  makes the inventory's count an upper bound nobody can check. A floor asserts the lock reader
+  still finds both resolution branches and that they differ, since a reader returning nothing
+  satisfies every comparison by describing none.
+
+  Prompted by three HIGH Dependabot alerts, all reported at `runtime` scope: urllib3
+  CVE-2026-44431 and CVE-2026-44432, and msgpack CVE-2026-57585. **Measured, all three reach
+  this tree only through pip-audit's own dependency chain** -- `pip-audit -> requests ->
+  urllib3` and `pip-audit -> CacheControl -> msgpack` -- no tracked file imports any of them,
+  and `[project].dependencies` is still empty, so nothing on a shipped path is affected. A
+  patched version exists for each and **none is installable on 3.9**: re-derived 2026-09-10
+  with `uv pip install --dry-run --python .venv/bin/python` for all seven waived packages,
+  every one unsatisfiable because the fix depends on Python>=3.10. Running pip-audit with no
+  waivers at all reports **exactly twelve findings against twelve waivers**, so none of the
+  entries is dead.
+
 - **`olive-bundle`: a tamper-evident evidence bundle, and a verifier that can fail.** The
   research roadmap's E1 is the item every adjudicator persona raised -- a property manager
   or a board will not weigh a log the other party could have edited -- and

@@ -78,6 +78,21 @@ cov:
 # `uv pip install --dry-run --python .venv/bin/python` on the 3.9 venv: unsatisfiable).
 # uv.lock carries pip 26.2.1 for >=3.10, so CI (3.12) is fixed, not waived; setuptools is
 # a venv seed package, not a locked dependency, and does not occur on CI at all.
+#
+# 2026-09-10: that last sentence is the one the whole arrangement rests on -- "we cannot fix
+# this on our floor interpreter" and "we have turned off an alert" differ only by it -- and
+# nothing re-derived it. tests/test_pip_audit_waivers.py now does, offline, from uv.lock:
+# every id below has a registry entry naming its package and first fixed version (neither
+# list may grow alone), every waived package's >=3.10 resolution is at or above that version
+# so CI is fixed rather than waived, and every <3.10 resolution is still below it so no
+# waiver here is suppressing nothing. Prompted by three HIGH Dependabot alerts (urllib3
+# CVE-2026-44431/44432, msgpack CVE-2026-57585) which the platform reports at `runtime`
+# scope: measured, all three reach this tree only through pip-audit's own dependency chain
+# (pip-audit -> requests -> urllib3, pip-audit -> CacheControl -> msgpack), no tracked file
+# imports any of them, and the shipped runtime still has zero dependencies. Re-derived by
+# hand the same day with the dry-run command above: no fix for filelock, msgpack, pip,
+# pytest, requests, setuptools or urllib3 is installable on 3.9 -- every one of the seven is
+# unsatisfiable because the fix depends on Python>=3.10.
 PIP_AUDIT_WAIVERS := \
 	--ignore-vuln PYSEC-2026-3721 \
 	--ignore-vuln PYSEC-2026-3447 \
