@@ -38,8 +38,13 @@ live = ["sounddevice>=0.4"]
 # tests/test_pdf_export.py's structural assertions (tag presence, reading order,
 # header association) — the only way to verify what actually got written, short of
 # a human assistive-technology pass (still deferred, see the ADR).
+# Upper bound widened 67..<70 -> 67..<71 on 2026-09-10: CVE-2026-55073 (url_fetcher
+# bypassed for the xmp_metadata= and stylesheets= channels) is fixed in 70.0 and in no
+# earlier release, so the cap that exists to force a rendering review was also excluding
+# the only patched version. Neither bypassed channel is used by report/pdf_export.py.
+# See the ADR's Amendment, 2026-09-10.
 pdf = [
-    "weasyprint>=67,<70; python_version >= '3.10'",
+    "weasyprint>=67,<71; python_version >= '3.10'",
     "pypdf>=5,<7; python_version >= '3.10'",
 ]
 

@@ -130,6 +130,34 @@ formats for attached files that are forbidden in A-2" — the same reasoning app
 the -3 level generally, kept available for a future CSV-attachment enhancement even
 though this pass does not use it).
 
+### Amendment, 2026-09-10: the upper bound moves to `<71`, for a security fix
+
+The Decision above caps WeasyPrint at `<70` so that "a new browser-style major release"
+cannot be adopted without a deliberate rendering review. **CVE-2026-55073 /
+`GHSA-jf6q-chmf-3h3v` (`PYSEC-2026-3940`) is fixed in 70.0 and in no earlier release**, so
+the cap now also excludes the only patched version. The extra is widened to
+`weasyprint>=67,<71`; the floor and the reason for it are unchanged, and so is the reason
+for having a cap at all — `<71` keeps the next major out.
+
+**The advisory is about this ADR's own mechanism, and it does not reach this code.**
+`url_fetcher` is how `report/pdf_export.py` enforces the local-only guarantee: it passes
+`block_external_resource`, which records and rejects every attempted load. The advisory
+says two `write_pdf()` channels ignore the document's fetcher and build a fresh default —
+`xmp_metadata=[url]` and `stylesheets=[...]`. **This call site passes neither**; it passes
+`pdf_variant` and `pdf_tags` only, over HTML this repository generated itself, with no
+caller-supplied URL anywhere in the path. So the local-only guarantee was not bypassable
+here on 69.0. The bump is hygiene and gate-correctness, not incident response, and the
+`Dependency audit` step is right to fail on the version regardless of reachability.
+
+**What the review consisted of, and what it did not.** `tests/test_pdf_export.py` is the
+structural gate this ADR already relies on — tag tree present, `/Lang` and `/MarkInfo`,
+heading order, table-header association, chart-summary text survival — and it runs against
+70.0 in the `verify` job, which installs the native pango stack the extra needs. It could
+not be run on the machine this change was written on: WeasyPrint fails to import there with
+`cannot load library 'libgobject-2.0-0'`. **No human assistive-technology or visual
+rendering pass was performed**, and none is claimed; that gate is still
+GAP-A11Y-2 in [the gap ledger](../GAP-LEDGER.md) and issue #90, exactly as before this amendment.
+
 ### Amendment, 2026-09-06: the workaround was passing by coincidence
 
 The mitigation recorded above (drop the chart SVG, flatten the chart `<figure>`,

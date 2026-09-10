@@ -668,6 +668,28 @@ release" defect this file's absence let stand.
   showing it store zero of eight on one failure.
 
 ### Security
+- **WeasyPrint 69.0 -> 70.0 for CVE-2026-55073, and the pin that was blocking it.** The
+  `pdf` extra was capped at `weasyprint>=67,<70`, deliberately: ADR-0004 records the upper
+  bound as a forcing function for a rendering review before a new browser-style major.
+  `PYSEC-2026-3940` is fixed in **70.0 and in no earlier release**, so the cap had also
+  become the thing excluding the only patched version. Widened to `<71`; the floor, and the
+  reason for having a cap at all, are unchanged. `uv lock --upgrade-package weasyprint`
+  moved exactly one entry -- 94 lock entries before and after, one version changed.
+
+  **The advisory is about this project's own mechanism and does not reach it.**
+  `url_fetcher` is how `report/pdf_export.py` enforces the local-only guarantee, and the
+  advisory says two `write_pdf()` channels ignore it: `xmp_metadata=[url]` and
+  `stylesheets=[...]`. **The call site passes neither** -- `pdf_variant` and `pdf_tags`
+  only, over HTML this project generated itself, with no caller-supplied URL anywhere in
+  the path. So this is hygiene and gate-correctness, not incident response, and the
+  `Dependency audit` step is right to fail on the version regardless of reachability.
+
+  Verified: full suite 625 passed / 1 skipped. `tests/test_pdf_export.py` -- the structural
+  gate ADR-0004 relies on -- **could not be run on the machine this was written on**
+  (WeasyPrint cannot import there: `cannot load library 'libgobject-2.0-0'`); it runs
+  against 70.0 in the `verify` job, which installs the pango stack. No human
+  assistive-technology or visual rendering pass was performed and none is claimed.
+
 - **`pypdf` 6.15.0 -> 6.16.2 in `uv.lock`** (CVE-2026-84309, CVE-2026-84310,
   CVE-2026-84311). The `pdf` extra pins `pypdf>=5,<7`, so no constraint changed; only
   the locked version moved, past the 6.16.0/6.16.1 fix versions the advisories name.
