@@ -130,6 +130,63 @@ formats for attached files that are forbidden in A-2" — the same reasoning app
 the -3 level generally, kept available for a future CSV-attachment enhancement even
 though this pass does not use it).
 
+### Amendment, 2026-09-10: the upper bound moves to `<71`, for a security fix
+
+The Decision above caps WeasyPrint at `<70` so that "a new browser-style major release"
+cannot be adopted without a deliberate rendering review. **CVE-2026-55073 /
+`GHSA-jf6q-chmf-3h3v` (`PYSEC-2026-3940`) is fixed in 70.0 and in no earlier release**, so
+the cap now also excludes the only patched version. The extra is widened to
+`weasyprint>=67,<71`; the floor and the reason for it are unchanged, and so is the reason
+for having a cap at all — `<71` keeps the next major out.
+
+**The advisory is about this ADR's own mechanism, and it does not reach this code.**
+`url_fetcher` is how `report/pdf_export.py` enforces the local-only guarantee: it passes
+`block_external_resource`, which records and rejects every attempted load. The advisory
+says two `write_pdf()` channels ignore the document's fetcher and build a fresh default —
+`xmp_metadata=[url]` and `stylesheets=[...]`. **This call site passes neither**; it passes
+`pdf_variant` and `pdf_tags` only, over HTML this repository generated itself, with no
+caller-supplied URL anywhere in the path. So the local-only guarantee was not bypassable
+here on 69.0. The bump is hygiene and gate-correctness, not incident response, and the
+`Dependency audit` step is right to fail on the version regardless of reachability.
+
+**What the review consisted of, and what it did not.** `tests/test_pdf_export.py` is the
+structural gate this ADR already relies on — tag tree present, `/Lang` and `/MarkInfo`,
+heading order, table-header association, chart-summary text survival — and it runs against
+70.0 in the `verify` job, which installs the native pango stack the extra needs. It could
+not be run on the machine this change was written on: WeasyPrint fails to import there with
+`cannot load library 'libgobject-2.0-0'`. **No human assistive-technology or visual
+rendering pass was performed**, and none is claimed; that gate is still
+GAP-A11Y-2 in [the gap ledger](../GAP-LEDGER.md) and issue #90, exactly as before this amendment.
+
+**And the cap did its job on the first run.** With the bound widened, CI's structural gate
+failed — not on a rendering assertion, but on
+`test_the_caption_keep_together_rule_is_the_one_doing_the_work`, the in-process negative
+control the 2026-09-06 amendment added. Removing `caption { break-after: avoid }` no longer
+crashes at **any** of the 60 filler lengths in `CONTROL_SWEEP`. The control's own message
+named the two readings it cannot tell apart — the rule has become dead code, or the crashing
+page shape moved outside the sweep — and said not to delete it to get green.
+
+The upstream changelog settles it: **[Kozea/WeasyPrint#2761](https://github.com/Kozea/WeasyPrint/issues/2761),
+titled `ValueError: Table wrapper without a table` in those words, is closed and appears in
+70.0's bug fixes as "Handle split tables with captions".** The workaround is inert on 70.0
+because the bug it works around is gone. The sweep could not have told us that; only the
+changelog could.
+
+So the control is now **version-split, and both halves are assertions rather than a skip**:
+below 70 the crash must still come back somewhere in the sweep, and at 70+ it must *not*,
+so a regression that reintroduced it fails here instead of passing quietly. The `>=70`
+branch also keeps a positive conversion assertion, because a branch that asserts only an
+absence is satisfied by a fixture that stopped rendering at all.
+
+**The rule stays in `_PDF_LAYOUT_STYLE`.** The extra still admits `>=67`, where it is
+load-bearing, and this repository's own venv floor makes 67-69 a real target. Retiring it
+means raising the extra's *lower* bound to 70, which is a separate decision about who can
+install the `pdf` extra — not something a green suite on one version authorises.
+
+One bookkeeping note for whoever re-reads the advisory: WeasyPrint's own release notes cite
+`GHSA-r543-q48m-4c9j`, which returns 404 from GitHub's advisory API. The published record is
+`GHSA-jf6q-chmf-3h3v`; both name **CVE-2026-55073**, which is the id to quote.
+
 ### Amendment, 2026-09-06: the workaround was passing by coincidence
 
 The mitigation recorded above (drop the chart SVG, flatten the chart `<figure>`,

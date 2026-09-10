@@ -484,12 +484,42 @@ def test_the_tagged_pdf_survives_a_longer_report(extra_paragraphs):
     assert pdf_bytes[:5] == b"%PDF-"
 
 
+def _weasyprint_major() -> int:
+    """The installed WeasyPrint's major version, refusing anything it cannot read.
+
+    The control below asks a different question of 67-69 than of 70+, so a version it
+    misparses would silently take one of the two branches and prove nothing.
+    """
+    from report.pdf_export import _weasyprint
+
+    raw = str(_weasyprint().__version__)
+    major = raw.split(".", 1)[0]
+    assert major.isdigit(), f"cannot read a major version out of WeasyPrint {raw!r}"
+    return int(major)
+
+
 def test_the_caption_keep_together_rule_is_the_one_doing_the_work():
-    """The negative control for the rule above, run in-process.
+    """The negative control for the rule above, run in-process -- with the version split
+    upstream forced on 2026-09-08.
 
     Removing `caption { break-after: avoid }` from the injected style must bring the
     crash back somewhere in :data:`FILLER_SWEEP` -- the same family of report lengths
-    the positive gate holds over.
+    the positive gate holds over. **On WeasyPrint 70.0 and later it must not**, because
+    upstream fixed the bug the rule works around: Kozea/WeasyPrint#2761, titled
+    `ValueError: Table wrapper without a table` in those words, is closed and listed in
+    70.0's bug fixes as "Handle split tables with captions".
+
+    Both halves are assertions, and neither is a skip. On 67-69 the rule is still
+    load-bearing and this proves it; on 70+ the rule is inert and this proves *that*,
+    so a regression that brought the crash back would fail here rather than pass
+    quietly. The rule itself stays in `_PDF_LAYOUT_STYLE` because the `pdf` extra still
+    admits `>=67`; retiring it needs the floor to move, which is ADR-0004's question and
+    not a test's.
+
+    This is what the cap at `<70` was for. The control found the change on the first CI
+    run after the bound was widened, and its own failure message named both readings --
+    dead code, or a sweep that stopped producing the crashing shape. The upstream
+    changelog is what tells the two apart; the sweep could not.
 
     It searches :data:`CONTROL_SWEEP` for a crashing length rather than asserting one.
     Until 2026-09-06 it asserted the crash at the report's own length alone, and which
@@ -523,12 +553,27 @@ def test_the_caption_keep_together_rule_is_the_one_doing_the_work():
     finally:
         pdf_export._PDF_LAYOUT_STYLE = original
 
+    major = _weasyprint_major()
+    if major >= 70:
+        assert crashed is None, (
+            f"WeasyPrint {major}.x reintroduced `Table wrapper without a table` at "
+            f"{crashed} filler paragraph(s) with the caption rule removed. Upstream "
+            "Kozea/WeasyPrint#2761 was fixed in 70.0; this is a regression, and the "
+            "caption rule in _PDF_LAYOUT_STYLE is load-bearing again on this version."
+        )
+        # The rule is inert here, so the length-sweep property is asserted the only way
+        # left: the report still converts at a length the sweep covers, with the rule
+        # restored. Without this the >=70 branch would assert only an absence.
+        assert html_to_tagged_pdf_bytes(_padded_report(CONTROL_SWEEP[-1]))[:5] == b"%PDF-"
+        return
+
     assert crashed is not None, (
         "removing `caption { break-after: avoid }` changed nothing at any of the "
-        f"{len(CONTROL_SWEEP)} filler lengths in CONTROL_SWEEP, so this control no "
-        "longer shows the rule is load-bearing. Either the rule has become dead code "
-        "that should go, or the crash needs a page shape this sweep stopped producing "
-        "and the sweep needs widening -- do not delete the control to get green."
+        f"{len(CONTROL_SWEEP)} filler lengths in CONTROL_SWEEP on WeasyPrint "
+        f"{major}.x, which is below the 70.0 that fixed Kozea/WeasyPrint#2761. So this "
+        "control no longer shows the rule is load-bearing. Either the crash needs a "
+        "page shape this sweep stopped producing and the sweep needs widening, or the "
+        "fix was backported -- do not delete the control to get green."
     )
 
     # And with the rule restored, the length that crashed without it converts: the

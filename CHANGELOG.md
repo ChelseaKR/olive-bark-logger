@@ -668,6 +668,47 @@ release" defect this file's absence let stand.
   showing it store zero of eight on one failure.
 
 ### Security
+- **WeasyPrint 69.0 -> 70.0 for CVE-2026-55073, and the pin that was blocking it.** The
+  `pdf` extra was capped at `weasyprint>=67,<70`, deliberately: ADR-0004 records the upper
+  bound as a forcing function for a rendering review before a new browser-style major.
+  `PYSEC-2026-3940` is fixed in **70.0 and in no earlier release**, so the cap had also
+  become the thing excluding the only patched version. Widened to `<71`; the floor, and the
+  reason for having a cap at all, are unchanged. `uv lock --upgrade-package weasyprint`
+  moved exactly one entry -- 94 lock entries before and after, one version changed.
+
+  **The advisory is about this project's own mechanism and does not reach it.**
+  `url_fetcher` is how `report/pdf_export.py` enforces the local-only guarantee, and the
+  advisory says two `write_pdf()` channels ignore it: `xmp_metadata=[url]` and
+  `stylesheets=[...]`. **The call site passes neither** -- `pdf_variant` and `pdf_tags`
+  only, over HTML this project generated itself, with no caller-supplied URL anywhere in
+  the path. So this is hygiene and gate-correctness, not incident response, and the
+  `Dependency audit` step is right to fail on the version regardless of reachability.
+
+  Verified: full suite 625 passed / 1 skipped. `tests/test_pdf_export.py` -- the structural
+  gate ADR-0004 relies on -- **could not be run on the machine this was written on**
+  (WeasyPrint cannot import there: `cannot load library 'libgobject-2.0-0'`); it runs
+  against 70.0 in the `verify` job, which installs the pango stack. No human
+  assistive-technology or visual rendering pass was performed and none is claimed.
+
+  **The cap did its job on the first run, and the finding is worth more than the bump.**
+  With the bound widened, CI failed on
+  `test_the_caption_keep_together_rule_is_the_one_doing_the_work` — the in-process negative
+  control that removes `caption { break-after: avoid }` and requires the
+  `Table wrapper without a table` crash to come back. On 70.0 it comes back at **none** of
+  the 60 filler lengths. The control's own message named the two readings it cannot
+  separate (dead code, or a sweep that stopped producing the crashing shape) and said not to
+  delete it to get green; the upstream changelog separates them —
+  [Kozea/WeasyPrint#2761](https://github.com/Kozea/WeasyPrint/issues/2761), titled
+  `ValueError: Table wrapper without a table`, is closed and listed in 70.0 as "Handle split
+  tables with captions". The workaround is inert because the bug is gone.
+
+  The control is now version-split with **both halves assertive**: below 70 the crash must
+  still return, at 70+ it must not, so a regression fails here rather than passing quietly,
+  and the `>=70` branch keeps a positive conversion assertion so it cannot be satisfied by a
+  fixture that stopped rendering. **The CSS rule stays** — the extra still admits `>=67`,
+  where it is load-bearing; retiring it means raising the extra's lower bound, which is a
+  separate decision.
+
 - **`pypdf` 6.15.0 -> 6.16.2 in `uv.lock`** (CVE-2026-84309, CVE-2026-84310,
   CVE-2026-84311). The `pdf` extra pins `pypdf>=5,<7`, so no constraint changed; only
   the locked version moved, past the 6.16.0/6.16.1 fix versions the advisories name.
