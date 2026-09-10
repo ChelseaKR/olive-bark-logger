@@ -690,6 +690,25 @@ release" defect this file's absence let stand.
   against 70.0 in the `verify` job, which installs the pango stack. No human
   assistive-technology or visual rendering pass was performed and none is claimed.
 
+  **The cap did its job on the first run, and the finding is worth more than the bump.**
+  With the bound widened, CI failed on
+  `test_the_caption_keep_together_rule_is_the_one_doing_the_work` — the in-process negative
+  control that removes `caption { break-after: avoid }` and requires the
+  `Table wrapper without a table` crash to come back. On 70.0 it comes back at **none** of
+  the 60 filler lengths. The control's own message named the two readings it cannot
+  separate (dead code, or a sweep that stopped producing the crashing shape) and said not to
+  delete it to get green; the upstream changelog separates them —
+  [Kozea/WeasyPrint#2761](https://github.com/Kozea/WeasyPrint/issues/2761), titled
+  `ValueError: Table wrapper without a table`, is closed and listed in 70.0 as "Handle split
+  tables with captions". The workaround is inert because the bug is gone.
+
+  The control is now version-split with **both halves assertive**: below 70 the crash must
+  still return, at 70+ it must not, so a regression fails here rather than passing quietly,
+  and the `>=70` branch keeps a positive conversion assertion so it cannot be satisfied by a
+  fixture that stopped rendering. **The CSS rule stays** — the extra still admits `>=67`,
+  where it is load-bearing; retiring it means raising the extra's lower bound, which is a
+  separate decision.
+
 - **`pypdf` 6.15.0 -> 6.16.2 in `uv.lock`** (CVE-2026-84309, CVE-2026-84310,
   CVE-2026-84311). The `pdf` extra pins `pypdf>=5,<7`, so no constraint changed; only
   the locked version moved, past the 6.16.0/6.16.1 fix versions the advisories name.
