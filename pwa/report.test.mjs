@@ -390,11 +390,11 @@ test("an unmonitored hour prints no count at all, not a zero", () => {
   );
 });
 
-test("the third state does not depend on colour", () => {
+test("the third state does not depend on color", () => {
   const s = calendarOf(threeDayRecords());
   const html = buildReportHtml(s, { generatedAt: "now", tz: "UTC", startHour: 22, endHour: 8 });
   const row = html.split("<tr>").find((r) => r.includes('scope="row">2026-03-11'));
-  // Three colour-free carriers: a text dash in the cell, the label in the cell's title,
+  // Three color-free carriers: a text dash in the cell, the label in the cell's title,
   // and the day's count of unmonitored hours as a real column.
   assert.ok(row.includes(">—</span>"), "no text marker in the cell");
   assert.ok(row.includes(`— ${UNMONITORED_LABEL}"`), "no spelled-out title on the cell");

@@ -82,7 +82,7 @@ release" defect this file's absence let stand.
     rather than one at a time.
 
   `sessions.csv` and `calibration.csv` carry the same R1 cover block as every other
-  export. They are discovered by `tests/test_export_caveats.py`'s behavioural half and
+  export. They are discovered by `tests/test_export_caveats.py`'s behavioral half and
   added to its checked set, so they are under the existing gate rather than beside it --
   and an empty calibration history is written as a header with no rows, because "this
   device was never calibrated" is a fact the recipient needs and a missing file states
@@ -220,7 +220,7 @@ release" defect this file's absence let stand.
     is a measurement), and `not monitored` for an hour nothing was listening for. An
     unmonitored cell prints no count at all, not even a zero, and is in neither the row
     total nor the shading scale.
-  - The third state does not depend on colour: a text dash in the cell, the label spelled
+  - The third state does not depend on color: a text dash in the cell, the label spelled
     out in the cell's title, and each day's count of unmonitored hours as a real column
     with its own header. Same rule `report/charts.py` follows for the same cell.
   - `UNMONITORED_LABEL` is exported and a test holds it equal to `report/charts.py`'s
@@ -352,7 +352,7 @@ release" defect this file's absence let stand.
   false-failure trap inside a test written to prevent false negatives. Against a
   three-line fixture with one real import, the old pattern returned three specifiers and
   the anchored one returns one. Both the binding/re-export form and the side-effect form
-  (`import "./x.js";`) are recognised, multi-line import lists still match, and the
+  (`import "./x.js";`) are recognized, multi-line import lists still match, and the
   pattern was duplicated in three places and is now one helper.
 - **The markdown link gate read a code span as a link.** `tests/test_doc_links.py`
   matched `[...](...)` wherever those characters occurred, backticks included, where
@@ -362,7 +362,7 @@ release" defect this file's absence let stand.
   truthful sentence could not pass, and the cheap way out was to reword the document
   rather than fix the check -- the same false-failure shape as the unanchored import
   regex, in the gate rather than in the code. Code spans are now stripped before the
-  scan; stripping rather than skipping the line keeps the target of a code-labelled
+  scan; stripping rather than skipping the line keeps the target of a code-labeled
   link (``[`monitor/features.py`](../monitor/features.py)``, the house style here)
   checked, and a canary pins both halves.
 
@@ -396,7 +396,7 @@ release" defect this file's absence let stand.
   someone remembered to name"). Fixed by closing the hole rather than softening the
   sentence: `status.html` now emits the shared `cover_html()` above its first table and the
   shared `NO_VERDICT_NOTE` beside its quiet-hours counts, and discovery is now **by
-  behaviour** — a public function in `report/` that builds a whole HTML document
+  behavior** — a public function in `report/` that builds a whole HTML document
   (`<!DOCTYPE html` in its own body) or writes a CSV (`csv.writer`) is an export path
   whatever it is called. The old name pattern is kept as a union member, so discovery can
   only widen; `test_the_name_half_of_discovery_is_never_narrowed` pins that. Verified by
@@ -425,7 +425,7 @@ release" defect this file's absence let stand.
   Two new merge-blocking gates close the hole these all sat in: `tests/test_doc_links.py`
   resolves every markdown link, anchor, and in-repo path citation in every tracked file,
   and `tests/test_doc_figures.py` derives every stated count from the tree. `PROJECT-SCOPE`'s
-  "37 hand-authored doc or metadata files" is deliberately left ungated and labelled as a
+  "37 hand-authored doc or metadata files" is deliberately left ungated and labeled as a
   point-in-time figure: its own definition has no mechanical equivalent here, so any number
   asserted for it would be invented.
 - **The README's supported-versions line presupposed a release that does not exist.** It
@@ -486,7 +486,7 @@ release" defect this file's absence let stand.
   `macos-*` runners on PR CI, so no honest per-PR macOS gate exists here. New
   `scripts/check_nightly_macos.py` (`make nightly-check`) fails unless the nightly sweep
   ran on `main`, on runners the API labels `macos-*`, within 7 days, and passed — the
-  runner-label assertion being the specific defence against a repeat. It runs as a step
+  runner-label assertion being the specific defense against a repeat. It runs as a step
   inside the already-required `verify` job, so it gained teeth without adding a required
   check name. It is a **lagging** gate and says so on every run, pass or fail: a
   macOS-only regression still merges, then blocks every merge after the next nightly
@@ -572,7 +572,7 @@ release" defect this file's absence let stand.
   compares the recent ambient baseline (median and L90, from the opt-in EXP-01 minute
   ledger) against the window right after the current calibration epoch. Past
   `drift_tolerance_db` — 5 dB by default, and documented as an order-of-magnitude
-  judgement rather than a measured distribution — it records a `drift_advisories` row,
+  judgment rather than a measured distribution — it records a `drift_advisories` row,
   publishes the state in the heartbeat JSON, shows it on `status.html`, and discloses it
   in the report's *Measurement conditions* block with the check to run:
   re-run `olive-calibrate`.

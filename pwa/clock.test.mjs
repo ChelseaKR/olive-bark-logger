@@ -68,7 +68,7 @@ test("gap records are excluded from event counts and both CSVs", () => {
 // would then have demanded sw.js precache a module app.js never imports. A false-failure
 // trap inside a test written to prevent false negatives (issue #68).
 //
-// Two shapes are recognised, both anchored to the start of a line:
+// Two shapes are recognized, both anchored to the start of a line:
 //   import ... from "./x.js";  /  export ... from "./x.js";   (binding and re-export)
 //   import "./x.js";                                          (side-effect only)
 // `[^;]*?` cannot cross a statement terminator, so a multi-line import list still

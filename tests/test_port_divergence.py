@@ -75,7 +75,7 @@ PYTHON_ONLY_SECTIONS: dict[str, str] = {
         "records no ambient minutes, so the section would have nothing behind it."
     ),
     "Threshold sensitivity": (
-        "EXP-03 recomputes the event set at neighbouring thresholds from stored levels the "
+        "EXP-03 recomputes the event set at neighboring thresholds from stored levels the "
         "browser does not keep."
     ),
     "Distributions": (

@@ -127,7 +127,7 @@ def test_that_gate_goes_red_against_the_pruning_rule_it_replaced(monkeypatch):
 
     class PreIssue63(FeatureWindow):
         def prune(self, active_since: float | None) -> None:
-            return  # the old behaviour on a quiet stretch: never pruned
+            return  # the old behavior on a quiet stretch: never pruned
 
     peak = _peak_buffer_len(monkeypatch, PreIssue63)
     assert peak == QUIET_FRAMES, f"expected unbounded growth to {QUIET_FRAMES}, saw {peak}"

@@ -44,7 +44,7 @@ from report.aggregate import Summary, summarize
 # exactly as they travel with the report and the CSVs. It shipped without them for as
 # long as it existed because `tests/test_export_caveats.py` discovered export paths by
 # *name* and `render_status` matched none of its alternatives; that gate now discovers
-# them by behaviour (an HTML document or a CSV built in the function's own body) too.
+# them by behavior (an HTML document or a CSV built in the function's own body) too.
 from report.render import _STYLE, NO_VERDICT_NOTE, _subtract_spans, cover_html, on_air_spans
 
 if TYPE_CHECKING:

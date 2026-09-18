@@ -30,7 +30,7 @@ detector (`monitor/detector.py`) and then confirmed to match the JS port. So:
   the vector to match the new output unless the semantic change is intentional.
 - An intentional semantic change is landed by updating the affected vector(s)
   (or adding new ones) in the same commit, so both language suites move together.
-- New behaviour (a new knob, a new boundary rule) should arrive with a new
+- New behavior (a new knob, a new boundary rule) should arrive with a new
   vector that pins it.
 
 ## What the cover vector pins

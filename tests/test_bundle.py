@@ -270,7 +270,7 @@ def test_an_unreadable_manifest_is_unverifiable(db, tmp_path):
 
 def test_a_manifest_version_this_verifier_does_not_know_is_unverifiable(db, tmp_path):
     """The case where a confident "intact" is worst: a newer format read by older code,
-    which would check the fields it happens to recognise and ignore the rest."""
+    which would check the fields it happens to recognize and ignore the rest."""
     root = tmp_path / "bundle"
     manifest_path = _build(db, root)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -312,7 +312,7 @@ def test_an_audio_shaped_file_in_a_bundle_is_a_finding(db, tmp_path):
     assert any("evidence.wav" in f and "audio-shaped" in f for f in result.findings)
 
 
-def test_audio_is_recognised_by_its_bytes_as_well_as_its_name(tmp_path):
+def test_audio_is_recognized_by_its_bytes_as_well_as_its_name(tmp_path):
     """An extension is a claim the file makes about itself; the magic bytes are what it
     is. Renaming a WAV to `.csv` must not get it past this."""
     renamed = tmp_path / "definitely-not-audio.csv"

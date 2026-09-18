@@ -144,7 +144,7 @@ required context, so they gained teeth without adding a check name:
 
 - `scripts/check_nightly_macos.py` fails unless the nightly macOS sweep really ran on
   `main`, on runners the API labels `macos-*`, within seven days, and passed. The
-  runner-label assertion is the specific defence against a repeat: a sweep reporting
+  runner-label assertion is the specific defense against a repeat: a sweep reporting
   macOS results from an ubuntu runner is exactly what went wrong.
 - `scripts/check_ruleset.py --scope public` fails unless the live ruleset still matches
   this file. That check already existed and was correct; it ran nowhere, so a PR that

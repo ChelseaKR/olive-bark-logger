@@ -22,7 +22,7 @@ Deliberately *not* gated: `docs/PROJECT-SCOPE.md`'s "37 hand-authored doc or met
 files". Its own definition excludes "vendored provider licenses, dependency folders,
 generated cache files, and generated artifacts", which no mechanical rule in this repo
 reproduces, so any figure asserted here would be invented. It is left as the dated
-point-in-time count it is, and labelled as one in the document.
+point-in-time count it is, and labeled as one in the document.
 """
 
 from __future__ import annotations
@@ -330,7 +330,7 @@ DATE = re.compile(r"\b(20\d\d-\d\d-\d\d)\b")
 
 def test_the_gap_ledgers_stamp_is_not_older_than_its_own_content():
     """The ledger's own preamble says a stale entry should "fail a build rather than
-    ageing quietly". Its `Last verified` stamp said 2026-08-15 while entries below it
+    aging quietly". Its `Last verified` stamp said 2026-08-15 while entries below it
     recorded updates through 2026-08-27: three passes edited the file without moving it."""
     # Blockquotes are excluded for the same reason as everywhere else in this file: they
     # hold the record of a superseded claim, and a note *about* the stamp being late must

@@ -134,7 +134,7 @@ def test_macos_jobs_is_what_filters_an_ubuntu_runner_out(monkeypatch):
     kept = macos_jobs(1, "owner/repo")
     assert [job["name"] for job in kept] == [job["name"] for job in GOOD_JOBS]
     assert all("macos" in job["labels"][0] for job in kept)
-    assert len(kept) == MIN_MACOS_JOBS, "the ubuntu-labelled twins must not be counted"
+    assert len(kept) == MIN_MACOS_JOBS, "the ubuntu-labeled twins must not be counted"
 
 
 def test_a_shrunken_sweep_is_caught():

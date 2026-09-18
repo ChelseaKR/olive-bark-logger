@@ -1,7 +1,7 @@
 """Merge-blocking: no export path ships without its caveats, in either implementation.
 
 `report/violations.py` says the cover block is written into the CSV "so the caveat travels
-with the file". It travelled with one CSV. The event CSV had none, and the whole browser
+with the file". It traveled with one CSV. The event CSV had none, and the whole browser
 edition -- the zero-hardware route, no Raspberry Pi and no command line, the path with the
 lowest barrier to reaching for it -- had none at all: `pwa/report.js` exported a bare table
 of timestamps and
@@ -18,8 +18,8 @@ Two gates, and the second is the one that matters:
    The failure mode this avoids is the one that let the browser CSV drift: a gate that
    checks the paths someone remembered to name.
 
-**Discovery is by behaviour, not only by name (2026-08-29).** The enumeration gate above
-described itself as behaviour-proof and was not: it discovered Python export paths purely
+**Discovery is by behavior, not only by name (2026-08-29).** The enumeration gate above
+described itself as behavior-proof and was not: it discovered Python export paths purely
 from a name pattern (`*_to_csv`, `build_report`, `build_*_html`), and `render_status` in
 `report/status.py` matched none of them. `status.html` is an artifact a person is handed
 -- the README tells the operator to open it from disk -- it printed two quiet-hours counts,
@@ -93,17 +93,17 @@ COVER_HELPERS = {"cover_text_lines", "cover_html"}
 # unchecked:
 #
 #  * NAME -- the original pattern, kept verbatim. It is only ever added to.
-#  * BEHAVIOUR -- the function's own body builds a whole HTML document or writes a CSV.
+#  * BEHAVIOR -- the function's own body builds a whole HTML document or writes a CSV.
 #    Name-only discovery is what let `render_status` ship uncovered; a new export path
 #    can be called anything, but it cannot produce an artifact without building one.
 PY_EXPORT_PATTERN = re.compile(r"^(?!_)(.*_to_csv|build_report|build_.*_html)$")
 
-# The behavioural half. `<!DOCTYPE html` marks a complete document (a fragment helper such
+# The behavioral half. `<!DOCTYPE html` marks a complete document (a fragment helper such
 # as `cover_html` has none); `csv.writer` marks a CSV file being written.
 HTML_DOCUMENT_MARKER = re.compile(r"<!doctype html", re.IGNORECASE)
 
 # The browser twin. Same union: the name alternation is widened (strictly -- every name
-# the old pattern matched still matches), plus the same `<!DOCTYPE html` behaviour test.
+# the old pattern matched still matches), plus the same `<!DOCTYPE html` behavior test.
 JS_EXPORT_PATTERN = re.compile(r"^(.*[Cc]sv|(build|render).*Html)$")
 
 # The paths this file renders and asserts on below. Discovery must land on exactly these.
@@ -116,7 +116,7 @@ PY_CHECKED = {
     # The two ledgers `olive-bundle` writes into an evidence bundle. They are handed to a
     # person exactly like the exports above -- a recipient reads them to find out what was
     # running and what the levels mean -- so they carry the same cover block, and they are
-    # discovered here by the behavioural half of the pattern rather than by their names.
+    # discovered here by the behavioral half of the pattern rather than by their names.
     "write_sessions_csv",
     "write_calibration_csv",
 }
@@ -161,8 +161,8 @@ def _writes_a_csv(node: ast.FunctionDef) -> bool:
 def _is_python_export(node: ast.FunctionDef) -> bool:
     """A public function in report/ that hands a person a finished artifact.
 
-    Name OR behaviour: either signature alone is enough, so widening one never narrows
-    the set. Private helpers (`_`-prefixed) are excluded from the behavioural half the
+    Name OR behavior: either signature alone is enough, so widening one never narrows
+    the set. Private helpers (`_`-prefixed) are excluded from the behavioral half the
     same way the name pattern excludes them.
     """
     if PY_EXPORT_PATTERN.match(node.name):
@@ -182,7 +182,7 @@ def discover_python_exports(source: str) -> set[str]:
 
 
 def _is_js_export(name: str, body: str) -> bool:
-    """The browser twin of `_is_python_export`: name OR whole-document behaviour."""
+    """The browser twin of `_is_python_export`: name OR whole-document behavior."""
     return bool(JS_EXPORT_PATTERN.match(name)) or bool(HTML_DOCUMENT_MARKER.search(body))
 
 
@@ -645,7 +645,7 @@ def test_export_discovery_flags_a_path_whose_name_matches_nothing():
 
     `render_status` built a whole `status.html`, printed quiet-hours counts, and was
     invisible to name-only discovery. Both plants below are named so that
-    `PY_EXPORT_PATTERN` / the JS name pattern reject them; behaviour has to find them.
+    `PY_EXPORT_PATTERN` / the JS name pattern reject them; behavior has to find them.
     """
     named_py = "def paint_the_dashboard(data):\n    return '<!DOCTYPE html>\\n<html></html>'\n"
     assert not PY_EXPORT_PATTERN.match("paint_the_dashboard"), "plant must evade the name half"
@@ -661,7 +661,7 @@ def test_export_discovery_flags_a_path_whose_name_matches_nothing():
 
 
 def test_export_discovery_ignores_fragment_helpers_and_private_functions():
-    """The other half of the canary: behaviour must not flag everything that touches
+    """The other half of the canary: behavior must not flag everything that touches
     HTML, or the gate becomes noise someone widens `PY_CHECKED` to silence."""
     fragment = "def sidebar_html(x):\n    return '<section>' + x + '</section>'\n"
     assert discover_python_exports(fragment) == set()

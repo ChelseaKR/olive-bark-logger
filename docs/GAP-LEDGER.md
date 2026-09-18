@@ -11,7 +11,7 @@
 > An entry that describes a gap the code has since closed is as wrong as one that hides a
 > gap — gentler, but the same defect: a document about the code that stopped tracking the
 > code. `tests/test_gap_ledger.py` reads this file and the README against a small set of
-> code facts, so a stale entry fails a build rather than ageing quietly. Add an assertion
+> code facts, so a stale entry fails a build rather than aging quietly. Add an assertion
 > there whenever an entry here makes a claim a test could check.
 
 This is the durable, in-repo tracking mechanism the README's

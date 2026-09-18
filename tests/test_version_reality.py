@@ -213,7 +213,7 @@ def restatement_findings(root: Path, declared: str) -> list[str]:
     ]
 
 
-#: Scripts that stamp a version into a generated artefact. None may hard-code it.
+#: Scripts that stamp a version into a generated artifact. None may hard-code it.
 GENERATORS = ("scripts/demo_report.py", "scripts/demo_pdf.py")
 
 DECLARED = declared_version()
