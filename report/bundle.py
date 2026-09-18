@@ -58,7 +58,7 @@ from store.db import SCHEMA_VERSION
 from report.render import cover_text_lines
 from report.render import main as render_main
 
-#: The manifest format's own version. A verifier that does not recognise it must say
+#: The manifest format's own version. A verifier that does not recognize it must say
 #: "unverifiable" rather than reading the fields it happens to know: a future manifest
 #: read by an old verifier is exactly the case where a confident "intact" is worst.
 MANIFEST_VERSION = 1

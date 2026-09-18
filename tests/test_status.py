@@ -313,7 +313,7 @@ def test_status_page_can_be_enabled_without_health_file(tmp_path):
 # two quiet-hours rows and, until 2026-08-29, carried neither. It was invisible to
 # `tests/test_export_caveats.py` because that gate discovered export paths by name and
 # `render_status` matched none of its alternatives. That gate now discovers by
-# behaviour and holds this page; these are the local, readable twin of that check.
+# behavior and holds this page; these are the local, readable twin of that check.
 
 
 def test_status_page_leads_with_the_cover_block():

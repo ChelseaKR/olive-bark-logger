@@ -38,7 +38,7 @@ Enforced by merge-blocking tests, not just promised:
   *and* the browser edition. The gate discovers export paths from source **by what they
   build** — a whole HTML document, or a CSV — not by what they are called, so a new one
   cannot ship without them. It used to discover them by name, and the status page slipped
-  through that way and shipped uncovered; the behavioural half exists because the
+  through that way and shipped uncovered; the behavioral half exists because the
   name-matching half missed a real artifact for as long as that artifact existed.
 
 Agent-facing build instructions live in [`CLAUDE.md`](./CLAUDE.md).

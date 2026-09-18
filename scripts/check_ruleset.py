@@ -85,7 +85,7 @@ def run_gh(args: list[str]) -> Any:
     """Call `gh api` and parse JSON, or raise CannotVerify with the reason.
 
     Public because `check_nightly_macos.py` needs the same "an unreadable answer is
-    never a passing one" behaviour, and two copies of it would be two things to keep
+    never a passing one" behavior, and two copies of it would be two things to keep
     honest.
     """
     try:

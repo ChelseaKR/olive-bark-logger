@@ -140,7 +140,7 @@ export function gapPreambleLines(gaps) {
   let seconds = 0;
   for (const g of gaps) seconds += Math.max(0, (g.end || 0) - (g.start || 0));
   const lines = [
-    `Monitoring gaps: ${gaps.length} recorded, totalling ${Math.round(seconds)}s, during ` +
+    `Monitoring gaps: ${gaps.length} recorded, totaling ${Math.round(seconds)}s, during ` +
       "which no event could be detected. These periods are absences of data, not silence: " +
       "the absence of an event in them is not evidence that no sound occurred.",
     "",
@@ -545,7 +545,7 @@ export function erasedWindowLines(records) {
  * The gap record an erasure leaves behind, given a window and the operator's reason.
  *
  * Built here rather than in pwa/app.js so the one place that decides what an erasure looks
- * like is the same file that decides how one is read back. `note` is normalised to a
+ * like is the same file that decides how one is read back. `note` is normalized to a
  * string and never invented: an empty reason stays empty and is rendered as
  * `NO_REASON_GIVEN` at the point of display, not stored as it.
  */
@@ -716,7 +716,7 @@ function table(caption, headers, rows) {
       if (row.length !== headers.length) {
         throw new Error(
           `table("${caption}"): a row has ${row.length} cells and the header has ` +
-            `${headers.length}. A column would be dropped or left unlabelled.`,
+            `${headers.length}. A column would be dropped or left unlabeled.`,
         );
       }
       const [first, ...rest] = row;
@@ -771,7 +771,7 @@ function heatTable(byDayHour, unmonitored = new Set()) {
         // (see tests/test_svg_contrast.py for the exact ratios on the shared ramp).
         return `<td style="background:${bg};text-align:center" title="${label} — ${v} events"><span style="background:#fff;color:#111;padding:0 3px;border-radius:2px">${v}</span></td>`;
       }).join("");
-      // The count of unmonitored hours is a real column, not only a colour: a reader who
+      // The count of unmonitored hours is a real column, not only a color: a reader who
       // cannot see the hatch still gets the number, and it is the figure that says how
       // much of the day the row's total was taken over.
       return `<tr><th scope="row">${esc(d)}</th>${cells}<td>${rowTotal}</td><td>${unmonHours}</td></tr>`;
@@ -799,7 +799,7 @@ export function buildReportHtml(summary, { generatedAt, tz = "UTC", startHour = 
   ]);
   const erasedCount = (summary.erasedLines || []).length;
   const gapsSection = gapRows.length
-    ? `<h2>Monitoring gaps</h2><p>During ${summary.gapCount} gap(s), totalling ${Math.round(summary.gapSeconds)}s, no events could be detected. These periods are absences of data, not silence. The browser cannot monitor while the tab is backgrounded or the device is locked; ${erasedCount ? `${erasedCount} of these were erased by the operator instead, and are listed again below with the reason given` : "none of these were erased by the operator"}.</p>${table("Monitoring gaps (no data collected)", ["Gap start", "Gap end", "Why"], gapRows)}`
+    ? `<h2>Monitoring gaps</h2><p>During ${summary.gapCount} gap(s), totaling ${Math.round(summary.gapSeconds)}s, no events could be detected. These periods are absences of data, not silence. The browser cannot monitor while the tab is backgrounded or the device is locked; ${erasedCount ? `${erasedCount} of these were erased by the operator instead, and are listed again below with the reason given` : "none of these were erased by the operator"}.</p>${table("Monitoring gaps (no data collected)", ["Gap start", "Gap end", "Why"], gapRows)}`
     : "";
   // Omitted rather than rendered empty, on the same rule report/render.py's `_erased_html`
   // follows: a report from a log nobody erased anything from should read as it always did,

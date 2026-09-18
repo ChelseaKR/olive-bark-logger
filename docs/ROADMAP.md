@@ -97,7 +97,7 @@ Migrated with the section above, on the same terms: the numbered files under
 | [0019](./adr/0019-detection-parameter-provenance.md) | Each session records the detection parameters its events were logged under (schema v3), and the report renders parameter epochs when they changed (FIX-02) |
 | [0020](./adr/0020-unattended-ops.md) | Reconnecting `resilient_source`, an atomically-written file heartbeat, and a `systemd` unit hardened with `PrivateNetwork` / `ProtectSystem` |
 | [0021](./adr/0021-time-driven-heartbeat-and-crash-safe-counters.md) | Heartbeat and frame counters flushed on a `checkpoint_interval_s` cadence, with no timer thread and no socket (FIX-04; rejected: an `sd_notify` socket watchdog) |
-| [0022](./adr/0022-runtime-egress-proof.md) | A test booby-traps `socket` and runs the full pipeline and report, so no-egress is proved as behaviour and not only by a static import scan |
+| [0022](./adr/0022-runtime-egress-proof.md) | A test booby-traps `socket` and runs the full pipeline and report, so no-egress is proved as behavior and not only by a static import scan |
 | [0023](./adr/0023-local-automation-hooks-over-af-unix.md) | Opt-in, emit-only heartbeat and event feed to a local `AF_UNIX` datagram socket, confined to `monitor/ipc.py` (EXP-11; rejected: an INET/localhost port) |
 | [0024](./adr/0024-opt-in-coarse-event-tagging.md) | Coarse bark-like/ambient tagging from an in-memory zero-crossing-rate feature, opt-in and surfaced as a hedged hint; no audio stored |
 | [0025](./adr/0025-bounded-per-event-envelope-stats.md) | Three seconds-valued envelope descriptors per event as O(1) running counters, carried through to SQLite v7 and the exports (EXP-02) |

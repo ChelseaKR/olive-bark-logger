@@ -332,7 +332,7 @@ def _drift_html(check: DriftCheck, *, recorded: int) -> str:
         '<p class="note">The ambient baseline has moved since the device was '
         "calibrated, so a level today may not mean what the same level meant then. "
         "This is a prompt to re-check the microphone, not a measurement of the "
-        f"neighbour.</p>\n<ul><li>{escape(describe_drift_advisory(check.advisory))}</li>"
+        f"neighbor.</p>\n<ul><li>{escape(describe_drift_advisory(check.advisory))}</li>"
         f"</ul>{history}"
     )
 

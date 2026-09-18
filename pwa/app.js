@@ -180,10 +180,10 @@ async function start() {
   gapStart = 0;
   await openSession(toEpochSeconds(audioCtx.currentTime, anchor));
   const src = audioCtx.createMediaStreamSource(stream);
-  const analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 2048;
-  src.connect(analyser);
-  const buf = new Float32Array(analyser.fftSize); // reused buffer; audio never kept
+  const analyzer = audioCtx.createAnalyser();
+  analyzer.fftSize = 2048;
+  src.connect(analyzer);
+  const buf = new Float32Array(analyzer.fftSize); // reused buffer; audio never kept
   detector = new Detector(c.threshold, c.minDuration, c.debounce);
 
   $("start").disabled = true;
@@ -192,7 +192,7 @@ async function start() {
   document.addEventListener("visibilitychange", onVisibilityChange);
 
   const tick = async () => {
-    analyser.getFloatTimeDomainData(buf);
+    analyzer.getFloatTimeDomainData(buf);
     const t = toEpochSeconds(audioCtx.currentTime, anchor);
     const level = dbfs(buf);
     $("meter").value = Math.max(0, Math.min(100, ((level + 60) / 60) * 100));

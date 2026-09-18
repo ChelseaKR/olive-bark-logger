@@ -21,7 +21,7 @@ Two scanners, matching those two shapes:
    Inline code spans are removed first (`md_link_targets`), because Markdown renders no
    link inside backticks and this scanner read one there: a changelog entry quoting a
    regex was told to add the file it "linked" to. Removing the span rather than skipping
-   the whole line keeps the target of a code-labelled link -- the house style here --
+   the whole line keeps the target of a code-labeled link -- the house style here --
    checked.
 2. **Bare in-repo paths.** Every `path/to/file.ext` mentioned in tracked Markdown, YAML,
    Python, or the Makefile resolves. This is the half that catches a stale citation in a

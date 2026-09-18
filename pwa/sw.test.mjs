@@ -56,7 +56,7 @@ function loadWorker(source, { failing = [] } = {}) {
       store.set(url, await fetchOne(url));
     },
     async addAll(urls) {
-      // Spec behaviour: every response is resolved before anything is written, and a
+      // Spec behavior: every response is resolved before anything is written, and a
       // single rejection discards the lot.
       const bodies = await Promise.all(urls.map(fetchOne));
       urls.forEach((url, i) => store.set(url, bodies[i]));
@@ -138,7 +138,7 @@ test("an incomplete precache fails the install rather than activating quietly", 
 
 test("the addAll install this replaced stored nothing on a single failure", async () => {
   // Canary. Same harness, same one failing asset, previous implementation: everything
-  // rolls back. Without this, the test above only describes the new behaviour instead of
+  // rolls back. Without this, the test above only describes the new behavior instead of
   // showing what it fixed — and a gate that cannot show its own defect is not a gate.
   const worker = loadWorker(ADD_ALL_INSTALL, { failing: ["./report.js"] });
   await assert.rejects(install(worker));
