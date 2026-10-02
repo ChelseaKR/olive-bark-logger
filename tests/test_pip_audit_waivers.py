@@ -1,10 +1,13 @@
 """Every pip-audit waiver covers the 3.9 branch of the lock and nothing else.
 
-`make security` runs pip-audit against the *installed environment*. `.python-version` is
-3.9, so a developer's `.venv` resolves the `python_full_version < '3.10'` branch of
-`uv.lock` — and on that branch several dev-toolchain packages sit below their first fixed
+`make security` runs pip-audit against the *installed environment*. A venv built on the
+3.9 floor resolves the `python_full_version < '3.10'` branch of `uv.lock` — and on that
+branch several dev-toolchain packages sit below their first fixed
 version, because every fix so far requires Python >=3.10 and this repository's floor is 3.9
-(ADR-0002 / CQ-01). Twelve advisories are waived for that reason.
+(ADR-0002 / CQ-01). Twelve advisories are waived for that reason. Since 2026-10-01 the
+default dev venv is 3.12 (`.python-version`, ADR-0031), so on it the waivers match nothing;
+they apply to a venv deliberately built on 3.9, and the floor itself is exercised by CI's
+required 3.9 test-matrix job rather than by the local venv.
 
 The waiver comment in the `Makefile` carries the sentence the whole arrangement rests on:
 
@@ -43,8 +46,9 @@ ROOT = Path(__file__).resolve().parent.parent
 MAKEFILE = ROOT / "Makefile"
 LOCKFILE = ROOT / "uv.lock"
 
-#: The floor this repository supports, and therefore the resolution branch a default
-#: `make dev` venv installs. `.python-version` holds the same number.
+#: The floor this repository supports (`requires-python`), and therefore the resolution
+#: branch a venv built on that floor installs. `.python-version` is the dev interpreter
+#: (3.12 since ADR-0031), not the floor.
 FLOOR_BRANCH = "python_full_version < '3.10'"
 
 #: advisory id -> (package, first fixed version). Fixed versions are pip-audit's own
@@ -158,8 +162,18 @@ def test_the_lock_reader_still_finds_both_resolution_branches() -> None:
         "the two urllib3 resolutions are the same version; this test would then be comparing "
         "one number with itself"
     )
-    # Whatever the lock says, the floor it is read against is the one the repo declares.
-    assert (ROOT / ".python-version").read_text(encoding="utf-8").strip().startswith("3.9")
+    # Whatever the lock says, the floor it is read against is the one the package declares.
+    # That is `requires-python`, not `.python-version`, which names the dev interpreter
+    # (3.12 since ADR-0031) and is deliberately not the floor.
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert re.search(r'^requires-python = ">=3\.9"$', pyproject, re.MULTILINE), (
+        "requires-python is no longer >=3.9; FLOOR_BRANCH and the waiver registry assume it is"
+    )
+    dev = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
+    assert not dev.startswith("3.9"), (
+        f".python-version is {dev}: the dev venv is back on the floor, so ADR-0031's split "
+        "and the 'inert on the default venv' claim in the Makefile no longer hold"
+    )
 
 
 @pytest.mark.parametrize(
