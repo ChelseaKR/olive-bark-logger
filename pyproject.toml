@@ -51,8 +51,10 @@ pdf = [
 [dependency-groups]
 # PEP 735 dependency group (CQ-27): dev-only tooling, not a runtime extra.
 # `mypy<2` is a real floor, not decoration: mypy 2.x dropped support for a
-# Python 3.9 host interpreter (this repo's own venv target), so `mypy>=2`
-# cannot be installed into `.venv` here — verified locally 2026-07-05.
+# Python 3.9 host interpreter, so `mypy>=2` cannot be installed into a venv built
+# on the 3.9 floor — verified locally 2026-07-05. The local dev venv is 3.12 since
+# 2026-10-01 (docs/adr/0031), but CI's required 3.9 test-matrix job installs this
+# same group on 3.9, so the cap stays.
 dev = [
     "pytest>=8",
     "pytest-cov>=5",

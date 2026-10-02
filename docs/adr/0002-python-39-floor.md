@@ -55,3 +55,10 @@ weigh into that decision sooner rather than later.
 - **Revisit trigger:** either (1) the maintainer decides to reimage/upgrade the Pi
   target, making option (a) free, or (2) the dev-toolchain CVE list grows large enough
   that the waiver-maintenance cost exceeds the shim-deletion cost of option (a).
+
+## Amendment, 2026-10-01
+The decision above is unchanged: `requires-python` stays `>=3.9` for the Pi. What moved
+is the *development* interpreter: `.python-version` is now 3.12, so the twelve dev-toolchain
+waivers are inert on a default `make dev` venv, and the 3.9 floor is exercised by CI's
+required 3.9 test-matrix job rather than by the local venv. See
+[ADR-0031](./0031-dev-interpreter-312-runtime-floor-39.md).

@@ -750,6 +750,17 @@ release" defect this file's absence let stand.
   advisories published; this is the whole of that failure.
 
 ### Changed
+- **The local dev venv is Python 3.12; the 3.9 runtime floor is now held by CI alone**
+  ([ADR-0031](docs/adr/0031-dev-interpreter-312-runtime-floor-39.md)). `.python-version`
+  moves from 3.9 to 3.12, matching CI's `verify` job, so `make security` audits the same
+  `>=3.10` branch of `uv.lock` that CI does. That is what lets urllib3 2.8.0
+  (PYSEC-2026-4175, PYSEC-2026-4176, PYSEC-2026-4177) be fixed rather than waived: no fixed
+  urllib3 installs on 3.9. `requires-python` stays `>=3.9`, and the Pi install path and
+  ADR-0002's decision are unchanged. The 3.9 floor is exercised by the required
+  `test-matrix (ubuntu-latest, 3.9)` job, not by a local `make verify`. The twelve existing
+  `PIP_AUDIT_WAIVERS` stay, inert on the default venv and still applicable to a venv built
+  with `--python 3.9`; `tests/test_pip_audit_waivers.py` now reads the floor from
+  `requires-python` instead of from `.python-version`.
 - **The coverage sentence has one definition, and the generator that publishes it is
   now checked against what it published.** The claim both editions make -- *"the device
   monitored X of Y wall-clock hours (Z%); the remaining N hours are shown as not

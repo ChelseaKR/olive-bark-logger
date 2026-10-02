@@ -93,6 +93,15 @@ cov:
 # hand the same day with the dry-run command above: no fix for filelock, msgpack, pip,
 # pytest, requests, setuptools or urllib3 is installable on 3.9 -- every one of the seven is
 # unsatisfiable because the fix depends on Python>=3.10.
+#
+# 2026-10-01: the dev venv no longer targets 3.9 (docs/adr/0031). `.python-version` is
+# 3.12, so a default `make dev` venv resolves the >=3.10 branch of uv.lock, the same one CI
+# audits, and every id below matches nothing there: on the default venv these waivers are
+# inert and `make security` is fixed, not waived. They still apply to a venv deliberately
+# built on the 3.9 floor (`uv sync --locked --group dev --python 3.9`), which is why they
+# stay. The floor itself (requires-python >=3.9) is exercised by CI's required 3.9
+# test-matrix job, not by the local venv. Wherever the text above says "this repo's dev
+# venv" or "the 3.9 venv", read "a venv built on the 3.9 floor".
 PIP_AUDIT_WAIVERS := \
 	--ignore-vuln PYSEC-2026-3721 \
 	--ignore-vuln PYSEC-2026-3447 \
