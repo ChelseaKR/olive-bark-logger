@@ -1,6 +1,6 @@
 # Gap Ledger
 
-**Last verified: 2026-09-06 · Recheck cadence: every remediation pass (see `docs/audits/`).**
+**Last verified: 2026-10-17 · Recheck cadence: every remediation pass (see `docs/audits/`).**
 
 > The stamp above read `2026-08-15` until 2026-08-29, while entries below carried updates
 > dated 2026-08-21, 2026-08-26 and 2026-08-27 — three remediation passes edited this file
@@ -318,15 +318,37 @@ Still open, unchanged:
 Plan: REMEDIATION.md P1-7, P2-2.
 
 ## GAP-REL-1 — Release & Versioning: the release/supply-chain pipeline is still absent
-**Status: Partially open (2026-07-10).** Controls: REL-08, REL-13 (closed this pass),
+**Status: Partially open (updated 2026-10-17).** Controls: REL-08, REL-13 (closed this pass),
 REL-14 (closed this pass), REL-15, REL-16, REL-18 (digest pin + HEALTHCHECK closed
 2026-07-05; GHCR publish still open), REL-20.
 `.github/workflows/release.yml` now exists (STANDARDS conformance remediation
-2026-07-10): tag-triggered on `v*`, re-runs `make verify` at the tagged commit, builds
-sdist + wheel, generates a CycloneDX SBOM, attests build provenance via GitHub's native
-keyless OIDC attestation, and publishes a GitHub Release with the matching CHANGELOG
-section — all using only built-in `GITHUB_TOKEN`/OIDC, no external credentials. It has
-never fired (no `v*` tag exists yet).
+2026-07-10). It is **not** triggered by a tag push: the maintainer dispatches it by hand
+(`workflow_dispatch`) with the name of a tag that already exists. A shared authorizer
+(`ChelseaKR/.github`'s `release-authorize.yml`, pinned to a commit SHA) runs from `main`
+and refuses anything but a stable `vX.Y.Z` that is an annotated tag object, signed by a
+key in `.github/allowed_signers`, on a commit reachable from `main`. Only then does the
+workflow re-run `make verify` at the tagged commit, assert the tag equals
+`pyproject.toml`'s version, build sdist + wheel, generate a CycloneDX SBOM, attest build
+provenance via GitHub's native keyless OIDC attestation, and publish a GitHub Release with
+the matching CHANGELOG section — all using only built-in `GITHUB_TOKEN`/OIDC, no external
+credentials. It has never fired (no `v*` tag exists yet).
+
+**2026-10-17: `0.1.0` is prepared, not released.** `pyproject.toml` declares `0.1.0`,
+`CHANGELOG.md` has its dated `## [0.1.0]` section, and `CITATION.cff` carries the matching
+`version` and `date-released`. `tests/test_version_reality.py` accepts that untagged state
+only while those three and the README agree and no other dated heading lacks a tag.
+Cutting the release still needs the maintainer's signed, annotated `v0.1.0` tag on `main`
+and a dispatch of `release.yml` against it; no automation in this repository may do
+either. The DoD release checklist's re-dating of `docs/audits/residual-risk.md` and
+`docs/RESPONSIBLE-TECH-AUDITS.md` §F has **not** been done: both still need the
+maintainer's review against the current tree.
+
+> Until 2026-10-17 this entry said the workflow was "tag-triggered on `v*`", and the
+> README's Release & Versioning row said the same. That was true from its first commit
+> (`cc701cd`, 2026-07-12) until `3137e34` (#36, 2026-08-04) replaced the `push: tags`
+> trigger with the dispatch-plus-signed-tag flow above, and both sentences went on
+> describing the old trigger for ten weeks. Pushing a tag starts nothing.
+
 Still open, and still an explicit **L-effort, multi-day, externally-visible-action**
 item not attempted in this pass: PyPI trusted-publisher configuration, a GHCR/registry
 publish decision, and cosign key-based signing (provisioning/protecting a long-lived
