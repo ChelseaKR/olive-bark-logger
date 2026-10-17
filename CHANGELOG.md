@@ -170,6 +170,17 @@ release" defect this file's absence let stand.
   sentences that are the claim itself are pinned in both directions.
 
 ### Fixed
+- **The README and the gap ledger described a release trigger that was removed ten weeks
+  earlier.** The README's Release & Versioning row and GAP-REL-1 both called
+  `.github/workflows/release.yml` "tag-triggered on `v*`". It was, from `cc701cd`
+  (2026-07-12) until `3137e34` (#36, 2026-08-04), which replaced the `push: tags` trigger
+  with `workflow_dispatch`: the maintainer runs the workflow by hand, naming a tag that
+  already exists, and a shared authorizer refuses it unless the tag is a stable `vX.Y.Z`
+  annotated tag signed by a key in `.github/allowed_signers` on a commit reachable from
+  `main`. Both now describe that flow. The difference matters at release time: under the
+  old wording, pushing `v0.1.0` would have been expected to publish something, and it
+  starts nothing.
+
 - **The file that lists the two ports' deliberate divergences was missing two of them, and
   one of them moves a number.** `spec/SEMANTICS.md` has an "Intentional Python ↔ PWA
   differences" section precisely so a divergence is a decision rather than a thing that
@@ -1006,6 +1017,9 @@ release" defect this file's absence let stand.
   `CHANGELOG.md` section as notes. Prepared ahead of the first tag — see the workflow
   file's header for what's deliberately still out of scope (PyPI, GHCR, cosign) and
   `docs/GAP-LEDGER.md#gap-rel-1` for the remaining release-pipeline gap.
+  *Superseded 2026-08-04 (#36):* the workflow no longer runs on a tag push. It is
+  dispatched by hand against an existing signed annotated tag; see the "Release
+  authorization" entry under `### Fixed` above and `docs/GAP-LEDGER.md#gap-rel-1`.
 - **EXP-06: optional tagged PDF/A-3a export** (`report/pdf_export.py`,
   `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md`). New `pdf` extra
   (`weasyprint>=67,<70`, needs Python >=3.10); new `--pdf` / `--violations-pdf` CLI
