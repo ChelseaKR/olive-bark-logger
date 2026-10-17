@@ -2,19 +2,26 @@
 
 All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project uses
-[SemVer](https://semver.org/) once it makes its first tagged release.
+[SemVer](https://semver.org/) from its first tagged release.
 
-**No version of this project has been tagged or released yet.** `pyproject.toml` and
-`monitor/__init__.py` (via `importlib.metadata`) carry an in-development version number
-(`0.1.0.dev0`) — that is a development milestone, not a release claim, and the PEP 440
-`.dev0` suffix says so in a form a tool reads rather than only a reader. Everything below lives
-under `[Unreleased]` until a `git tag` actually exists; see `docs/GAP-LEDGER.md#gap-rel-1`
-for the release-pipeline gap and `CITATION.cff` for the corrected (un-dated) citation
-metadata. Do not add a dated `## [0.1.0] - YYYY-MM-DD` heading here until `v0.1.0` (or
-whatever version supersedes it) is actually tagged — that was the exact "phantom
-release" defect this file's absence let stand.
+**Release stance.** `pyproject.toml` and `monitor/__init__.py` (via `importlib.metadata`)
+declare version (`0.1.0`), and the dated `## [0.1.0]` section below is the first release
+this project has prepared. A dated heading here is written in the commit that gets tagged,
+so it records what that tag will carry, not that it exists: a version is released only once
+its signed, annotated `v0.1.0` tag is pushed and `.github/workflows/release.yml`,
+dispatched against it, has published a GitHub Release whose notes are that section
+verbatim. Check the
+repository's tags and Releases page for that, not this file. Until this section was cut,
+the version carried a PEP 440 `.dev0` suffix and everything below sat under
+`[Unreleased]`. `tests/test_version_reality.py` holds this heading, `pyproject.toml`,
+`CITATION.cff` and the README to one version and one date, refuses a dated heading for any
+version that is neither tagged nor the one being prepared, and, once the tag exists, holds
+the date to the day the tag records. That is the "phantom release" defect GAP-REL-1
+records: `CITATION.cff` once named a release date for a release that never happened.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-10-17
 
 ### Added
 - **The pip-audit waiver list is now held to `uv.lock` instead of to a sentence.** Twelve
@@ -168,6 +175,31 @@ release" defect this file's absence let stand.
   Python wording names `olive-forget` and "the device", and copying it into a browser tab
   would make the disclosure a false statement about how the erasure happened. The two
   sentences that are the claim itself are pinned in both directions.
+
+### Changed
+- **`0.1.0` is prepared for release; it is not released.** `pyproject.toml` (and `uv.lock`'s
+  record of the project) drops the `.dev0` suffix, because `release.yml` refuses a tag that
+  does not equal the declared version exactly (REL-14). Everything that sat under
+  `[Unreleased]` moves into this dated section, which `release.yml` extracts verbatim as the
+  GitHub Release notes (REL-10), and an empty `[Unreleased]` stays above it for what comes
+  next. `CITATION.cff` moves to `version: "0.1.0"` and gains a `date-released` equal to
+  this heading's date, and the README's supported-versions line and Release & Versioning row now
+  say a version counts as released only once its signed tag and GitHub Release exist.
+
+  `tests/test_version_reality.py` had two allowed states, *no tags and a `.devN` version*
+  and *a tag equal to the version*, and the commit that gets tagged is necessarily in
+  neither: it is written, reviewed and merged before the tag can point at it. It gains the
+  third, *prepared*, and holds it narrowly. A bare version with no tag is accepted only
+  beside exactly one `## [X.Y.Z] - YYYY-MM-DD` heading for it, written at column 0 where
+  `release.yml`'s `awk` finds it, a `CITATION.cff` carrying the same version and the same
+  date, a README that names the version, and none of the "nothing has been released"
+  sentences left standing. A dated heading for any version that is neither tagged nor the
+  one being prepared is a finding, so the phantom-release defect cannot come back under a
+  different number. Once the tag exists, the heading's date must equal the day the
+  annotated tag records, and the failure names both dates. A sabotaged copy of each
+  document shows every one of those checks failing. What the tree cannot see is time: a
+  release that is prepared and then never tagged stays green, and is visible only as
+  GAP-REL-1's "no tag cut yet" and the absence of a GitHub Release.
 
 ### Fixed
 - **The README and the gap ledger described a release trigger that was removed ten weeks

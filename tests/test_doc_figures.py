@@ -349,20 +349,30 @@ def test_the_gap_ledgers_stamp_is_not_older_than_its_own_content():
 
 
 def test_no_document_implies_a_release_exists_while_none_does():
-    """`CITATION.cff`'s own in-file note makes `date-released` the marker: "Add
-    `date-released` back only once a version is actually tagged." While it is absent, the
-    README's supported-versions line may state a policy but must not read as a claim that
-    a release stream exists -- the "phantom release" defect `CHANGELOG.md` was written to
-    prevent, and which the README's `only the latest 0.y release receives fixes` reprised.
+    """While `CITATION.cff` has no `date-released`, the README's supported-versions line
+    may state a policy but must not read as a claim that a release stream exists -- the
+    "phantom release" defect `CHANGELOG.md` was written to prevent, and which the README's
+    `only the latest 0.y release receives fixes` reprised.
+
+    `date-released` used to be the marker that a release exists. It no longer is: it is
+    written in the commit that gets tagged, so it first appears *before* the tag does
+    (`tests/test_version_reality.py` holds it to the CHANGELOG heading, and to the tag's
+    own date once there is one). With it present, the line must still say that a version
+    counts as released only once its tag exists, rather than assert that one does.
     """
     citation = _text(ROOT / "CITATION.cff")
-    if re.search(r"^date-released:", citation, re.MULTILINE):
-        return  # a release exists; the present-tense policy is fair
     line = next(
         (ln for ln in _claims(ROOT / "README.md").splitlines() if "Supported versions" in ln),
         None,
     )
     assert line, "README no longer states a supported-versions policy"
+    if re.search(r"^date-released:", citation, re.MULTILINE):
+        assert "released only once" in line.lower(), (
+            "CITATION.cff carries date-released, which a prepared-but-untagged release has "
+            "too, but the README's supported-versions line does not say a version counts as "
+            f"released only once its tag exists: {line.strip()}"
+        )
+        return
     assert "no version has been tagged" in line.lower(), (
         "no `v*` release exists (CITATION.cff has no date-released) but the README's "
         f"supported-versions line does not say so: {line.strip()}"

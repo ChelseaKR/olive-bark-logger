@@ -333,6 +333,16 @@ provenance via GitHub's native keyless OIDC attestation, and publish a GitHub Re
 the matching CHANGELOG section — all using only built-in `GITHUB_TOKEN`/OIDC, no external
 credentials. It has never fired (no `v*` tag exists yet).
 
+**2026-10-17: `0.1.0` is prepared, not released.** `pyproject.toml` declares `0.1.0`,
+`CHANGELOG.md` has its dated `## [0.1.0]` section, and `CITATION.cff` carries the matching
+`version` and `date-released`. `tests/test_version_reality.py` accepts that untagged state
+only while those three and the README agree and no other dated heading lacks a tag.
+Cutting the release still needs the maintainer's signed, annotated `v0.1.0` tag on `main`
+and a dispatch of `release.yml` against it; no automation in this repository may do
+either. The DoD release checklist's re-dating of `docs/audits/residual-risk.md` and
+`docs/RESPONSIBLE-TECH-AUDITS.md` §F has **not** been done: both still need the
+maintainer's review against the current tree.
+
 > Until 2026-10-17 this entry said the workflow was "tag-triggered on `v*`", and the
 > README's Release & Versioning row said the same. That was true from its first commit
 > (`cc701cd`, 2026-07-12) until `3137e34` (#36, 2026-08-04) replaced the `push: tags`

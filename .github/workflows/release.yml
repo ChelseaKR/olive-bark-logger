@@ -17,10 +17,10 @@ name: release
 #   - cosign key-based signing (would require provisioning/protecting a
 #     long-lived signing key; native attestation below needs no key at all)
 #
-# NOT YET USED: no `v*` tag exists in this repo yet (CHANGELOG.md's own header:
-# "No version of this project has been tagged or released yet"). This workflow
-# is prepared ahead of the first tag so cutting `v0.1.0` doesn't also require
-# writing a release pipeline from scratch under time pressure.
+# NOT YET USED: no `v*` tag exists in this repo yet. `0.1.0` is prepared
+# (pyproject.toml, CHANGELOG.md's dated section, CITATION.cff) but not released;
+# this workflow first runs when the maintainer dispatches it against the signed
+# `v0.1.0` tag. It is not triggered by pushing a tag.
 
 on:
   workflow_dispatch:
