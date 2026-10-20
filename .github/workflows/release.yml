@@ -68,14 +68,27 @@ jobs:
         with:
           version: "0.11.28"
           enable-cache: false
-      # This action has no input to disable its own Node-distribution tool-cache
-      # (unlike ci.yml's other caches); zizmor itself notes Low confidence for
-      # this instance — this job only runs the verify gate, it builds/publishes
-      # nothing, so there's no cached artifact for a poisoned cache to ride into.
-      - name: Set up Node (for the pa11y/axe a11y and pwa-test targets in `make verify`)
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4  # zizmor: ignore[cache-poisoning] no per-action toggle for the Node tool-cache; low-confidence finding
-        with:
-          node-version: "20"
+      # Node is installed from its pinned release archive, not with actions/setup-node. That
+      # action has no input to turn off its own Node tool-cache, and CodeQL's
+      # actions/cache-poisoning/poisonable-step rule reports any later step in a job that
+      # checks out the commit a dispatch input resolved to, which is what `make verify` is
+      # here. No cache is read or written in this job, so there is nothing for a poisoned
+      # commit to ride into. Same shape as the gitleaks step below: fixed version, checksum
+      # checked before extraction (published in SHASUMS256.txt for v20.20.2 on nodejs.org).
+      - name: Install Node (for the pa11y/axe a11y and pwa-test targets in `make verify`)
+        env:
+          NODE_VERSION: "20.20.2"
+          NODE_SHA256: "19e56f0825510207dd904f087fe52faa0a4eb6b2aab5f0ea7a33830d04888b8b"
+        run: |
+          archive="node-v${NODE_VERSION}-linux-x64.tar.gz"
+          curl -sSfL -o "${RUNNER_TEMP}/${archive}" \
+            "https://nodejs.org/dist/v${NODE_VERSION}/${archive}"
+          echo "${NODE_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          mkdir "${RUNNER_TEMP}/node"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/node" --strip-components=1
+          echo "${RUNNER_TEMP}/node/bin" >> "${GITHUB_PATH}"
+      - name: Show Node version
+        run: node --version
       - name: Install gitleaks (pinned, matches .pre-commit-config.yaml)
         run: |
           GL=8.21.2
