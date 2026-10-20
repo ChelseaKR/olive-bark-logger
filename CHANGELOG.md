@@ -21,6 +21,16 @@ records: `CITATION.cff` once named a release date for a release that never happe
 
 ## [Unreleased]
 
+### Changed
+- **The Python floor is now 3.10** (ADR-0032, superseding ADR-0002). `requires-python` is
+  `>=3.10`, ruff targets `py310`, the CI test matrix and the nightly macOS sweep drop their
+  3.9 legs, and `uv.lock` loses its `python_full_version < '3.10'` branch. That branch is
+  what held 14 open Dependabot alerts (urllib3, msgpack, pip, filelock, pytest, requests):
+  the `>=3.10` resolution already carried the patched versions. The twelve
+  `PIP_AUDIT_WAIVERS` entries are deleted and `tests/test_pip_audit_waivers.py` now fails if
+  one returns. `.github/rulesets/main.json` no longer requires
+  `test-matrix (ubuntu-latest, 3.9)`; the live ruleset has to match.
+
 ## [0.1.0] - 2026-10-17
 
 ### Added

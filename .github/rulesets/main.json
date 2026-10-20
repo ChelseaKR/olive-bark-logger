@@ -36,9 +36,6 @@
             "context": "verify"
           },
           {
-            "context": "test-matrix (ubuntu-latest, 3.9)"
-          },
-          {
             "context": "test-matrix (ubuntu-latest, 3.10)"
           },
           {

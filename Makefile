@@ -63,58 +63,13 @@ test:
 cov:
 	$(PY) -m pytest --cov --cov-report=term-missing --cov-fail-under=85
 
-# Dated waiver (2026-07-05, recheck per SEC-40 cadence in docs/RESPONSIBLE-TECH-AUDITS.md
-# §F): these CVEs are in pip-audit's own dev-toolchain dependencies (filelock/msgpack
-# via CacheControl, pip, pytest, requests, urllib3) — never shipped in the runtime,
-# which has zero dependencies (pyproject.toml). Every fix version requires Python
-# >=3.10 (verified 2026-07-05 against the live index); this repo's dev venv targets
-# the documented >=3.9 floor (pyproject.toml, CQ-01), so no fix is installable here
-# yet. Re-audit when P1-5's Python-floor decision resolves, or drop entries as fixes
-# ship for 3.9. Harmless no-op on hosts (e.g. CI's Python 3.12) where these IDs don't
-# occur.
-#
-# 2026-08-21 additions, same shape: PYSEC-2026-3721 (pip <26.2) and PYSEC-2026-3447
-# (setuptools <83.0.0). Both fixes require Python >=3.10 (verified with
-# `uv pip install --dry-run --python .venv/bin/python` on the 3.9 venv: unsatisfiable).
-# uv.lock carries pip 26.2.1 for >=3.10, so CI (3.12) is fixed, not waived; setuptools is
-# a venv seed package, not a locked dependency, and does not occur on CI at all.
-#
-# 2026-09-10: that last sentence is the one the whole arrangement rests on -- "we cannot fix
-# this on our floor interpreter" and "we have turned off an alert" differ only by it -- and
-# nothing re-derived it. tests/test_pip_audit_waivers.py now does, offline, from uv.lock:
-# every id below has a registry entry naming its package and first fixed version (neither
-# list may grow alone), every waived package's >=3.10 resolution is at or above that version
-# so CI is fixed rather than waived, and every <3.10 resolution is still below it so no
-# waiver here is suppressing nothing. Prompted by three HIGH Dependabot alerts (urllib3
-# CVE-2026-44431/44432, msgpack CVE-2026-57585) which the platform reports at `runtime`
-# scope: measured, all three reach this tree only through pip-audit's own dependency chain
-# (pip-audit -> requests -> urllib3, pip-audit -> CacheControl -> msgpack), no tracked file
-# imports any of them, and the shipped runtime still has zero dependencies. Re-derived by
-# hand the same day with the dry-run command above: no fix for filelock, msgpack, pip,
-# pytest, requests, setuptools or urllib3 is installable on 3.9 -- every one of the seven is
-# unsatisfiable because the fix depends on Python>=3.10.
-#
-# 2026-10-01: the dev venv no longer targets 3.9 (docs/adr/0031). `.python-version` is
-# 3.12, so a default `make dev` venv resolves the >=3.10 branch of uv.lock, the same one CI
-# audits, and every id below matches nothing there: on the default venv these waivers are
-# inert and `make security` is fixed, not waived. They still apply to a venv deliberately
-# built on the 3.9 floor (`uv sync --locked --group dev --python 3.9`), which is why they
-# stay. The floor itself (requires-python >=3.9) is exercised by CI's required 3.9
-# test-matrix job, not by the local venv. Wherever the text above says "this repo's dev
-# venv" or "the 3.9 venv", read "a venv built on the 3.9 floor".
-PIP_AUDIT_WAIVERS := \
-	--ignore-vuln PYSEC-2026-3721 \
-	--ignore-vuln PYSEC-2026-3447 \
-	--ignore-vuln GHSA-w853-jp5j-5j7f \
-	--ignore-vuln GHSA-qmgc-5h2g-mvrw \
-	--ignore-vuln GHSA-6v7p-g79w-8964 \
-	--ignore-vuln PYSEC-2026-196 \
-	--ignore-vuln GHSA-58qw-9mgm-455v \
-	--ignore-vuln GHSA-jp4c-xjxw-mgf9 \
-	--ignore-vuln GHSA-6w46-j5rx-g56g \
-	--ignore-vuln GHSA-gc5v-m9x4-r6x2 \
-	--ignore-vuln PYSEC-2026-142 \
-	--ignore-vuln PYSEC-2026-141
+# No pip-audit waivers. Until the floor moved to Python 3.10 (docs/adr/0032) twelve advisories
+# in pip-audit's own dev-toolchain dependencies (filelock, msgpack, pip, pytest, requests,
+# setuptools, urllib3) were waived because every fix required Python >=3.10 and the 3.9
+# branch of uv.lock could not install one. That branch is gone, so each waiver would
+# suppress nothing. Do not add one to make a red audit green: bump the package, or record
+# the decision in an ADR first. CI's "Dependency audit" step passes no waivers either.
+PIP_AUDIT_WAIVERS :=
 
 # Hard-fail, not soft-skip: this target used to fall back to "not installed —
 # skipping (CI enforces it)" for each tool, which is exactly the silent-gate

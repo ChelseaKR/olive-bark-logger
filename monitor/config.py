@@ -1,6 +1,6 @@
 """Runtime configuration: detection knobs, calibration, quiet hours, db path.
 
-Loaded from a small JSON file (stdlib only — tomllib is 3.11+ and we target 3.9).
+Loaded from a small JSON file (stdlib only — tomllib is 3.11+ and we target 3.10).
 Every field has a documented default so the monitor runs with no config at all, and
 every field is validated on construction so a bad config fails loudly, not silently.
 """

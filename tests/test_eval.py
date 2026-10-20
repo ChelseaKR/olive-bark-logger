@@ -34,7 +34,7 @@ def test_recovers_the_labeled_event_count():
 
 def test_detected_events_align_with_labels():
     events = sorted(_detect(), key=lambda e: e.start)
-    for ev, label in zip(events, LABELS):
+    for ev, label in zip(events, LABELS, strict=False):
         # Detection should start within one frame of the label and not overrun it much.
         assert abs(ev.start - label.start_s) <= 0.2, (ev.start, label.start_s)
         assert abs(ev.end - label.end_s) <= 0.2, (ev.end, label.end_s)

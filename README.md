@@ -56,7 +56,7 @@ uv sync --locked --group dev --extra live
 .venv/bin/olive-report   --config config.sample.json --out report.html --csv events.csv
 ```
 The core (level math, detector, store, report) has **zero runtime dependencies** and runs
-on any Python 3.9+ with no installs; only live microphone capture needs the `live` extra.
+on any Python 3.10+ with no installs; only live microphone capture needs the `live` extra.
 
 > **Calibration is a single source of truth.** Events are stored as **raw** dBFS and the
 > calibration offset is applied at report time from an append-only history owned by

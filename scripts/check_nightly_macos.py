@@ -57,9 +57,9 @@ BRANCH = "main"
 MAX_AGE_HOURS = 168
 
 # The number of macOS legs the nightly matrix is expected to run: one per supported
-# Python version (pyproject.toml's >=3.9 floor through 3.13). Written as a floor, so
+# Python version (pyproject.toml's >=3.10 floor through 3.13). Written as a floor, so
 # adding a version does not fail the check, but quietly shrinking the sweep does.
-MIN_MACOS_JOBS = 5
+MIN_MACOS_JOBS = 4
 
 # How many recent runs to look through for a completed one. A generous window, so a
 # single in-progress run does not read as "the sweep never ran".
