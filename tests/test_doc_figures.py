@@ -401,7 +401,7 @@ def test_the_parity_table_names_the_pip_audit_waiver_divergence():
     second one, in the argument list: `make security` runs `pip-audit` with twelve
     `--ignore-vuln` flags and CI runs it with none.
 
-    That is not a bug in either command -- the waivers are a >=3.9 accommodation and CI
+    That is not a bug in either command -- the waivers were a >=3.9 accommodation and CI
     runs 3.12, where `uv.lock` resolves the fixed versions -- but it does mean a green
     `make verify` does not predict a green CI, which is precisely what the parity section
     exists to tell a contributor. Derive it, so the sentence cannot rot once the two
@@ -426,7 +426,7 @@ def test_the_parity_table_names_the_pip_audit_waiver_divergence():
 def test_the_waiver_scanner_reads_the_makefile_and_the_workflow():
     """Canary: both halves of the comparison above must actually find their text, or the
     divergence check passes by reading two empty sets."""
-    assert _ignored_vulns(_text(MAKEFILE)), "no --ignore-vuln flags found in the Makefile"
+    # The Makefile carries no waivers since ADR-0032, so only the CI side must be found.
     assert ci_dependency_audit_command().strip(), (
         "ci.yml has no step named 'Dependency audit'; the comparison above has no CI side"
     )
@@ -510,7 +510,7 @@ def test_codeql_is_not_described_as_a_gate_while_it_is_not_one():
 def test_the_figure_scanners_read_real_values():
     """Prove each derivation returns something, so a silently-empty glob cannot make
     every assertion above vacuously agree with a doc that says zero."""
-    assert waiver_count() > 0
+    assert waiver_count() == 0  # none since ADR-0032; the counter itself is exercised below
     assert adr_count() > 0
     assert count_test_files() > 0
     assert workflow_count() > 0

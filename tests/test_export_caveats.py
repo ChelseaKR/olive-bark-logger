@@ -403,7 +403,7 @@ def unsourced_spec_values(source: str, required: set[str] = IMPORTED_SPEC_PATHS)
     imported, offenders = _report_imports(source), []
 
     def visit(node: ast.Dict, prefix: str = "") -> None:
-        for key, value in zip(node.keys, node.values):
+        for key, value in zip(node.keys, node.values, strict=False):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                 continue
             path = prefix + key.value

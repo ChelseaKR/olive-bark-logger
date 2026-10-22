@@ -119,13 +119,14 @@ LIVE_2026_08_21 = {
 # The live ruleset after the 2026-08-26 change: identical to the 2026-08-21 one except
 # that the five `test-matrix (macos-latest, X)` contexts are no longer required. That is
 # the whole diff, so it is expressed as the whole diff rather than retyped. The offline
-# twin of `make ruleset-check` exiting 0 today.
+# twin of `make ruleset-check` exiting 0 today. The Python 3.9 leg is gone from this
+# fixture because the floor moved to 3.10 (docs/adr/0032), so the live ruleset must no
+# longer require `test-matrix (ubuntu-latest, 3.9)`: no job reports that context any more.
 LIVE_2026_08_26 = _with_contexts(
     LIVE_2026_08_21,
     [{"context": "verify"}]
     + [
-        {"context": f"test-matrix (ubuntu-latest, {py})"}
-        for py in ("3.9", "3.10", "3.11", "3.12", "3.13")
+        {"context": f"test-matrix (ubuntu-latest, {py})"} for py in ("3.10", "3.11", "3.12", "3.13")
     ],
 )
 

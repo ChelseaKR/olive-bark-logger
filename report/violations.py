@@ -183,7 +183,7 @@ def compute_violations(
     within = 0
     within_secs = 0.0
     outside_secs = 0.0
-    for ev, off, how in zip(events, offs, bases):
+    for ev, off, how in zip(events, offs, bases, strict=False):
         dt = datetime.fromtimestamp(ev.start, tz=tz)
         end_dt = datetime.fromtimestamp(ev.start + ev.duration, tz=tz)
         is_within = quiet_hours.contains(dt)

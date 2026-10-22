@@ -84,7 +84,7 @@ GOOD_JOBS = [
         "conclusion": "success",
         "labels": ["macos-latest"],
     }
-    for py in ("3.9", "3.10", "3.11", "3.12", "3.13")
+    for py in ("3.10", "3.11", "3.12", "3.13")
 ]
 
 # The five jobs that satisfied the five required contexts until 2026-08-26, as the same
@@ -146,7 +146,7 @@ def test_a_shrunken_sweep_is_caught():
 def test_a_failed_sweep_blocks_the_merge():
     failing = [{**GOOD_JOBS[0], "conclusion": "failure"}, *GOOD_JOBS[1:]]
     problems = "\n".join(assess(GOOD_RUN, failing, NOW))
-    assert "test-matrix-macos (macos-latest, 3.9)" in problems
+    assert "test-matrix-macos (macos-latest, 3.10)" in problems
 
 
 def test_a_red_run_blocks_the_merge_even_with_five_macos_jobs():

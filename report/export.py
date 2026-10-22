@@ -110,7 +110,7 @@ def events_to_csv(
             fh.write(f"# {line}\n" if line else "#\n")
         writer = csv.writer(fh)
         writer.writerow(_HEADER)
-        for ev, off, how in zip(events, offs, bases):
+        for ev, off, how in zip(events, offs, bases, strict=False):
             monitored = _is_monitored(ev.start, ev.end, gap_list)
             writer.writerow(
                 [

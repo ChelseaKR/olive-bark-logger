@@ -1,6 +1,6 @@
 # 0002. Python ≥3.9 floor (divergence from the ≥3.12 standard)
 
-**Status:** Accepted (divergence, not a pass) · **Date:** 2026-07-05
+**Status:** Superseded by [ADR-0032](./0032-python-310-floor.md) (was: Accepted, divergence, not a pass) · **Date:** 2026-07-05
 
 ## Context
 `STANDARDS/CODE-QUALITY-STANDARD.md` (CQ-01) sets a floor of Python ≥3.12 (≥3.11 only
