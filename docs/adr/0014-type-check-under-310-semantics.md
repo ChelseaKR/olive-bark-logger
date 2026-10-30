@@ -1,6 +1,6 @@
 # 0014. Type-check under 3.10 semantics on a 3.9 runtime floor
 
-**Status:** Accepted · **Date:** 2026-06-05 · **Migrated:** 2026-09-05 from `docs/ROADMAP.md` §6 (GAP-DOC-1)
+**Status:** Superseded by [ADR-0032](./0032-python-311-floor.md): the runtime floor and the checked version are both 3.11 (was: Accepted) · **Date:** 2026-06-05 · **Migrated:** 2026-09-05 from `docs/ROADMAP.md` §6 (GAP-DOC-1)
 
 ## Context
 The runtime floor is Python 3.9 ([ADR-0002](./0002-python-39-floor.md)) because that is

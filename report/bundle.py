@@ -47,7 +47,7 @@ import hashlib
 import json
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from monitor import __version__
@@ -302,7 +302,7 @@ def build_bundle(
             "was already there."
         )
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    stamp = created_at or datetime.now(UTC).isoformat(timespec="seconds")
 
     _snapshot_db(db_path, out_dir / SNAPSHOT_NAME)
 
@@ -354,8 +354,9 @@ def build_bundle(
     # `sort_keys` and an explicit `\n`: the manifest is the file a signature would be
     # taken over, so its bytes must not depend on dict ordering or on a platform's idea
     # of a line ending. Written through `open(newline="\n")` rather than
-    # `write_text(newline=...)`, which arrived in 3.10 and this project's floor is 3.9
-    # (docs/adr/0002-python-39-floor.md).
+    # `write_text(newline=...)`, which arrived in 3.10. That choice dates from the 3.9
+    # floor (docs/adr/0002-python-39-floor.md); the floor is 3.11 now (docs/adr/0032) and
+    # the two spellings write the same bytes, so it was left as it is.
     with manifest_path.open("w", encoding="utf-8", newline="\n") as fh:
         fh.write(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
     return manifest_path

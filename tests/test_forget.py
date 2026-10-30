@@ -28,7 +28,7 @@ assertion here searches the document for the words it cares about.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from monitor.ambient import MinuteLevel
@@ -39,7 +39,7 @@ from store import ERASED_REASON, EventStore
 from store.db import _MIGRATIONS, SCHEMA_VERSION
 from store.forget import CONFIRMATION, TimestampError, describe, main, parse_moment
 
-UTC = timezone.utc
+UTC = UTC
 HOUR = 3600.0
 BASE = 1_700_000_000.0  # an arbitrary but fixed moment; nothing here depends on "now"
 

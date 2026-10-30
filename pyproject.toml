@@ -14,11 +14,11 @@ name = "olive-bark-logger"
 version = "0.1.0"
 description = "Privacy-first, on-device noise monitor: logs sound-level events (never audio) and generates an honest report."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Chelsea" }]
 # Core has ZERO runtime dependencies: level math, detector, store, and report are
-# pure standard library so `make verify` runs on any Python 3.9+ with no installs.
+# pure standard library so `make verify` runs on any Python 3.11+ with no installs.
 dependencies = []
 
 [project.optional-dependencies]
@@ -31,9 +31,7 @@ live = ["sounddevice>=0.4"]
 # a new export-side path. See docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md for
 # why WeasyPrint and why >=67 (PDF/A level-A — "pdf/a-3a", archival + tagged in one
 # ISO 19005 conformance claim — landed in 67.0, 2025-12-02). NOTE: WeasyPrint >=67
-# itself requires a >=3.10 host interpreter, so this extra cannot install on the
-# >=3.9 core floor (ADR-0002) — a documented, scoped divergence for this optional,
-# non-core extra only; nothing on the always-run monitoring/report path is affected.
+# itself requires a >=3.10 host interpreter, which the 3.11 core floor already satisfies.
 # pypdf reads the generated PDF's own structure tree back out again, for
 # tests/test_pdf_export.py's structural assertions (tag presence, reading order,
 # header association) — the only way to verify what actually got written, short of
@@ -44,17 +42,15 @@ live = ["sounddevice>=0.4"]
 # the only patched version. Neither bypassed channel is used by report/pdf_export.py.
 # See the ADR's Amendment, 2026-09-10.
 pdf = [
-    "weasyprint>=67,<71; python_version >= '3.10'",
-    "pypdf>=5,<7; python_version >= '3.10'",
+    "weasyprint>=67,<71",
+    "pypdf>=5,<7",
 ]
 
 [dependency-groups]
 # PEP 735 dependency group (CQ-27): dev-only tooling, not a runtime extra.
-# `mypy<2` is a real floor, not decoration: mypy 2.x dropped support for a
-# Python 3.9 host interpreter, so `mypy>=2` cannot be installed into a venv built
-# on the 3.9 floor — verified locally 2026-07-05. The local dev venv is 3.12 since
-# 2026-10-01 (docs/adr/0031), but CI's required 3.9 test-matrix job installs this
-# same group on 3.9, so the cap stays.
+# `mypy<2` is kept as it was when the floor moved to 3.11 (docs/adr/0032). The reason it
+# existed, a 3.9 host interpreter, is gone; lifting the cap is a separate change because
+# mypy 2 may report new findings.
 dev = [
     "pytest>=8",
     "pytest-cov>=5",
@@ -102,7 +98,7 @@ show_missing = true
 skip_covered = false
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py311"
 line-length = 100
 src = ["monitor", "store", "report", "tests"]
 
@@ -120,9 +116,8 @@ max-complexity = 10
 "tests/test_violations.py" = ["RUF001", "RUF003"]
 
 [tool.mypy]
-# Runtime target is 3.9 (see requires-python); the code uses `from __future__ import
-# annotations`, so checking under 3.10 semantics is safe and required by current mypy.
-python_version = "3.10"
+# Runtime target is 3.11 (see requires-python), the same semantics mypy checks under.
+python_version = "3.11"
 strict = true
 files = ["monitor", "store", "report"]
 exclude = "(^|/)capture_live\\.py$"

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from monitor.config import Config
@@ -57,7 +57,7 @@ from report.render import ERASED_HEADING, cover_text_lines
 from store import ERASED_REASON, EventStore
 
 STAMP = "2026-03-11T00:00:00+00:00"
-DAY = datetime(2026, 3, 10, tzinfo=timezone.utc)
+DAY = datetime(2026, 3, 10, tzinfo=UTC)
 
 
 def _at(day_offset: int, hour: int) -> float:

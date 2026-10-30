@@ -6,7 +6,7 @@ audio artifact left on disk anywhere.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from monitor.capture import LoudRegion, resilient_source, synthetic_session
@@ -95,7 +95,7 @@ def test_source_killed_mid_session_records_gap_shown_in_report(tmp_path):
     generated report renders it as 'not monitored', distinct from a quiet hour."""
     db = tmp_path / "olive.db"
     config = Config(db_path=str(db), tz="UTC")
-    base = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp()
     loud = [0.3] * 10  # ~-10 dBFS, well above the -35 threshold
     quiet = [0.0005] * 10  # ~-66 dBFS, below threshold
 

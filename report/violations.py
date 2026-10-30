@@ -28,7 +28,7 @@ from __future__ import annotations
 import csv
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, tzinfo
+from datetime import UTC, datetime, tzinfo
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -144,7 +144,7 @@ def compute_violations(
     events: list[Event],
     *,
     quiet_hours: QuietSchedule,
-    tz: tzinfo = timezone.utc,
+    tz: tzinfo = UTC,
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
     basis: Sequence[str] | None = None,
@@ -183,7 +183,7 @@ def compute_violations(
     within = 0
     within_secs = 0.0
     outside_secs = 0.0
-    for ev, off, how in zip(events, offs, bases):
+    for ev, off, how in zip(events, offs, bases, strict=False):
         dt = datetime.fromtimestamp(ev.start, tz=tz)
         end_dt = datetime.fromtimestamp(ev.start + ev.duration, tz=tz)
         is_within = quiet_hours.contains(dt)
@@ -498,7 +498,7 @@ def violations_to_csv(
     path: str | Path,
     *,
     quiet_hours: QuietSchedule,
-    tz: tzinfo = timezone.utc,
+    tz: tzinfo = UTC,
     tz_name: str = "UTC",
     offsets_db: Sequence[float] | None = None,
     basis: Sequence[str] | None = None,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from monitor.config import Config, QuietHours, QuietSchedule
 from monitor.detector import Event
@@ -19,7 +19,7 @@ from store import EventStore
 
 
 def _ev(hour: int, day: int = 1, duration: float = 2.0, tag: str | None = None) -> Event:
-    start = datetime(2026, 1, day, hour, tzinfo=timezone.utc).timestamp()
+    start = datetime(2026, 1, day, hour, tzinfo=UTC).timestamp()
     return Event(
         start=start,
         end=start + duration,
@@ -45,8 +45,8 @@ def test_seconds_within_quiet_hours_prorates_boundary():
     # 120 s event straddling the 22:00 quiet-hours start: begins at 21:59:00, so exactly
     # 60 s fall inside the window and 60 s fall outside.
     qh = QuietHours(22, 8)
-    ev = _ev_at(datetime(2026, 1, 1, 21, 59, 0, tzinfo=timezone.utc), 120.0)
-    report = compute_violations([ev], quiet_hours=qh, tz=timezone.utc)
+    ev = _ev_at(datetime(2026, 1, 1, 21, 59, 0, tzinfo=UTC), 120.0)
+    report = compute_violations([ev], quiet_hours=qh, tz=UTC)
     row = report.rows[0]
     assert row.within_quiet_hours is False  # start (21:59) is outside quiet hours
     assert row.seconds_within_quiet_hours == 60.0
@@ -56,9 +56,9 @@ def test_seconds_within_quiet_hours_prorates_boundary():
 
 def test_seconds_within_quiet_hours_fully_inside_and_outside():
     qh = QuietHours(22, 8)
-    inside = _ev_at(datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc), 30.0)
-    outside = _ev_at(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc), 3600.0)
-    report = compute_violations([inside, outside], quiet_hours=qh, tz=timezone.utc)
+    inside = _ev_at(datetime(2026, 1, 1, 23, 0, 0, tzinfo=UTC), 30.0)
+    outside = _ev_at(datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC), 3600.0)
+    report = compute_violations([inside, outside], quiet_hours=qh, tz=UTC)
     assert report.rows[0].seconds_within_quiet_hours == 30.0  # full duration
     assert report.rows[1].seconds_within_quiet_hours == 0.0  # long, but wholly outside
 
@@ -66,14 +66,14 @@ def test_seconds_within_quiet_hours_fully_inside_and_outside():
 def test_seconds_within_quiet_hours_midnight_wrap():
     # Window 22->8 wraps midnight; an event from 23:59:30 to 00:00:30 is entirely inside.
     qh = QuietHours(22, 8)
-    ev = _ev_at(datetime(2026, 1, 1, 23, 59, 30, tzinfo=timezone.utc), 60.0)
-    report = compute_violations([ev], quiet_hours=qh, tz=timezone.utc)
+    ev = _ev_at(datetime(2026, 1, 1, 23, 59, 30, tzinfo=UTC), 60.0)
+    report = compute_violations([ev], quiet_hours=qh, tz=UTC)
     assert report.rows[0].seconds_within_quiet_hours == 60.0
 
 
 def test_compute_violations_counts_within_and_outside():
     events = [_ev(23), _ev(2), _ev(12)]  # two inside 22-08, one outside
-    report = compute_violations(events, quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    report = compute_violations(events, quiet_hours=QuietHours(22, 8), tz=UTC)
     assert report.total_events == 3
     assert report.within_count == 2
     assert report.outside_count == 1
@@ -85,7 +85,7 @@ def test_compute_violations_counts_within_and_outside():
 
 
 def test_compute_violations_empty():
-    report = compute_violations([], quiet_hours=QuietHours(), tz=timezone.utc)
+    report = compute_violations([], quiet_hours=QuietHours(), tz=UTC)
     assert report.total_events == 0
     assert report.within_count == 0 and report.outside_count == 0
     assert report.rows == []
@@ -93,8 +93,8 @@ def test_compute_violations_empty():
 
 def test_compute_violations_carries_event_anatomy():
     event = Event(
-        start=datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp(),
-        end=datetime(2026, 1, 1, 23, 0, 2, tzinfo=timezone.utc).timestamp(),
+        start=datetime(2026, 1, 1, 23, tzinfo=UTC).timestamp(),
+        end=datetime(2026, 1, 1, 23, 0, 2, tzinfo=UTC).timestamp(),
         duration=2.0,
         peak_level=-8.0,
         avg_level=-12.0,
@@ -102,7 +102,7 @@ def test_compute_violations_carries_event_anatomy():
         loud6_s=1.6,
         longest_run_s=1.9,
     )
-    report = compute_violations([event], quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    report = compute_violations([event], quiet_hours=QuietHours(22, 8), tz=UTC)
     row = report.rows[0]
     assert (row.rise_time_s, row.loud6_s, row.longest_run_s) == (0.4, 1.6, 1.9)
 
@@ -110,7 +110,7 @@ def test_compute_violations_carries_event_anatomy():
 def test_violations_csv_lists_all_events_flagged(tmp_path):
     out = tmp_path / "violations.csv"
     events = [_ev(23, tag="bark-like"), _ev(12)]
-    n = violations_to_csv(events, out, quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    n = violations_to_csv(events, out, quiet_hours=QuietHours(22, 8), tz=UTC)
     assert n == 2
     text = out.read_text()
     # R1: the "what this can and cannot prove" cover travels as a leading comment preamble;
@@ -166,7 +166,7 @@ def test_violations_csv_flags_unmonitored_events(tmp_path):
         end=events[0].end + 1,
         reason="shutdown",
     )
-    violations_to_csv(events, out, quiet_hours=QuietHours(22, 8), tz=timezone.utc, gaps=[gap])
+    violations_to_csv(events, out, quiet_hours=QuietHours(22, 8), tz=UTC, gaps=[gap])
     data_lines = [ln for ln in out.read_text().splitlines() if not ln.startswith("#")]
     rows = list(csv.reader(data_lines))
     mon = rows[0].index("monitored")
@@ -175,7 +175,7 @@ def test_violations_csv_flags_unmonitored_events(tmp_path):
 
 
 def test_violation_html_is_honest_and_accessible():
-    report = compute_violations([_ev(23)], quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    report = compute_violations([_ev(23)], quiet_hours=QuietHours(22, 8), tz=UTC)
     html = build_violation_report_html(
         report,
         threshold_dbfs=-35.0,
@@ -201,7 +201,7 @@ def test_violation_html_multi_epoch_is_disclosed_per_row():
     single uniform calibration state (honest-report invariant on the export surface)."""
     events = [_ev(23), _ev(2)]
     report = compute_violations(
-        events, quiet_hours=QuietHours(22, 8), tz=timezone.utc, offsets_db=[0.0, 12.0]
+        events, quiet_hours=QuietHours(22, 8), tz=UTC, offsets_db=[0.0, 12.0]
     )
     assert [r.calibration_offset_db for r in report.rows] == [0.0, 12.0]
     html = build_violation_report_html(
@@ -221,7 +221,7 @@ def test_violation_html_multi_epoch_is_disclosed_per_row():
 
 
 def test_violation_html_empty_log():
-    report = compute_violations([], quiet_hours=QuietHours(), tz=timezone.utc)
+    report = compute_violations([], quiet_hours=QuietHours(), tz=UTC)
     html = build_violation_report_html(
         report,
         threshold_dbfs=-35.0,
@@ -284,7 +284,7 @@ def test_report_cli_exports_violations(tmp_path, capsys):
 
 def test_window_label_wraps_24():
     # A 24-hour end wraps to 00; the label normalizes both bounds.
-    report = compute_violations([], quiet_hours=QuietHours(22, 24), tz=timezone.utc)
+    report = compute_violations([], quiet_hours=QuietHours(22, 24), tz=UTC)
     assert report.window == "22:00–00:00"
 
 

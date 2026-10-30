@@ -7,7 +7,7 @@ change is intentional, regenerate the golden with: make snapshot.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from monitor.config import Config
@@ -21,7 +21,7 @@ GOLDEN = Path(__file__).resolve().parent / "snapshots" / "report.html"
 def fixture_html() -> str:
     """A fixed, machine-independent report used for snapshotting."""
     config = Config(tz="UTC")
-    base = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp()
     spec = [(23, 6.0, -8.0), (23, 4.0, -12.0), (2, 9.0, -5.0), (14, 3.0, -20.0)]
     events = [
         Event(

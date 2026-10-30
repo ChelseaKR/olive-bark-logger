@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from monitor.config import (
@@ -15,7 +15,7 @@ from monitor.config import (
     QuietWindow,
 )
 
-UTC = timezone.utc
+UTC = UTC
 
 # Weekday indices used by the schedule (0=Mon .. 6=Sun).
 FRI = 4

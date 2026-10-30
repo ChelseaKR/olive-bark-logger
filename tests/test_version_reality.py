@@ -69,7 +69,8 @@ RELEASE_HEADING = re.compile(r"^## \[([^\]]+)\] - (.*)$", re.MULTILINE)
 #: `awk` no longer finds it) or undated. `[Unreleased]` is the one undated heading allowed.
 LOOSE_HEADING = re.compile(r"^ {0,3}## \[(?!Unreleased\])[^\n]*$", re.MULTILINE)
 
-#: Read with a regex rather than `tomllib`, which is 3.11+; this suite runs on 3.9 too.
+#: Read with a regex rather than `tomllib`. Written while the floor was 3.9, before `tomllib`
+#: (3.11+) was available; the floor is 3.11 now (docs/adr/0032) and the regex still works.
 _PYPROJECT_VERSION = re.compile(r'^version = "([^"]+)"$', re.MULTILINE)
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from monitor.ambient import MinuteLevel
@@ -12,7 +12,7 @@ from report.aggregate import summarize, summarize_ambient
 
 
 def _ev(hour: int, day: int = 1, duration: float = 2.0, peak: float = -10.0) -> Event:
-    start = datetime(2026, 1, day, hour, 0, tzinfo=timezone.utc).timestamp()
+    start = datetime(2026, 1, day, hour, 0, tzinfo=UTC).timestamp()
     return Event(
         start=start, end=start + duration, duration=duration, peak_level=peak, avg_level=peak - 3
     )
@@ -51,22 +51,22 @@ def _ev_at(dt: datetime, duration: float) -> Event:
 def test_overlap_seconds_prorates_boundary():
     # 120 s event straddling the 22:00 quiet-hours start contributes exactly 60 s.
     qh = QuietHours(22, 8)
-    start = datetime(2026, 1, 1, 21, 59, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, 21, 59, 0, tzinfo=UTC)
     end = start + timedelta(seconds=120)
     assert qh.overlap_seconds(start, end) == 60.0
 
 
 def test_overlap_seconds_fully_inside_and_outside():
     qh = QuietHours(22, 8)
-    inside_s = datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc)
+    inside_s = datetime(2026, 1, 1, 23, 0, 0, tzinfo=UTC)
     assert qh.overlap_seconds(inside_s, inside_s + timedelta(seconds=45)) == 45.0
-    outside_s = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)  # long but wholly outside
+    outside_s = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)  # long but wholly outside
     assert qh.overlap_seconds(outside_s, outside_s + timedelta(hours=2)) == 0.0
 
 
 def test_overlap_seconds_midnight_wrap():
     qh = QuietHours(22, 8)
-    start = datetime(2026, 1, 1, 23, 59, 30, tzinfo=timezone.utc)  # crosses midnight
+    start = datetime(2026, 1, 1, 23, 59, 30, tzinfo=UTC)  # crosses midnight
     assert qh.overlap_seconds(start, start + timedelta(seconds=60)) == 60.0
 
 
@@ -74,7 +74,7 @@ def test_overlap_seconds_partition_invariant():
     # For any event, the pro-rated quiet seconds are within [0, duration], and the quiet
     # portion plus the non-quiet portion equal the whole duration (a clean partition).
     qh = QuietHours(22, 8)
-    starts = [datetime(2026, 1, 1, h, m, tzinfo=timezone.utc) for h in range(24) for m in (0, 37)]
+    starts = [datetime(2026, 1, 1, h, m, tzinfo=UTC) for h in range(24) for m in (0, 37)]
     complement = QuietHours(8, 22)  # the complementary daily window (8:00 -> 22:00)
     for s in starts:
         for dur in (5.0, 90.0, 3600.0, 7200.0):
@@ -96,7 +96,7 @@ def test_overlap_seconds_overlapping_windows_count_once():
             QuietWindow(start_minute=23 * 60, end_minute=1 * 60),
         )
     )
-    start = datetime(2026, 1, 1, 22, 30, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, 22, 30, 0, tzinfo=UTC)
     end = start + timedelta(hours=3)  # 22:30 -> 01:30, all inside the union
     assert sched.overlap_seconds(start, end) == 3 * 3600.0
 
@@ -109,11 +109,11 @@ def test_overlap_seconds_day_restricted_window():
     sched = QuietSchedule(
         (QuietWindow(start_minute=23 * 60, end_minute=7 * 60, days=frozenset({4})),)
     )
-    fri_night = datetime(2026, 1, 2, 23, 30, 0, tzinfo=timezone.utc)
+    fri_night = datetime(2026, 1, 2, 23, 30, 0, tzinfo=UTC)
     assert sched.overlap_seconds(fri_night, fri_night + timedelta(hours=1)) == 3600.0
-    sat_early = datetime(2026, 1, 3, 6, 0, 0, tzinfo=timezone.utc)  # tail of Fri window
+    sat_early = datetime(2026, 1, 3, 6, 0, 0, tzinfo=UTC)  # tail of Fri window
     assert sched.overlap_seconds(sat_early, sat_early + timedelta(hours=2)) == 3600.0
-    tue_night = datetime(2026, 1, 6, 23, 30, 0, tzinfo=timezone.utc)  # Tuesday: inactive
+    tue_night = datetime(2026, 1, 6, 23, 30, 0, tzinfo=UTC)  # Tuesday: inactive
     assert sched.overlap_seconds(tue_night, tue_night + timedelta(hours=1)) == 0.0
 
 
@@ -121,8 +121,8 @@ def test_summary_reports_both_prorated_and_start_attributed():
     qh = QuietHours(22, 8)
     # 120 s event straddling 22:00 start: pro-rated = 60 s, but start-attributed = 0
     # (it started at 21:59, outside quiet hours, so the whole duration is credited outside).
-    straddle = _ev_at(datetime(2026, 1, 1, 21, 59, 0, tzinfo=timezone.utc), 120.0)
-    inside = _ev_at(datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc), 40.0)
+    straddle = _ev_at(datetime(2026, 1, 1, 21, 59, 0, tzinfo=UTC), 120.0)
+    inside = _ev_at(datetime(2026, 1, 1, 23, 0, 0, tzinfo=UTC), 40.0)
     s = summarize([straddle, inside], quiet_hours=qh)
     assert s.quiet_hours_event_count == 1  # only the 23:00 event started in quiet hours
     assert s.quiet_hours_loud_seconds == 100.0  # 60 (pro-rated straddle) + 40 (inside)
@@ -206,7 +206,7 @@ def test_summarize_ambient_empty():
 
 
 def test_summarize_ambient_rolls_up_one_day():
-    day = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    day = datetime(2026, 1, 1, tzinfo=UTC)
     minutes = [
         _minute(day, min_dbfs=-40.0, median_dbfs=-35.0, max_dbfs=-20.0, l90_dbfs=-38.0),
         _minute(
@@ -238,14 +238,14 @@ def test_summarize_ambient_rolls_up_one_day():
 def test_summarize_ambient_splits_and_sorts_by_day():
     minutes = [
         _minute(
-            datetime(2026, 1, 2, 12, tzinfo=timezone.utc),
+            datetime(2026, 1, 2, 12, tzinfo=UTC),
             min_dbfs=-40.0,
             median_dbfs=-35.0,
             max_dbfs=-30.0,
             l90_dbfs=-38.0,
         ),
         _minute(
-            datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, 12, tzinfo=UTC),
             min_dbfs=-50.0,
             median_dbfs=-45.0,
             max_dbfs=-40.0,
@@ -261,7 +261,7 @@ def test_summarize_ambient_buckets_by_the_given_time_zone():
     # 23:30 UTC on Jan 1 is already Jan 2 local at a fixed +2h offset -- same day-
     # bucketing rule summarize() uses for events (test_fixed_offset_shifts_buckets).
     m = _minute(
-        datetime(2026, 1, 1, 23, 30, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, 23, 30, tzinfo=UTC),
         min_dbfs=-40.0,
         median_dbfs=-35.0,
         max_dbfs=-30.0,

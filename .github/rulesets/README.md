@@ -35,10 +35,11 @@ ruleset required five macOS contexts, and its comment said so.
   absolute. That is the deliberate posture — an owner who cannot recover a repository
   whose required check is wedged has a worse problem than an unreviewed merge — and it is
   written here because between 2026-08-21 and 2026-08-27 this page said the opposite.
-- **Six required status checks** must report green: `verify` and five
-  `test-matrix (ubuntu-latest, 3.9–3.13)`. Every one of them runs the repository's real
-  gates and every one of them can fail. Six is both the count and the strength; before
-  2026-08-26 the count was eleven and the strength was six.
+- **Four required status checks** must report green: `verify` and three
+  `test-matrix (ubuntu-latest, 3.11–3.13)`. Every one of them runs the repository's real
+  gates and every one of them can fail. Four is both the count and the strength; before
+  2026-08-26 the count was eleven and the strength was six, and until the floor moved to
+  3.11 (docs/adr/0032) the 3.9 and 3.10 legs made it six.
 
 ## The 2026-08-27 correction: someone can bypass, and two documents said no one could
 

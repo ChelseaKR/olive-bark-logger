@@ -71,8 +71,8 @@ the `Makefile` is the single place that says so:
 ### The optional `pdf` extra (tagged PDF/A export, EXP-06)
 `pip install -e '.[pdf]'` adds `weasyprint` (and `pypdf`, used only by
 `tests/test_pdf_export.py` to read the generated structure tree back out). This
-extra needs a **Python >=3.10** host interpreter — a further, deliberate, scoped
-divergence from the project's >=3.9 core floor (ADR-0002), documented in
+extra needs a **Python >=3.10** host interpreter, which the 3.11 core floor
+(ADR-0032) already satisfies, documented in
 `pyproject.toml` and `docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md`. It is
 never installed by `make dev` / `make verify`, mirroring the `live` extra: nothing
 on the core monitoring/report path depends on it. `tests/test_pdf_export.py` skips
@@ -96,8 +96,8 @@ CI invokes
 
 | Target | How CI runs it instead | Why |
 | --- | --- | --- |
-| `cov` | `pytest --cov --cov-fail-under=85` in the `test-matrix` job | Same flags and the same 85% floor, run once per supported Python (3.9–3.13) rather than once locally. |
-| `security` | `bandit` and `pip-audit` as steps, plus `gitleaks-action` | The Makefile's `security` expects a `gitleaks` CLI on `PATH`; CI runs gitleaks as a container action, so the target cannot be called as-is. **The two `pip-audit` runs are not the same command:** the Makefile passes `PIP_AUDIT_WAIVERS`, CI passes nothing. The waivers exist for a venv built on the documented `>=3.9` floor, where no fix version for those advisories installs; CI runs 3.12, where `uv.lock` resolves the fixed versions, so CI is *fixed, not waived* and is deliberately the stricter of the two. Since 2026-10-01 the default dev venv is 3.12 too (`.python-version`, ADR-0031), so on it the waivers match nothing and `make security` audits what CI audits. They still matter on a venv built with `uv sync --locked --group dev --python 3.9`, where `make security PIP_AUDIT_WAIVERS=` reports 12 advisories in the dev toolchain — the divergence, not a regression. Reproduce CI's exact run locally with `make security PIP_AUDIT_WAIVERS=`. |
+| `cov` | `pytest --cov --cov-fail-under=85` in the `test-matrix` job | Same flags and the same 85% floor, run once per supported Python (3.11–3.13) rather than once locally. |
+| `security` | `bandit` and `pip-audit` as steps, plus `gitleaks-action` | The Makefile's `security` expects a `gitleaks` CLI on `PATH`; CI runs gitleaks as a container action, so the target cannot be called as-is. **The two `pip-audit` runs are written differently but audit the same thing:** the Makefile passes `PIP_AUDIT_WAIVERS`, CI passes nothing, and since the floor moved to 3.11 (ADR-0032) `PIP_AUDIT_WAIVERS` is empty. The twelve waivers it used to hold existed only for the 3.9 branch of `uv.lock`, which is gone. Reproduce CI's exact run locally with `make security PIP_AUDIT_WAIVERS=`. |
 | `a11y` | `scripts/demo_report.py`, then `pa11y` on `report.html` and again on `pwa/index.html` | CI additionally scans the PWA page, and excludes axe's `color-contrast` rule on the report (axe cannot resolve SVG `<text>` backgrounds; `tests/test_svg_contrast.py` is the merge-blocking replacement). `ci.yml`'s own comments carry the detail. |
 
 Beyond `verify`, CI also runs things no local target does at all: the OS × Python

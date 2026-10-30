@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from monitor.config import Config
 from monitor.detector import Event
@@ -33,9 +33,9 @@ from report.render import (
 from report.render import main as report_main
 from store import EventStore
 
-JAN_1 = datetime(2026, 1, 1, 22, 0, tzinfo=timezone.utc).timestamp()
-JAN_20 = datetime(2026, 1, 20, 12, 0, tzinfo=timezone.utc).timestamp()
-JAN_25 = datetime(2026, 1, 25, 22, 0, tzinfo=timezone.utc).timestamp()
+JAN_1 = datetime(2026, 1, 1, 22, 0, tzinfo=UTC).timestamp()
+JAN_20 = datetime(2026, 1, 20, 12, 0, tzinfo=UTC).timestamp()
+JAN_25 = datetime(2026, 1, 25, 22, 0, tzinfo=UTC).timestamp()
 OFFSET = 48.0
 
 
@@ -188,12 +188,12 @@ def test_basis_when_there_is_no_calibration_history(tmp_path):
 
     events = [_ev(JAN_1)]
     raw = tmp_path / "raw.csv"
-    events_to_csv(events, raw, tz=timezone.utc)
+    events_to_csv(events, raw, tz=UTC)
     assert _data_rows(raw)[0]["calibration_basis"] == CALIBRATION_NONE
 
     # Offsets given but no basis: the export must not guess.
     unstated = tmp_path / "unstated.csv"
-    events_to_csv(events, unstated, tz=timezone.utc, offsets_db=[5.0])
+    events_to_csv(events, unstated, tz=UTC, offsets_db=[5.0])
     assert _data_rows(unstated)[0]["calibration_basis"] == CALIBRATION_UNSTATED
 
     # The deprecated config bootstrap offset is named as such through the CLI.

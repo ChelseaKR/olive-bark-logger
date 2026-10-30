@@ -50,7 +50,7 @@ import dataclasses
 import importlib.util
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from monitor.config import Config, QuietHours
 from monitor.detector import Event
@@ -124,7 +124,7 @@ JS_CHECKED = {"eventsToCsv", "violationsToCsv", "buildReportHtml"}
 
 
 def _events():
-    base = datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 23, tzinfo=UTC).timestamp()
     return [
         Event(base, base + 4.0, 4.0, -8.0, -12.0, coarse_tag="bark-like"),
         Event(base + 3600 * 13, base + 3600 * 13 + 1.5, 1.5, -20.0, -24.0),
@@ -277,7 +277,7 @@ def test_the_python_coverage_sentence_matches_the_shared_template():
     """Both ports format the numbers themselves; the sentence they build must be one
     sentence. Python appends a further clause naming the recorded span, so the shared
     claim is the prefix -- stated in the vector rather than discovered here."""
-    report = compute_violations(_events(), quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    report = compute_violations(_events(), quiet_hours=QuietHours(22, 8), tz=UTC)
     report = dataclasses.replace(report, monitored_hours=7.0, wall_clock_hours=10.0)
     expected = COVERAGE["sentence_template"].format(
         monitored="7.0", wall="10.0", pct="70", unmonitored="3.0"
@@ -403,7 +403,7 @@ def unsourced_spec_values(source: str, required: set[str] = IMPORTED_SPEC_PATHS)
     imported, offenders = _report_imports(source), []
 
     def visit(node: ast.Dict, prefix: str = "") -> None:
-        for key, value in zip(node.keys, node.values):
+        for key, value in zip(node.keys, node.values, strict=False):
             if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
                 continue
             path = prefix + key.value
@@ -464,13 +464,13 @@ def _rendered_python_exports(tmp_path) -> dict[str, str]:
     """Every artifact the Python side can hand to someone, rendered."""
     config = Config(tz="UTC")
     events = _events()
-    summary = summarize(events, quiet_hours=config.quiet_hours, tz=timezone.utc)
-    report = compute_violations(events, quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    summary = summarize(events, quiet_hours=config.quiet_hours, tz=UTC)
+    report = compute_violations(events, quiet_hours=QuietHours(22, 8), tz=UTC)
 
     events_csv = tmp_path / "events.csv"
     events_to_csv(events, events_csv)
     violations_csv = tmp_path / "violations.csv"
-    violations_to_csv(events, violations_csv, quiet_hours=QuietHours(22, 8), tz=timezone.utc)
+    violations_to_csv(events, violations_csv, quiet_hours=QuietHours(22, 8), tz=UTC)
 
     return {
         "build_report": build_report(summary, config=config, generated_at="2026-01-01 00:00 UTC"),

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Sequence
-from datetime import datetime, timezone, tzinfo
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -74,7 +74,7 @@ def events_to_csv(
     events: list[Event],
     path: str | Path,
     *,
-    tz: tzinfo = timezone.utc,
+    tz: tzinfo = UTC,
     offsets_db: Sequence[float] | None = None,
     basis: Sequence[str] | None = None,
     gaps: list[Gap] | None = None,
@@ -110,7 +110,7 @@ def events_to_csv(
             fh.write(f"# {line}\n" if line else "#\n")
         writer = csv.writer(fh)
         writer.writerow(_HEADER)
-        for ev, off, how in zip(events, offs, bases):
+        for ev, off, how in zip(events, offs, bases, strict=False):
             monitored = _is_monitored(ev.start, ev.end, gap_list)
             writer.writerow(
                 [
