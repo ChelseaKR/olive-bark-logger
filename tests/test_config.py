@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from monitor.config import Config, ConfigError, QuietHours
@@ -40,9 +40,9 @@ def test_missing_file_falls_back_to_defaults(tmp_path):
 
 def test_quiet_hours_wrapping_midnight():
     qh = QuietHours(start_hour=22, end_hour=8)
-    in_quiet = datetime(2026, 1, 1, 23, 0, tzinfo=timezone.utc)
-    in_quiet2 = datetime(2026, 1, 1, 3, 0, tzinfo=timezone.utc)
-    not_quiet = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    in_quiet = datetime(2026, 1, 1, 23, 0, tzinfo=UTC)
+    in_quiet2 = datetime(2026, 1, 1, 3, 0, tzinfo=UTC)
+    not_quiet = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
     assert qh.contains(in_quiet)
     assert qh.contains(in_quiet2)
     assert not qh.contains(not_quiet)
@@ -50,8 +50,8 @@ def test_quiet_hours_wrapping_midnight():
 
 def test_quiet_hours_non_wrapping():
     qh = QuietHours(start_hour=1, end_hour=5)
-    assert qh.contains(datetime(2026, 1, 1, 3, tzinfo=timezone.utc))
-    assert not qh.contains(datetime(2026, 1, 1, 6, tzinfo=timezone.utc))
+    assert qh.contains(datetime(2026, 1, 1, 3, tzinfo=UTC))
+    assert not qh.contains(datetime(2026, 1, 1, 6, tzinfo=UTC))
 
 
 def test_invalid_hour_rejected():

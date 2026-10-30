@@ -50,7 +50,7 @@ def test_detector_matches_vector(vector_file: Path):
     assert len(events) == len(expected), (
         f"{vec['name']}: got {len(events)} events, expected {len(expected)}"
     )
-    for got, exp in zip(events, expected):
+    for got, exp in zip(events, expected, strict=False):
         assert got.start == pytest.approx(exp["start"], abs=1e-9)
         assert got.end == pytest.approx(exp["end"], abs=1e-9)
         assert got.duration == pytest.approx(exp["duration"], abs=1e-9)

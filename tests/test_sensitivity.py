@@ -24,7 +24,7 @@ headline count is untouched in the same breath.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from monitor.ambient import MinuteLevel
 from monitor.config import Config
@@ -42,7 +42,7 @@ from report.sensitivity import (
 )
 from store import EventStore
 
-DAY = datetime(2026, 4, 1, tzinfo=timezone.utc).timestamp()
+DAY = datetime(2026, 4, 1, tzinfo=UTC).timestamp()
 THRESHOLD = -35.0
 SECTION_HEADING = "<h2>Threshold sensitivity</h2>"
 

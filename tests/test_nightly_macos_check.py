@@ -33,7 +33,7 @@ exercises the un-injected path, with a fixture built relative to the real clock.
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from conftest import ROOT
 
@@ -51,7 +51,7 @@ from check_ruleset import CANNOT_VERIFY, CannotVerify
 # The clock the fixtures below were captured against: 2026-08-26, ~15.5h after the
 # nightly run they describe finished. Passed to every `assess` and `main` call here, so
 # the suite's answer does not depend on the day it runs.
-NOW = datetime(2026, 8, 26, 22, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 26, 22, 0, tzinfo=UTC)
 
 # nightly.yml run 32938452292 on main, trimmed to the fields the check reads.
 GOOD_RUN = {
@@ -73,18 +73,18 @@ def run_aged(age: timedelta) -> dict:
     Only for the one test that deliberately does not inject `now`. Everywhere else the
     frozen `NOW` is better: it pins the arithmetic instead of restating it.
     """
-    finished = datetime.now(timezone.utc) - age
+    finished = datetime.now(UTC) - age
     return {**GOOD_RUN, "updated_at": finished.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
-# Its five jobs, as the jobs endpoint returned them. `labels` is the load-bearing field.
+# Its jobs, as the jobs endpoint returned them. `labels` is the load-bearing field.
 GOOD_JOBS = [
     {
         "name": f"test-matrix-macos (macos-latest, {py})",
         "conclusion": "success",
         "labels": ["macos-latest"],
     }
-    for py in ("3.9", "3.10", "3.11", "3.12", "3.13")
+    for py in ("3.11", "3.12", "3.13")
 ]
 
 # The five jobs that satisfied the five required contexts until 2026-08-26, as the same
@@ -146,7 +146,7 @@ def test_a_shrunken_sweep_is_caught():
 def test_a_failed_sweep_blocks_the_merge():
     failing = [{**GOOD_JOBS[0], "conclusion": "failure"}, *GOOD_JOBS[1:]]
     problems = "\n".join(assess(GOOD_RUN, failing, NOW))
-    assert "test-matrix-macos (macos-latest, 3.9)" in problems
+    assert "test-matrix-macos (macos-latest, 3.11)" in problems
 
 
 def test_a_red_run_blocks_the_merge_even_with_five_macos_jobs():

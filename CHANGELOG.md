@@ -21,6 +21,23 @@ records: `CITATION.cff` once named a release date for a release that never happe
 
 ## [Unreleased]
 
+### Changed
+- **The Python floor is now 3.11** (ADR-0032, superseding ADR-0002 and ADR-0014).
+  `requires-python` is `>=3.11`, ruff targets `py311`, mypy checks under 3.11, the CI test
+  matrix and the nightly macOS sweep drop their 3.9 and 3.10 legs, and `uv.lock` loses its
+  3.9 and 3.10 resolutions. Those resolutions are what held the remaining critical and high
+  Dependabot alerts (pillow, urllib3, msgpack, filelock, pip, pytest, requests): the
+  `>=3.11` resolution already carried the patched versions. The twelve `PIP_AUDIT_WAIVERS`
+  entries are deleted and `tests/test_pip_audit_waivers.py` now fails if one returns.
+  `.github/rulesets/main.json` no longer requires `test-matrix (ubuntu-latest, 3.9)` or
+  `(ubuntu-latest, 3.10)`; the live ruleset has to match.
+
+### Fixed
+- **CI installs WeasyPrint's libraries on Ubuntu 26.04.** The `verify` job asked apt for
+  `libgdk-pixbuf2.0-0`, a name Ubuntu 26.04 (now `ubuntu-latest`) no longer carries, so
+  the step exited 100. It now asks for `libgdk-pixbuf-2.0-0`, which 24.04 and 26.04 both
+  provide.
+
 ## [0.1.0] - 2026-10-17
 
 ### Added

@@ -140,7 +140,7 @@ def test_monitor_main_emits_over_ipc_socket(monkeypatch, capsys):
             while True:
                 try:
                     received.append(json.loads(listener.recv(4096)))
-                except socket.timeout:
+                except TimeoutError:
                     break
         finally:
             listener.close()

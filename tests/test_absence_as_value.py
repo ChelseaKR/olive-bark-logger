@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from html import escape
 
 from monitor.config import Config, QuietSchedule, QuietWindow
@@ -45,7 +45,7 @@ from report.render import (
 from report.render import main as report_main
 from store import EventStore
 
-DAY = datetime(2026, 3, 10, tzinfo=timezone.utc)
+DAY = datetime(2026, 3, 10, tzinfo=UTC)
 
 
 def _at(day_offset: int, hour: int) -> float:
@@ -57,7 +57,7 @@ def _at(day_offset: int, hour: int) -> float:
 
 def test_empty_report_does_not_print_full_scale_as_the_loudest_peak():
     config = Config(tz="UTC")
-    summary = summarize([], quiet_hours=config.quiet_hours, tz=timezone.utc)
+    summary = summarize([], quiet_hours=config.quiet_hours, tz=UTC)
     assert summary.loudest_peak_dbfs == 0.0  # the sentinel summarize() returns
     html = build_report(summary, config=config, generated_at="2026-03-11 UTC")
     assert "0.0 dBFS" not in html
@@ -70,7 +70,7 @@ def test_empty_report_does_not_print_full_scale_as_the_loudest_peak():
 def test_report_with_events_still_prints_real_peaks():
     config = Config(tz="UTC")
     events = [Event(_at(0, 22), _at(0, 22) + 3, 3.0, -18.0, -22.0)]
-    summary = summarize(events, quiet_hours=config.quiet_hours, tz=timezone.utc)
+    summary = summarize(events, quiet_hours=config.quiet_hours, tz=UTC)
     html = build_report(summary, config=config, generated_at="2026-03-11 UTC")
     assert "<dt>Loudest peak</dt><dd>-18.0 dBFS</dd>" in html
     assert f"<dd>{NO_EVENTS_VALUE}</dd>" not in html
@@ -84,7 +84,7 @@ def test_main_report_states_when_coverage_cannot_be_determined(tmp_path):
     events themselves here, so drive `build_report` the way a caller without any
     coverage inputs does, and also the empty-log CLI path where nothing at all exists."""
     config = Config(tz="UTC")
-    summary = summarize([], quiet_hours=config.quiet_hours, tz=timezone.utc)
+    summary = summarize([], quiet_hours=config.quiet_hours, tz=UTC)
     html = build_report(summary, config=config, generated_at="2026-03-11 UTC")
     assert COVERAGE_UNDETERMINED_NOTE in html
 
@@ -252,7 +252,7 @@ def test_rollup_still_says_nothing_to_roll_up_when_that_is_the_whole_truth():
     summary = summarize(
         [Event(noon, noon + 5, 5.0, -20.0, -25.0)],
         quiet_hours=config.quiet_hours,
-        tz=timezone.utc,
+        tz=UTC,
     )
     html = build_report(summary, config=config, generated_at="2026-03-11 UTC")
     assert "nothing to roll up" in html
@@ -320,7 +320,7 @@ def _states_the_renderer_can_reach() -> set[str]:
         mean_peak_dbfs=0.0,
         by_day_hour={day: {}},
     )
-    quiet = _quiet_hours_on(day, everyday, timezone.utc)
+    quiet = _quiet_hours_on(day, everyday, UTC)
     assert len(quiet) > 1, "the partly-covered state needs a day with more than one quiet hour"
     reached = set()
     for schedule, unmonitored in (
@@ -329,9 +329,7 @@ def _states_the_renderer_can_reach() -> set[str]:
         (everyday, {(day, hour) for hour in quiet}),  # unmonitored
         (tuesdays, set()),  # no quiet window at all
     ):
-        cells = _rollup_cells(
-            summary, quiet_hours=schedule, tz=timezone.utc, unmonitored=unmonitored
-        )
+        cells = _rollup_cells(summary, quiet_hours=schedule, tz=UTC, unmonitored=unmonitored)
         reached.update(cell.state for cell in cells)
     return reached
 

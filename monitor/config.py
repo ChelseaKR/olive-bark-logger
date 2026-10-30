@@ -1,6 +1,7 @@
 """Runtime configuration: detection knobs, calibration, quiet hours, db path.
 
-Loaded from a small JSON file (stdlib only — tomllib is 3.11+ and we target 3.9).
+Loaded from a small JSON file (stdlib only; JSON rather than TOML per docs/adr/0010,
+chosen while the floor was 3.9 and kept on the 3.11 floor so existing configs still load).
 Every field has a documented default so the monitor runs with no config at all, and
 every field is validated on construction so a bad config fails loudly, not silently.
 """
@@ -11,7 +12,7 @@ import json
 import logging
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, time, timedelta, timezone, tzinfo
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from pathlib import Path
 
 from monitor.log import LOG_FORMATS
@@ -387,11 +388,11 @@ class Config:
     def tzinfo(self) -> tzinfo:
         """Resolve the configured zone, falling back to UTC if tzdata is unavailable."""
         if ZoneInfo is None:
-            return timezone.utc
+            return UTC
         try:
             return ZoneInfo(self.tz)
         except (ZoneInfoNotFoundError, ValueError):
-            return timezone.utc
+            return UTC
 
     @classmethod
     def load(cls, path: Path | None) -> Config:

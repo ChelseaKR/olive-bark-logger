@@ -41,7 +41,7 @@ There is no path that exits 0 without having read a real workflow run.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from check_ruleset import CANNOT_VERIFY, CannotVerify, run_gh
@@ -57,9 +57,9 @@ BRANCH = "main"
 MAX_AGE_HOURS = 168
 
 # The number of macOS legs the nightly matrix is expected to run: one per supported
-# Python version (pyproject.toml's >=3.9 floor through 3.13). Written as a floor, so
+# Python version (pyproject.toml's >=3.11 floor through 3.13). Written as a floor, so
 # adding a version does not fail the check, but quietly shrinking the sweep does.
-MIN_MACOS_JOBS = 5
+MIN_MACOS_JOBS = 3
 
 # How many recent runs to look through for a completed one. A generous window, so a
 # single in-progress run does not read as "the sweep never ran".
@@ -67,7 +67,7 @@ RUNS_TO_SCAN = 20
 
 
 def _parse_ts(value: str) -> datetime:
-    """GitHub's ISO-8601 with a `Z` suffix, which 3.9's fromisoformat cannot take."""
+    """GitHub's ISO-8601 with a `Z` suffix (kept explicit; 3.11+ parses it either way)."""
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
@@ -219,7 +219,7 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    now = datetime.now(timezone.utc) if now is None else now
+    now = datetime.now(UTC) if now is None else now
     try:
         run = latest_completed_run(args.repo)
         jobs = macos_jobs(int(run["id"]), args.repo) if run is not None else []

@@ -1,6 +1,6 @@
 # 0031. Develop on Python 3.12; the 3.9 runtime floor is held by CI
 
-**Status:** Accepted · **Date:** 2026-10-01 · **Amends:** [ADR-0002](./0002-python-39-floor.md) (its decision is unchanged)
+**Status:** Accepted; its 3.9 runtime floor is superseded by [ADR-0032](./0032-python-311-floor.md) (the 3.12 dev interpreter stands) · **Date:** 2026-10-01 · **Amends:** [ADR-0002](./0002-python-39-floor.md) (its decision is unchanged)
 
 ## Context
 [ADR-0002](./0002-python-39-floor.md) keeps `requires-python = ">=3.9"` so the core runs

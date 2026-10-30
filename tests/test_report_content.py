@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from monitor.config import Config
@@ -60,7 +60,7 @@ def test_calibrated_offset_is_disclosed():
 
 
 def test_reports_event_numbers():
-    start = datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp()
+    start = datetime(2026, 1, 1, 23, tzinfo=UTC).timestamp()
     ev = Event(start=start, end=start + 5, duration=5.0, peak_level=-8.0, avg_level=-12.0)
     html = _report([ev])
     assert "Total events" in html
@@ -100,7 +100,7 @@ def test_measurement_conditions_with_session():
 
 
 def test_event_types_section_appears_with_tags():
-    base = datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 12, tzinfo=UTC).timestamp()
     events = [
         Event(base, base + 2, 2.0, -8, -12, coarse_tag="bark-like"),
         Event(base + 10, base + 11, 1.0, -9, -13, coarse_tag="ambient"),
@@ -113,7 +113,7 @@ def test_event_types_section_appears_with_tags():
 
 
 def test_event_types_section_absent_without_tags():
-    base = datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 12, tzinfo=UTC).timestamp()
     html = _report([Event(base, base + 2, 2.0, -8, -12)])
     assert "Event types" not in html
 
@@ -195,10 +195,10 @@ def test_two_sessions_with_different_thresholds_render_epochs(tmp_path):
             sample_rate=16000,
             frame_size=1600,
         )
-        base = datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp()
+        base = datetime(2026, 1, 1, 12, tzinfo=UTC).timestamp()
         s1 = store.start_session(started_at=base, threshold_dbfs=-35.0, **common)
         store.add_event(Event(base + 1, base + 3, 2.0, -8, -12), session_id=s1)
-        later = datetime(2026, 1, 5, 12, tzinfo=timezone.utc).timestamp()
+        later = datetime(2026, 1, 5, 12, tzinfo=UTC).timestamp()
         s2 = store.start_session(started_at=later, threshold_dbfs=-42.0, **common)
         store.add_event(Event(later + 1, later + 3, 2.0, -20, -24), session_id=s2)
 
@@ -214,7 +214,7 @@ def test_two_sessions_with_different_thresholds_render_epochs(tmp_path):
 
 def test_fmt_seconds_minutes_and_hours():
     # Exercise the minute/hour formatting branches via long durations.
-    base = datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 12, tzinfo=UTC).timestamp()
     long_event = Event(start=base, end=base + 4000, duration=4000.0, peak_level=-5, avg_level=-9)
     html = _report([long_event])
     assert " h" in html  # 4000 s renders in hours
@@ -253,7 +253,7 @@ def test_calibrated_banner_shows_provenance():
 
 # --- R3: quiet-hours duration rollup (no verdict) ---------------------------
 def test_duration_rollup_reports_minutes_without_a_verdict():
-    base = datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 23, tzinfo=UTC).timestamp()
     ev = Event(start=base, end=base + 120, duration=120.0, peak_level=-8.0, avg_level=-12.0)
     html = _report([ev])  # 23:00 is within the default 22:00-08:00 window
     assert "<h2>Quiet-hours duration rollup</h2>" in html
@@ -266,7 +266,7 @@ def test_duration_rollup_reports_minutes_without_a_verdict():
 
 
 def test_duration_rollup_empty_when_no_quiet_hours_events():
-    base = datetime(2026, 1, 1, 12, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 12, tzinfo=UTC).timestamp()
     ev = Event(start=base, end=base + 5, duration=5.0, peak_level=-8.0, avg_level=-12.0)
     html = _report([ev])  # noon -> outside the quiet window
     assert "<h2>Quiet-hours duration rollup</h2>" in html
@@ -295,7 +295,7 @@ def _violation_html(events=None, *, gaps=None, sessions=None):
     report = compute_violations(
         events or [],
         quiet_hours=QuietHours(22, 8),
-        tz=timezone.utc,
+        tz=UTC,
         gaps=gaps,
         sessions=sessions,
     )
@@ -319,7 +319,7 @@ def _quiet_hours_scenario():
     recorded monitoring gap covering eight of those hours."""
     from store import Session
 
-    win_start = datetime(2026, 1, 1, 22, tzinfo=timezone.utc).timestamp()
+    win_start = datetime(2026, 1, 1, 22, tzinfo=UTC).timestamp()
     ev_start = win_start + 600  # 22:10
     event = Event(start=ev_start, end=ev_start + 60, duration=60.0, peak_level=-8, avg_level=-12)
     gap = _gap(win_start + 5400, win_start + 34200)  # 23:30 -> 07:30, eight hours
@@ -347,7 +347,7 @@ def test_no_violation_report_shows_counts_without_stating_coverage():
     from report.violations import COVERAGE_HEADING
 
     events, gaps, session = _quiet_hours_scenario()
-    base = datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 23, tzinfo=UTC).timestamp()
     one = [Event(start=base, end=base + 5, duration=5.0, peak_level=-8, avg_level=-12)]
     cases = {
         "empty log": _violation_html(),
@@ -404,7 +404,7 @@ def test_coverage_never_claims_more_than_was_recorded():
     bound and says so -- including on a log with no recorded gaps at all."""
     from report.violations import NO_RECORDED_GAPS_NOTE, UNRECORDED_GAP_CAVEAT
 
-    base = datetime(2026, 1, 1, 23, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 23, tzinfo=UTC).timestamp()
     html = _violation_html([Event(base, base + 5, 5.0, -8, -12)])
     assert UNRECORDED_GAP_CAVEAT in html
     assert "upper bound" in html
@@ -442,7 +442,7 @@ def test_violations_csv_preamble_carries_the_coverage_statement(tmp_path):
         events,
         out,
         quiet_hours=QuietHours(22, 8),
-        tz=timezone.utc,
+        tz=UTC,
         gaps=gaps,
         sessions=[session],
     )
@@ -514,7 +514,7 @@ def _two_session_log(store):
 
     Returns nothing; writes straight into the store the way two real runs would.
     """
-    day = datetime(2026, 3, 10, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 10, tzinfo=UTC)
 
     def at(hour, minute=0, next_day=False):
         return day.timestamp() + (86400 if next_day else 0) + hour * 3600 + minute * 60
@@ -649,7 +649,7 @@ def test_overlapping_recorded_gaps_are_not_double_counted():
     """
     from report.render import _coverage_hours
 
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
     events = [Event(start=base, end=base + 10, duration=10.0, peak_level=-8, avg_level=-12)]
     gaps = [
         _gap(base + 3600, base + 3600 * 5),  # 01:00 -> 05:00
@@ -702,7 +702,7 @@ def test_a_crashed_session_is_credited_only_for_the_frames_it_recorded():
     """
     from report.render import _coverage_hours
 
-    base = datetime(2026, 1, 1, 22, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 22, tzinfo=UTC).timestamp()
     crashed = _coverage_session(
         base, None, frames_seen=36000
     )  # 22:00, an hour of frames, then dead
@@ -716,7 +716,7 @@ def test_a_running_session_counts_as_far_as_its_checkpointed_frames_prove():
     """The live case rides the same rule, losing at most one checkpoint interval."""
     from report.render import _coverage_hours
 
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
     running = _coverage_session(base, None, frames_seen=36000 * 4)  # four hours of frames, still up
     events = [
         Event(
@@ -738,7 +738,7 @@ def test_a_legacy_session_row_vouches_for_nothing_past_its_own_start():
     monitor stayed up, so it is not assumed to have."""
     from report.render import _coverage_hours
 
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
     legacy = _coverage_session(base, None, frames_seen=999, framing=False)
     events = [
         Event(

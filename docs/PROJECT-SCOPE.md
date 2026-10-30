@@ -10,7 +10,7 @@ Olive's Bark Logger is an on-device noise monitor and report generator. It measu
 
 Package metadata checked in this pass:
 
-- Python package `olive-bark-logger` for Python `>=3.9`.
+- Python package `olive-bark-logger` for Python `>=3.11`.
 
 ## Who It Serves
 

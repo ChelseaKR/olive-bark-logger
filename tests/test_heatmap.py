@@ -7,7 +7,7 @@ must be byte-stable, mirroring the bar-chart guarantees.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from monitor.config import Config, QuietHours
@@ -18,7 +18,7 @@ from report.render import build_report
 
 
 def _ev(day: int, hour: int) -> Event:
-    start = datetime(2026, 1, day, hour, tzinfo=timezone.utc).timestamp()
+    start = datetime(2026, 1, day, hour, tzinfo=UTC).timestamp()
     return Event(start=start, end=start + 2.0, duration=2.0, peak_level=-9.0, avg_level=-13.0)
 
 
@@ -123,13 +123,13 @@ def test_heatmap_unmonitored_excluded_from_row_total():
 
 
 def test_report_shows_not_monitored_when_gaps_present(tmp_path):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from report.render import generate_report_from_db
     from store import EventStore
 
     db = tmp_path / "olive.db"
-    base = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc).timestamp()
+    base = datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp()
     with EventStore(db) as store:
         # Two events on 2026-01-01 so the day appears as a heatmap row.
         for hour in (1, 20):
@@ -144,7 +144,7 @@ def test_report_shows_not_monitored_when_gaps_present(tmp_path):
 
 def test_summary_by_day_hour_grid():
     events = [_ev(1, 23), _ev(1, 23), _ev(2, 2)]
-    s = summarize(events, quiet_hours=QuietHours(), tz=timezone.utc)
+    s = summarize(events, quiet_hours=QuietHours(), tz=UTC)
     assert s.by_day_hour["2026-01-01"][23] == 2
     assert s.by_day_hour["2026-01-02"][2] == 1
     # Each day row covers all 24 hours.

@@ -11,7 +11,7 @@ report.
 from __future__ import annotations
 
 import json
-from datetime import timezone
+from datetime import UTC
 
 import pytest
 from monitor import drift
@@ -343,7 +343,7 @@ def test_the_heartbeat_stays_json_and_carries_no_identifying_text() -> None:
 
 def _status_html(payload: dict[str, object]) -> str:
     aggregates = StatusAggregates(
-        summary=summarize([], quiet_hours=_config().quiet_hours, tz=timezone.utc),
+        summary=summarize([], quiet_hours=_config().quiet_hours, tz=UTC),
         quiet_window="22:00-08:00",
         tz_name="UTC",
         gaps=[],
@@ -421,7 +421,7 @@ def test_the_report_states_a_steady_baseline_as_a_finding(tmp_path) -> None:
 
 def test_a_report_rendered_without_a_check_never_claims_steady() -> None:
     """build_report's default. A caller that forgets must not publish reassurance."""
-    summary = summarize([], quiet_hours=Config().quiet_hours, tz=timezone.utc)
+    summary = summarize([], quiet_hours=Config().quiet_hours, tz=UTC)
     html = build_report(summary, config=_config(), generated_at="2026-01-01 00:00 UTC")
     assert "Drift watch unavailable" in html
     assert "has not moved more than the configured tolerance" not in html

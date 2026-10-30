@@ -26,7 +26,7 @@ docs/adr/0004-weasyprint-for-tagged-pdf-a-export.md). The core test suite and
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -57,7 +57,7 @@ def _main_report_html(with_events: bool = True, num_days: int = 3) -> str:
     config = Config(tz="UTC", tagging=True)
     events = []
     if with_events:
-        base = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc).timestamp()
+        base = datetime(2026, 1, 1, 0, 0, tzinfo=UTC).timestamp()
         spec = [(23, 6.0, -8.0), (23, 4.0, -12.0), (2, 9.0, -5.0), (14, 3.0, -20.0)]
         events = [
             Event(

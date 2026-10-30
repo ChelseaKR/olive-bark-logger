@@ -42,9 +42,10 @@ Plan: REMEDIATION.md P2-3.
 ## GAP-CQ-1 — Code Quality: Python floor, pre-commit hook wiring, src/ layout, hatchling
 **Status: Partially open (updated 2026-09-05).** Controls: CQ-01, CQ-10, CQ-12 (**closed
 2026-09-05**), CQ-13/CQ-23, CQ-27 (closed 2026-07-14).
-- `docs/adr/0002-python-39-floor.md` records the floor decision (option (b): keep 3.9,
-  ADR on file) — this makes the *declaration* honest but the standard's floor is still
-  ≥3.12, so this remains a tracked, accepted divergence, not a pass.
+- `docs/adr/0002-python-39-floor.md` recorded the original floor decision (option (b):
+  keep 3.9, ADR on file). It is superseded by `docs/adr/0032-python-311-floor.md`:
+  the floor is now 3.11, which CQ-01 accepts only with an ADR, and the
+  standard's floor is ≥3.12, so this remains a tracked, accepted divergence, not a pass.
 - `uv.lock` and `.python-version` now make development, CI, and tag verification
   reproducible (CQ-09, SEC-13). The Pi deploy remains source-based because the runtime
   has zero mandatory dependencies; pinning the optional live-capture stack is still

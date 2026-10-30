@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone, tzinfo
+from datetime import UTC, datetime, tzinfo
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -127,7 +127,7 @@ class StatusAggregates:
     summary: Summary
     quiet_window: str
     tz_name: str
-    tz: tzinfo = timezone.utc
+    tz: tzinfo = UTC
     window_hours: int = DEFAULT_WINDOW_HOURS
     busiest_hour: int | None = None
     # None means the caller could not supply gap data. An empty list means the ledger

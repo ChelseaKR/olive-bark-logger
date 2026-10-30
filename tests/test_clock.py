@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from monitor.clock import BACKWARD_JUMP, FORWARD_JUMP, ClockGuard
 from monitor.config import Config
@@ -111,7 +111,7 @@ def test_describe_clock_anomalies_formats_direction_and_delta(tmp_path):
             delta=7200.0,
             detected_at=8210.0,
         )
-        lines = describe_clock_anomalies(store.clock_anomalies(), tz=timezone.utc)
+        lines = describe_clock_anomalies(store.clock_anomalies(), tz=UTC)
     assert len(lines) == 1
     assert "forward" in lines[0] and "7200.0 s" in lines[0]
 
@@ -132,7 +132,7 @@ def test_report_discloses_no_anomalies_by_default():
 
 
 def test_report_discloses_anomaly_line_when_present():
-    dt = datetime(2026, 1, 1, 3, 0, tzinfo=timezone.utc)
+    dt = datetime(2026, 1, 1, 3, 0, tzinfo=UTC)
     line = f"Clock jumped forward by 7200.0 s (wall time X → {dt:%Y-%m-%d %H:%M:%S})."
     html = _report_with_anomaly_lines([line])
     assert "Clock jumped forward by 7200.0 s" in html

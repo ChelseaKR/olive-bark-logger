@@ -125,7 +125,10 @@ jobs:
       - name: Install WeasyPrint's native libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libgdk-pixbuf2.0-0
+          # `libgdk-pixbuf-2.0-0`, not the old `libgdk-pixbuf2.0-0`: Ubuntu 26.04 (the
+          # current ubuntu-latest) dropped the old transitional name and apt exits 100.
+          # The new name exists on 24.04 too, so this is not tied to one runner image.
+          sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libgdk-pixbuf-2.0-0
       - name: Install pdf extra
         run: uv sync --locked --group dev --extra pdf --python 3.12
       - name: Tagged PDF/A structural tests
@@ -142,17 +145,12 @@ jobs:
       - name: SAST (bandit)
         run: .venv/bin/bandit -q -r monitor store report
       #    The dependency audit is deliberately NOT `make security`'s command. That target
-      #    passes `PIP_AUDIT_WAIVERS`; this passes nothing, so CI is the stricter of the
-      #    two. The waivers exist for a venv built on the documented >=3.9 floor (CQ-01),
-      #    where no fix version for those advisories installs, while this job runs 3.12
-      #    where uv.lock resolves the fixed versions -- fixed, not waived. Since
-      #    2026-10-01 the default local dev venv is also 3.12 (docs/adr/0031), so on it
-      #    the waivers match nothing; the 3.9 floor is exercised by the test-matrix job's
-      #    3.9 leg below, not by the local venv. Keeping the waivers out of here is what stops a 3.9-only accommodation
-      #    from silently becoming CI's policy. The consequence -- a green `make verify`
-      #    does not by itself predict a green run here -- is stated in CONTRIBUTING.md's
-      #    Local/CI parity table, and `tests/test_doc_figures.py` fails if the two
-      #    commands diverge without that table saying so. `make security
+      #    passes `PIP_AUDIT_WAIVERS`; this passes nothing. Since the floor moved to 3.11
+      #    (docs/adr/0032) the Makefile's waiver list is empty, so today the two commands
+      #    audit the same thing. Keeping a waiver variable out of here is what stops a
+      #    future local accommodation from silently becoming CI's policy, and
+      #    `tests/test_doc_figures.py` fails if the two commands diverge without
+      #    CONTRIBUTING.md's Local/CI parity table saying so. `make security
       #    PIP_AUDIT_WAIVERS=` reproduces this step locally.
       - name: Dependency audit
         run: .venv/bin/pip-audit
@@ -250,7 +248,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:

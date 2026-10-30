@@ -10,7 +10,7 @@ from __future__ import annotations
 import statistics
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, tzinfo
+from datetime import UTC, datetime, tzinfo
 from typing import TYPE_CHECKING
 
 from monitor.ambient import percentile
@@ -73,9 +73,7 @@ class AmbientDay:
 _DAY_L90_PERCENTILE_RANK = 10.0
 
 
-def summarize_ambient(
-    minute_levels: list[MinuteLevel], *, tz: tzinfo = timezone.utc
-) -> list[AmbientDay]:
+def summarize_ambient(minute_levels: list[MinuteLevel], *, tz: tzinfo = UTC) -> list[AmbientDay]:
     """Roll up per-minute ambient summaries (EXP-01) into one row per calendar day.
 
     Empty input yields an empty list, exactly like `summarize`'s `by_day` for events --
@@ -104,9 +102,7 @@ def summarize_ambient(
     return days
 
 
-def describe_clock_anomalies(
-    anomalies: list[ClockAnomaly], *, tz: tzinfo = timezone.utc
-) -> list[str]:
+def describe_clock_anomalies(anomalies: list[ClockAnomaly], *, tz: tzinfo = UTC) -> list[str]:
     """Plain-language disclosure lines for detected clock jumps, wall times in `tz`.
 
     Empty input yields an empty list; the renderer turns that into an explicit
@@ -139,7 +135,7 @@ DRIFT_UNAVAILABLE_NOTE = (
 
 
 def describe_drift_advisories(
-    advisories: list[DriftAdvisoryRecord], *, tz: tzinfo = timezone.utc
+    advisories: list[DriftAdvisoryRecord], *, tz: tzinfo = UTC
 ) -> list[str]:
     """Plain-language disclosure lines for recorded drift advisories, wall times in `tz`.
 
@@ -151,7 +147,7 @@ def describe_drift_advisories(
 
 
 def describe_drift_advisory(
-    advisory: DriftAdvisoryRecord | DriftAdvisory, *, tz: tzinfo = timezone.utc
+    advisory: DriftAdvisoryRecord | DriftAdvisory, *, tz: tzinfo = UTC
 ) -> str:
     """One advisory as a sentence an operator can act on."""
     calibrated = datetime.fromtimestamp(advisory.calibration_epoch, tz=tz).strftime("%Y-%m-%d")
@@ -171,7 +167,7 @@ def summarize(
     events: list[Event],
     *,
     quiet_hours: QuietSchedule,
-    tz: tzinfo = timezone.utc,
+    tz: tzinfo = UTC,
 ) -> Summary:
     """Reduce events to distributions and quiet-hours compliance figures."""
     if not events:

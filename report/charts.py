@@ -43,7 +43,7 @@ def bar_chart(
     height = chart_h + pad_bottom + pad_top
 
     bars: list[str] = []
-    for i, (label, value) in enumerate(zip(labels, values)):
+    for i, (label, value) in enumerate(zip(labels, values, strict=False)):
         x = gap + i * (bar_w + gap)
         h = round((value / max_v) * chart_h) if max_v else 0
         y = pad_top + (chart_h - h)
@@ -74,7 +74,7 @@ def _table(
 ) -> str:
     rows = "".join(
         f'<tr><th scope="row">{escape(label)}</th><td>{_fmt(value)}</td></tr>'
-        for label, value in zip(labels, values)
+        for label, value in zip(labels, values, strict=False)
     )
     return (
         f'<table id="{escape(chart_id)}-table">'
@@ -209,7 +209,7 @@ def heatmap(
         )
     # One row of cells per day.
     busiest = ""
-    for i, (label, row) in enumerate(zip(day_labels, grid)):
+    for i, (label, row) in enumerate(zip(day_labels, grid, strict=False)):
         y = top + i * cell_h
         parts.append(
             f'<text x="0" y="{y + cell_h - 5}" font-size="9" '
@@ -261,7 +261,7 @@ def _heat_table(
     unmon = unmonitored or set()
     head = "".join(f'<th scope="col">{h:02d}</th>' for h in range(24))
     rows: list[str] = []
-    for label, row in zip(day_labels, grid):
+    for label, row in zip(day_labels, grid, strict=False):
         cells = "".join(
             f"<td>{UNMONITORED_LABEL}</td>" if (label, h) in unmon else f"<td>{v}</td>"
             for h, v in enumerate(row)

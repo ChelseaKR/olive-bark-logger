@@ -1508,7 +1508,7 @@ def generate_report_from_db(
     tz = config.tzinfo()
     epochs_in_window = _epochs_covering(history, events)
     offsets = _per_event_offsets(events, history, config)
-    adjusted = [_apply_offset(ev, off) for ev, off in zip(events, offsets)]
+    adjusted = [_apply_offset(ev, off) for ev, off in zip(events, offsets, strict=False)]
     summary = summarize(adjusted, quiet_hours=config.quiet_hours, tz=tz)
     # Rows that predate the first calibration carry its offset retroactively (by
     # design); the report must say so, on every path, or "Calibrated." overclaims.
@@ -1518,7 +1518,7 @@ def generate_report_from_db(
     # rolled up to one row per day. Empty when the ledger was never enabled.
     minute_offsets = _per_minute_offsets(minute_levels, history, config)
     adjusted_minutes = [
-        _apply_offset_minute(m, off) for m, off in zip(minute_levels, minute_offsets)
+        _apply_offset_minute(m, off) for m, off in zip(minute_levels, minute_offsets, strict=False)
     ]
     ambient_days = summarize_ambient(adjusted_minutes, tz=tz)
 
@@ -1749,7 +1749,7 @@ def main(argv: list[str] | None = None) -> int:
             if back_applied is not None
             else None
         )
-        events = [_apply_offset(ev, off) for ev, off in zip(raw_events, offsets)]
+        events = [_apply_offset(ev, off) for ev, off in zip(raw_events, offsets, strict=False)]
         multi_epoch = len(set(offsets)) > 1
         if events:
             calibrated = all(off != 0.0 for off in offsets)

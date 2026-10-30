@@ -51,7 +51,7 @@ fails the build if a migrated ADR is missing from it.
 | [0011](./adr/0011-hand-rendered-inline-svg-charts.md) | Hand-rendered inline-SVG charts with a paired data table, for byte-stable and accessible output (rejected: matplotlib) |
 | [0012](./adr/0012-fixed-utc-offset-bucketing.md) | Fixed UTC-offset bucketing (`tz_offset_hours`) — **superseded by [0015](./adr/0015-dst-safe-iana-time-zones.md)**. This section stated it as live for months after the code stopped doing it |
 | [0013](./adr/0013-structural-a11y-gate-as-the-floor.md) | Structural a11y gate as the enforced floor; pa11y/axe as a deeper layer, the screen-reader walkthrough human and review-gated |
-| [0014](./adr/0014-type-check-under-310-semantics.md) | Type-check under 3.10 semantics on a 3.9 runtime floor, via `from __future__ import annotations` |
+| [0014](./adr/0014-type-check-under-310-semantics.md) | Type-check under 3.10 semantics on a 3.9 runtime floor, via `from __future__ import annotations` — **superseded by [0032](./adr/0032-python-311-floor.md)**, which moved both to 3.11 |
 
 ## 7. Quality attributes & metrics
 | Metric | Target | Measured by | Gate |
